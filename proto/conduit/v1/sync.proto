@@ -1,0 +1,58 @@
+syntax = "proto3";
+package conduit.v1;
+
+option go_package = "github.com/noebrito/conduit/proto/conduit/v1;conduitv1";
+
+message Envelope {
+  string schema_version = 1;              // "v1"
+  string batch_id = 2;                    // UUID, dedupe key for whole batch
+  string device_id = 3;                   // Keychain-stable per-install UUID
+  int64  sent_at_unix_ms = 4;
+  repeated SampleBatch batches = 5;       // grouped by data type
+}
+
+message SampleBatch {
+  string hk_type_id = 1;                  // e.g. "HKQuantityTypeIdentifierHeartRate"
+  repeated Sample samples = 2;
+}
+
+message Sample {
+  string uuid = 1;                        // HealthKit sample UUID — dedupe key
+  int64  start_unix_ms = 2;
+  int64  end_unix_ms = 3;
+  Source source = 4;
+
+  oneof value {
+    QuantityValue    quantity    = 10;
+    CategoryValue    category    = 11;
+    WorkoutValue     workout     = 12;
+    CorrelationValue correlation = 13;
+  }
+}
+
+message Source {
+  string name = 1;
+  string bundle_id = 2;
+  string product_type = 3;                // e.g. "Watch6,1"
+}
+
+message QuantityValue {
+  double value = 1;
+  string unit = 2;                        // e.g. "count/min", "kg", "m"
+}
+
+message CategoryValue {
+  int32 value = 1;                        // raw HK enum int
+  string value_name = 2;                  // human-readable, e.g. "asleepREM"
+}
+
+message WorkoutValue {
+  string activity_type = 1;
+  double duration_seconds = 2;
+  double total_energy_kcal = 3;
+  double total_distance_m = 4;
+}
+
+message CorrelationValue {
+  repeated Sample components = 1;         // e.g. blood pressure = [systolic, diastolic]
+}

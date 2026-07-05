@@ -1,0 +1,165 @@
+# Fastfile — Conduit iOS App Store automation
+#
+# Purpose: upload the already-generated App Store marketing screenshots (and,
+# optionally, text metadata) to App Store Connect with ONE command, authenticated
+# by an App Store Connect API key supplied at runtime via environment variables.
+#
+# These lanes are SCREENSHOTS-ONLY and NON-DESTRUCTIVE by default:
+#   • they NEVER upload or change the app binary (`skip_binary_upload`),
+#   • they NEVER submit the app for review (`submit_for_review false`),
+#   • they NEVER auto-release,
+# so they are safe to run repeatedly. See fastlane/README.md for the full contract.
+#
+# ---------------------------------------------------------------------------
+# Required environment (the captain sets these at runtime — nothing is committed):
+#   ASC_API_KEY_ID     App Store Connect API key ID (e.g. "2X9R4HXF34")
+#   ASC_API_ISSUER_ID  Issuer ID (a UUID, from Users and Access → Integrations)
+#   ASC_API_KEY_PATH   Absolute path to the downloaded .p8 private key file
+#                      (e.g. ~/secrets/AuthKey_2X9R4HXF34.p8)
+# Optional:
+#   CONDUIT_SCREENSHOT_APPEARANCE  "light" (default) or "dark" — which committed
+#                                  appearance set to upload (ASC has one screenshot
+#                                  slot set per device size, so we upload one).
+# ---------------------------------------------------------------------------
+
+default_platform(:ios)
+
+# Repo layout (paths are relative to this fastlane/ dir's parent = conduit/ios):
+IOS_DIR                = File.expand_path("..", __dir__)
+COMMITTED_SHOTS_DIR    = File.join(IOS_DIR, "docs", "appstore-screenshots")
+DELIVER_SCREENSHOTS    = File.join(IOS_DIR, "fastlane", "screenshots")
+DELIVER_LOCALE         = "en-US"
+
+# Committed device folders → a short, unique filename prefix. `deliver` maps each
+# PNG to an App Store display size by its PIXEL RESOLUTION (not the folder/name),
+# so the prefix only keeps the two device sets from colliding and preserves order.
+DEVICE_FOLDERS = {
+  "iphone-6.9-inch-1320x2868" => "iphone69",
+  "iphone-6.5-inch-1284x2778" => "iphone65",
+}.freeze
+
+platform :ios do
+  desc "Upload App Store screenshots to App Store Connect (screenshots-only, non-destructive)."
+  desc "One command:  ASC_API_KEY_ID=… ASC_API_ISSUER_ID=… ASC_API_KEY_PATH=… bundle exec fastlane ios upload_screenshots"
+  lane :upload_screenshots do
+    prepare_screenshots
+
+    upload_to_app_store(
+      api_key: asc_api_key,
+      # Screenshots ONLY — don't touch metadata or the binary on this run.
+      skip_screenshots: false,
+      skip_metadata: true,
+      skip_binary_upload: true,
+      screenshots_path: DELIVER_SCREENSHOTS,
+      overwrite_screenshots: true,
+      submit_for_review: false,
+      run_precheck_before_submit: false,
+      force: true,
+    )
+
+    UI.success("Screenshots uploaded to App Store Connect for dev.noebrito.Conduit (no metadata/binary changed, not submitted).")
+  end
+
+  desc "Upload TEXT metadata only (name/subtitle/description/keywords/URLs) — opt-in, non-destructive."
+  desc "Requires fastlane/metadata/ to be populated first (e.g. `bundle exec fastlane ios download_metadata`)."
+  lane :upload_metadata do
+    metadata_dir = File.join(IOS_DIR, "fastlane", "metadata")
+    unless Dir.exist?(metadata_dir) && !Dir.empty?(metadata_dir)
+      UI.user_error!(
+        "fastlane/metadata/ is empty. Populate it first — e.g. pull the live listing with " \
+        "`bundle exec fastlane ios download_metadata`, edit the .txt files, then re-run upload_metadata."
+      )
+    end
+
+    upload_to_app_store(
+      api_key: asc_api_key,
+      # Metadata ONLY — leave screenshots and the binary untouched.
+      skip_metadata: false,
+      skip_screenshots: true,
+      skip_binary_upload: true,
+      submit_for_review: false,
+      run_precheck_before_submit: false,
+      force: true,
+    )
+
+    UI.success("Metadata uploaded to App Store Connect for dev.noebrito.Conduit (screenshots/binary untouched, not submitted).")
+  end
+
+  desc "Download the current App Store Connect text metadata into fastlane/metadata/ (no upload)."
+  lane :download_metadata do
+    deliver(
+      api_key: asc_api_key,
+      download_metadata: true,
+      skip_screenshots: true,
+      skip_binary_upload: true,
+      skip_metadata: false,
+      force: true,
+    )
+    UI.success("Downloaded metadata into fastlane/metadata/. Edit the .txt files, then run upload_metadata.")
+  end
+
+  desc "Arrange the committed docs/appstore-screenshots PNGs into the deliver layout (fastlane/screenshots/en-US/)."
+  desc "Appearance set via CONDUIT_SCREENSHOT_APPEARANCE (light|dark, default light). This dir is gitignored/derived."
+  lane :prepare_screenshots do
+    appearance = (ENV["CONDUIT_SCREENSHOT_APPEARANCE"] || "light").downcase
+    unless %w[light dark].include?(appearance)
+      UI.user_error!("CONDUIT_SCREENSHOT_APPEARANCE must be 'light' or 'dark' (got '#{appearance}').")
+    end
+
+    locale_dir = File.join(DELIVER_SCREENSHOTS, DELIVER_LOCALE)
+    require "fileutils"
+    FileUtils.rm_rf(locale_dir)
+    FileUtils.mkdir_p(locale_dir)
+
+    copied = 0
+    DEVICE_FOLDERS.each do |folder, prefix|
+      src = File.join(COMMITTED_SHOTS_DIR, folder, appearance)
+      unless Dir.exist?(src)
+        UI.user_error!("Missing committed screenshots: #{src}. Regenerate them (see docs/appstore-screenshots/README.md).")
+      end
+      Dir.glob(File.join(src, "*.png")).sort.each do |png|
+        # e.g. iphone69_1-home.png — deliver auto-detects the device by pixel size;
+        # the numeric filename preserves the on-store ordering, prefix avoids collisions.
+        dest = File.join(locale_dir, "#{prefix}_#{File.basename(png)}")
+        FileUtils.cp(png, dest)
+        copied += 1
+      end
+    end
+
+    UI.user_error!("No screenshots were prepared — check docs/appstore-screenshots/.") if copied.zero?
+    UI.success("Prepared #{copied} '#{appearance}' screenshots into #{locale_dir} for deliver.")
+  end
+end
+
+# Build the App Store Connect API key hash from environment variables. Fails loudly
+# and specifically if any piece is missing — nothing is hardcoded or defaulted.
+def asc_api_key
+  key_id    = ENV["ASC_API_KEY_ID"]
+  issuer_id = ENV["ASC_API_ISSUER_ID"]
+  key_path  = ENV["ASC_API_KEY_PATH"]
+
+  missing = []
+  missing << "ASC_API_KEY_ID"    if key_id.to_s.strip.empty?
+  missing << "ASC_API_ISSUER_ID" if issuer_id.to_s.strip.empty?
+  missing << "ASC_API_KEY_PATH"  if key_path.to_s.strip.empty?
+  unless missing.empty?
+    UI.user_error!(
+      "Missing App Store Connect API key env var(s): #{missing.join(', ')}. " \
+      "Export ASC_API_KEY_ID, ASC_API_ISSUER_ID and ASC_API_KEY_PATH (path to your .p8). " \
+      "See fastlane/README.md."
+    )
+  end
+  unless File.exist?(key_path)
+    UI.user_error!("ASC_API_KEY_PATH points to a nonexistent file: #{key_path}")
+  end
+
+  app_store_connect_api_key(
+    key_id: key_id,
+    issuer_id: issuer_id,
+    key_filepath: key_path,
+    # These are App Store Connect (not Enterprise) keys and we don't want fastlane
+    # to persist a decoded token to disk.
+    in_house: false,
+    duration: 1200,
+  )
+end

@@ -1,0 +1,6 @@
+source "https://rubygems.org"
+
+# fastlane drives the App Store Connect screenshot/metadata upload (see
+# fastlane/README.md). Pin to a recent 2.x that recognizes the iPhone 6.9″
+# (1320×2868) and 6.5″ (1284×2778) display sizes `deliver` maps by resolution.
+gem "fastlane", ">= 2.222.0"

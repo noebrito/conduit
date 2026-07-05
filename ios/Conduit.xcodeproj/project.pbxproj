@@ -1,0 +1,893 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		CD0000000000000000000101 /* ConduitApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000100 /* ConduitApp.swift */; };
+		CD0000000000000000000103 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000102 /* AppDelegate.swift */; };
+		CD0000000000000000000107 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000106 /* HomeView.swift */; };
+		CD0000000000000000000109 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000108 /* KeychainStore.swift */; };
+		CD000000000000000000010B /* sync.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000010A /* sync.pb.swift */; };
+		CD000000000000000000010D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000010C /* Assets.xcassets */; };
+		CD000000000000000000010F /* ConduitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000010E /* ConduitTests.swift */; };
+		CD0000000000000000000110 /* SwiftProtobuf in Frameworks */ = {isa = PBXBuildFile; productRef = CD0000000000000000000072 /* SwiftProtobuf */; };
+		CD0000000000000000000111 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CD0000000000000000000073 /* GRDB */; };
+		CD00000000000000000001A1 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001A0 /* AppState.swift */; };
+		CD00000000000000000001A3 /* DeliveryLogEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001A2 /* DeliveryLogEntry.swift */; };
+		CD00000000000000000001A5 /* DeliveryLogDAO.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001A4 /* DeliveryLogDAO.swift */; };
+		CD000000000000000000F0F2 /* SyncStateDAO.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000F0F1 /* SyncStateDAO.swift */; };
+		CD00000000000000000001A7 /* BackgroundSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001A6 /* BackgroundSession.swift */; };
+		CD00000000000000000001A9 /* WebhookTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001A8 /* WebhookTester.swift */; };
+		CD00000000000000000001AB /* OnboardingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001AA /* OnboardingViewModel.swift */; };
+		CD00000000000000000001AD /* HomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001AC /* HomeViewModel.swift */; };
+		CD00000000000000000001AF /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001AE /* SettingsViewModel.swift */; };
+		CD00000000000000000001B1 /* ActivityLogViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001B0 /* ActivityLogViewModel.swift */; };
+		CD00000000000000000001B3 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001B2 /* OnboardingView.swift */; };
+		CD00000000000000000001B5 /* WelcomeStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001B4 /* WelcomeStepView.swift */; };
+		CD00000000000000000001B7 /* WebhookSetupStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001B6 /* WebhookSetupStepView.swift */; };
+		CD00000000000000000001B9 /* DataTypePickerStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001B8 /* DataTypePickerStepView.swift */; };
+		CD00000000000000000001BB /* HKPermissionStepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001BA /* HKPermissionStepView.swift */; };
+		CD00000000000000000001BD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001BC /* SettingsView.swift */; };
+		CD00000000000000000001BF /* HKPermissionsDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001BE /* HKPermissionsDetailView.swift */; };
+		CD00000000000000000001C1 /* ActivityLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001C0 /* ActivityLogView.swift */; };
+		CD00000000000000000001C3 /* ActivityBatchDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001C2 /* ActivityBatchDetailView.swift */; };
+		CD00000000000000000001C5 /* MaskedTokenField.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001C4 /* MaskedTokenField.swift */; };
+		CD00000000000000000001C7 /* WebhookTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001C6 /* WebhookTestView.swift */; };
+		CD0000000000000000000121 /* WebhookConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000120 /* WebhookConfig.swift */; };
+		CD0000000000000000000123 /* DataTypeConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000122 /* DataTypeConfig.swift */; };
+		CD0000000000000000000125 /* OutboxRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000124 /* OutboxRow.swift */; };
+		CD0000000000000000000127 /* HealthTypeRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000126 /* HealthTypeRegistry.swift */; };
+		CD0000000000000000000129 /* HealthKitAuthorizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000128 /* HealthKitAuthorizer.swift */; };
+		CD000000000000000000012B /* AnchoredReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000012A /* AnchoredReader.swift */; };
+		CD000000000000000000012D /* Database.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000012C /* Database.swift */; };
+		CD000000000000000000012F /* WebhookConfigDAO.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000012E /* WebhookConfigDAO.swift */; };
+		CD0000000000000000000131 /* DataTypeConfigDAO.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000130 /* DataTypeConfigDAO.swift */; };
+		CD0000000000000000000133 /* OutboxDAO.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000132 /* OutboxDAO.swift */; };
+		CD0000000000000000000151 /* HealthTypeRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000150 /* HealthTypeRegistryTests.swift */; };
+		CD00000000000000000001E1 /* HealthKitAuthorizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001E0 /* HealthKitAuthorizerTests.swift */; };
+		CD0000000000000000000153 /* DatabaseMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000152 /* DatabaseMigrationTests.swift */; };
+		CD0000000000000000000155 /* OutboxDAOTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000154 /* OutboxDAOTests.swift */; };
+		CD00000000000000000001F3 /* HistoryImportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001F2 /* HistoryImportTests.swift */; };
+		CD00000000000000000001F5 /* ForwardCaptureFloorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001F4 /* ForwardCaptureFloorTests.swift */; };
+		CD00000000000000000002A1 /* RegistryReconcileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000002A0 /* RegistryReconcileTests.swift */; };
+		CD0000000000000000000157 /* StorageDAOTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000156 /* StorageDAOTests.swift */; };
+		CD000000000000000000F0F4 /* SyncStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000F0F3 /* SyncStateTests.swift */; };
+		CD0000000000000000000159 /* SwiftProtobuf in Frameworks */ = {isa = PBXBuildFile; productRef = CD0000000000000000000158 /* SwiftProtobuf */; };
+		CD000000000000000000015B /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CD000000000000000000015A /* GRDB */; };
+		CD0000000000000000000161 /* ObserverCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000160 /* ObserverCoordinator.swift */; };
+		CD0000000000000000000163 /* SyncEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000162 /* SyncEngine.swift */; };
+		CD00000000000000000001F1 /* HistoryImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001F0 /* HistoryImporter.swift */; };
+		CD0000000000000000000165 /* Throttle.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000164 /* Throttle.swift */; };
+		CD0000000000000000000167 /* Batcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000166 /* Batcher.swift */; };
+		CD0000000000000000000169 /* Uploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000168 /* Uploader.swift */; };
+		CD000000000000000000016B /* BackoffPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000016A /* BackoffPolicy.swift */; };
+		CD0000000000000000000171 /* ThrottleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000170 /* ThrottleTests.swift */; };
+		CD0000000000000000000173 /* BatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000172 /* BatcherTests.swift */; };
+		CD0000000000000000000175 /* BackoffPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000174 /* BackoffPolicyTests.swift */; };
+		CD0000000000000000000177 /* UploaderResponseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000176 /* UploaderResponseTests.swift */; };
+		CD0000000000000000000179 /* CrashRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000178 /* CrashRecoveryTests.swift */; };
+		CD0000000000000000000502 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = CD0000000000000000000501 /* SnapshotTesting */; };
+		CD0000000000000000000511 /* SnapshotSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000510 /* SnapshotSupport.swift */; };
+		CD0000000000000000000513 /* ScreenSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000512 /* ScreenSnapshotTests.swift */; };
+		CD0000000000000000000521 /* AppStoreScreenshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000520 /* AppStoreScreenshotTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		CD0000000000000000000061 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CD0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CD0000000000000000000010;
+			remoteInfo = Conduit;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		CD0000000000000000000050 /* Conduit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Conduit.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CD0000000000000000000051 /* ConduitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ConduitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CD0000000000000000000100 /* ConduitApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConduitApp.swift; sourceTree = "<group>"; };
+		CD0000000000000000000102 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		CD0000000000000000000104 /* Conduit.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Conduit.entitlements; sourceTree = "<group>"; };
+		CD0000000000000000000105 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		CD0000000000000000000106 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		CD0000000000000000000108 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		CD000000000000000000010A /* sync.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = sync.pb.swift; sourceTree = "<group>"; };
+		CD000000000000000000010C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		CD000000000000000000010E /* ConduitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConduitTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000120 /* WebhookConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookConfig.swift; sourceTree = "<group>"; };
+		CD0000000000000000000122 /* DataTypeConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataTypeConfig.swift; sourceTree = "<group>"; };
+		CD0000000000000000000124 /* OutboxRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutboxRow.swift; sourceTree = "<group>"; };
+		CD0000000000000000000126 /* HealthTypeRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthTypeRegistry.swift; sourceTree = "<group>"; };
+		CD0000000000000000000128 /* HealthKitAuthorizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitAuthorizer.swift; sourceTree = "<group>"; };
+		CD000000000000000000012A /* AnchoredReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnchoredReader.swift; sourceTree = "<group>"; };
+		CD000000000000000000012C /* Database.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Database.swift; sourceTree = "<group>"; };
+		CD000000000000000000012E /* WebhookConfigDAO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookConfigDAO.swift; sourceTree = "<group>"; };
+		CD0000000000000000000130 /* DataTypeConfigDAO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataTypeConfigDAO.swift; sourceTree = "<group>"; };
+		CD0000000000000000000132 /* OutboxDAO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutboxDAO.swift; sourceTree = "<group>"; };
+		CD0000000000000000000160 /* ObserverCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObserverCoordinator.swift; sourceTree = "<group>"; };
+		CD0000000000000000000162 /* SyncEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncEngine.swift; sourceTree = "<group>"; };
+		CD00000000000000000001F0 /* HistoryImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryImporter.swift; sourceTree = "<group>"; };
+		CD0000000000000000000164 /* Throttle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Throttle.swift; sourceTree = "<group>"; };
+		CD0000000000000000000166 /* Batcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Batcher.swift; sourceTree = "<group>"; };
+		CD0000000000000000000168 /* Uploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Uploader.swift; sourceTree = "<group>"; };
+		CD000000000000000000016A /* BackoffPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackoffPolicy.swift; sourceTree = "<group>"; };
+		CD00000000000000000001A0 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		CD00000000000000000001A2 /* DeliveryLogEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeliveryLogEntry.swift; sourceTree = "<group>"; };
+		CD00000000000000000001A4 /* DeliveryLogDAO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeliveryLogDAO.swift; sourceTree = "<group>"; };
+		CD000000000000000000F0F1 /* SyncStateDAO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStateDAO.swift; sourceTree = "<group>"; };
+		CD00000000000000000001A6 /* BackgroundSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSession.swift; sourceTree = "<group>"; };
+		CD00000000000000000001A8 /* WebhookTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookTester.swift; sourceTree = "<group>"; };
+		CD00000000000000000001AA /* OnboardingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViewModel.swift; sourceTree = "<group>"; };
+		CD00000000000000000001AC /* HomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeViewModel.swift; sourceTree = "<group>"; };
+		CD00000000000000000001AE /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
+		CD00000000000000000001B0 /* ActivityLogViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityLogViewModel.swift; sourceTree = "<group>"; };
+		CD00000000000000000001B2 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		CD00000000000000000001B4 /* WelcomeStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeStepView.swift; sourceTree = "<group>"; };
+		CD00000000000000000001B6 /* WebhookSetupStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookSetupStepView.swift; sourceTree = "<group>"; };
+		CD00000000000000000001B8 /* DataTypePickerStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataTypePickerStepView.swift; sourceTree = "<group>"; };
+		CD00000000000000000001BA /* HKPermissionStepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HKPermissionStepView.swift; sourceTree = "<group>"; };
+		CD00000000000000000001BC /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		CD00000000000000000001BE /* HKPermissionsDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HKPermissionsDetailView.swift; sourceTree = "<group>"; };
+		CD00000000000000000001C0 /* ActivityLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityLogView.swift; sourceTree = "<group>"; };
+		CD00000000000000000001C2 /* ActivityBatchDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityBatchDetailView.swift; sourceTree = "<group>"; };
+		CD00000000000000000001C4 /* MaskedTokenField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaskedTokenField.swift; sourceTree = "<group>"; };
+		CD00000000000000000001C6 /* WebhookTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookTestView.swift; sourceTree = "<group>"; };
+		CD0000000000000000000170 /* ThrottleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThrottleTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000172 /* BatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatcherTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000174 /* BackoffPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackoffPolicyTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000176 /* UploaderResponseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploaderResponseTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000178 /* CrashRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashRecoveryTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000150 /* HealthTypeRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthTypeRegistryTests.swift; sourceTree = "<group>"; };
+		CD00000000000000000001E0 /* HealthKitAuthorizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitAuthorizerTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000152 /* DatabaseMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseMigrationTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000154 /* OutboxDAOTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutboxDAOTests.swift; sourceTree = "<group>"; };
+		CD00000000000000000001F2 /* HistoryImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryImportTests.swift; sourceTree = "<group>"; };
+		CD00000000000000000001F4 /* ForwardCaptureFloorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForwardCaptureFloorTests.swift; sourceTree = "<group>"; };
+		CD00000000000000000002A0 /* RegistryReconcileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegistryReconcileTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000156 /* StorageDAOTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageDAOTests.swift; sourceTree = "<group>"; };
+		CD000000000000000000F0F3 /* SyncStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStateTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000510 /* SnapshotSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotSupport.swift; sourceTree = "<group>"; };
+		CD0000000000000000000512 /* ScreenSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenSnapshotTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000520 /* AppStoreScreenshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStoreScreenshotTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		CD0000000000000000000041 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CD0000000000000000000110 /* SwiftProtobuf in Frameworks */,
+				CD0000000000000000000111 /* GRDB in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CD0000000000000000000044 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CD0000000000000000000159 /* SwiftProtobuf in Frameworks */,
+				CD000000000000000000015B /* GRDB in Frameworks */,
+				CD0000000000000000000502 /* SnapshotTesting in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		CD0000000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				CD0000000000000000000004 /* Conduit */,
+				CD000000000000000000000C /* ConduitTests */,
+				CD0000000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		CD0000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				CD0000000000000000000050 /* Conduit.app */,
+				CD0000000000000000000051 /* ConduitTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		CD0000000000000000000004 /* Conduit */ = {
+			isa = PBXGroup;
+			children = (
+				CD0000000000000000000005 /* App */,
+				CD0000000000000000000006 /* Models */,
+				CD0000000000000000000008 /* Services */,
+				CD00000000000000000001D0 /* ViewModels */,
+				CD000000000000000000000A /* Views */,
+				CD000000000000000000010C /* Assets.xcassets */,
+				CD0000000000000000000105 /* Info.plist */,
+			);
+			path = Conduit;
+			sourceTree = "<group>";
+		};
+		CD00000000000000000001D0 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				CD00000000000000000001AA /* OnboardingViewModel.swift */,
+				CD00000000000000000001AC /* HomeViewModel.swift */,
+				CD00000000000000000001AE /* SettingsViewModel.swift */,
+				CD00000000000000000001B0 /* ActivityLogViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		CD0000000000000000000005 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				CD0000000000000000000100 /* ConduitApp.swift */,
+				CD0000000000000000000102 /* AppDelegate.swift */,
+				CD0000000000000000000104 /* Conduit.entitlements */,
+				CD00000000000000000001A0 /* AppState.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		CD0000000000000000000006 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				CD0000000000000000000007 /* Generated */,
+				CD0000000000000000000120 /* WebhookConfig.swift */,
+				CD0000000000000000000122 /* DataTypeConfig.swift */,
+				CD0000000000000000000124 /* OutboxRow.swift */,
+				CD00000000000000000001A2 /* DeliveryLogEntry.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		CD0000000000000000000007 /* Generated */ = {
+			isa = PBXGroup;
+			children = (
+				CD000000000000000000010A /* sync.pb.swift */,
+			);
+			path = Generated;
+			sourceTree = "<group>";
+		};
+		CD0000000000000000000008 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				CD0000000000000000000140 /* HealthKit */,
+				CD0000000000000000000141 /* Storage */,
+				CD0000000000000000000009 /* Security */,
+				CD0000000000000000000180 /* Sync */,
+				CD0000000000000000000181 /* Networking */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		CD0000000000000000000009 /* Security */ = {
+			isa = PBXGroup;
+			children = (
+				CD0000000000000000000108 /* KeychainStore.swift */,
+			);
+			path = Security;
+			sourceTree = "<group>";
+		};
+		CD0000000000000000000140 /* HealthKit */ = {
+			isa = PBXGroup;
+			children = (
+				CD0000000000000000000126 /* HealthTypeRegistry.swift */,
+				CD0000000000000000000128 /* HealthKitAuthorizer.swift */,
+				CD000000000000000000012A /* AnchoredReader.swift */,
+				CD0000000000000000000160 /* ObserverCoordinator.swift */,
+			);
+			path = HealthKit;
+			sourceTree = "<group>";
+		};
+		CD0000000000000000000180 /* Sync */ = {
+			isa = PBXGroup;
+			children = (
+				CD0000000000000000000162 /* SyncEngine.swift */,
+				CD00000000000000000001F0 /* HistoryImporter.swift */,
+				CD0000000000000000000164 /* Throttle.swift */,
+				CD0000000000000000000166 /* Batcher.swift */,
+			);
+			path = Sync;
+			sourceTree = "<group>";
+		};
+		CD0000000000000000000181 /* Networking */ = {
+			isa = PBXGroup;
+			children = (
+				CD0000000000000000000168 /* Uploader.swift */,
+				CD000000000000000000016A /* BackoffPolicy.swift */,
+				CD00000000000000000001A6 /* BackgroundSession.swift */,
+				CD00000000000000000001A8 /* WebhookTester.swift */,
+			);
+			path = Networking;
+			sourceTree = "<group>";
+		};
+		CD0000000000000000000141 /* Storage */ = {
+			isa = PBXGroup;
+			children = (
+				CD000000000000000000012C /* Database.swift */,
+				CD000000000000000000012E /* WebhookConfigDAO.swift */,
+				CD0000000000000000000130 /* DataTypeConfigDAO.swift */,
+				CD0000000000000000000132 /* OutboxDAO.swift */,
+				CD00000000000000000001A4 /* DeliveryLogDAO.swift */,
+				CD000000000000000000F0F1 /* SyncStateDAO.swift */,
+			);
+			path = Storage;
+			sourceTree = "<group>";
+		};
+		CD000000000000000000000A /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				CD000000000000000000000B /* Home */,
+				CD00000000000000000001D1 /* Onboarding */,
+				CD00000000000000000001D2 /* Settings */,
+				CD00000000000000000001D3 /* Activity */,
+				CD00000000000000000001D4 /* Shared */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		CD000000000000000000000B /* Home */ = {
+			isa = PBXGroup;
+			children = (
+				CD0000000000000000000106 /* HomeView.swift */,
+			);
+			path = Home;
+			sourceTree = "<group>";
+		};
+		CD00000000000000000001D1 /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				CD00000000000000000001B2 /* OnboardingView.swift */,
+				CD00000000000000000001B4 /* WelcomeStepView.swift */,
+				CD00000000000000000001B6 /* WebhookSetupStepView.swift */,
+				CD00000000000000000001B8 /* DataTypePickerStepView.swift */,
+				CD00000000000000000001BA /* HKPermissionStepView.swift */,
+			);
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		CD00000000000000000001D2 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				CD00000000000000000001BC /* SettingsView.swift */,
+				CD00000000000000000001BE /* HKPermissionsDetailView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		CD00000000000000000001D3 /* Activity */ = {
+			isa = PBXGroup;
+			children = (
+				CD00000000000000000001C0 /* ActivityLogView.swift */,
+				CD00000000000000000001C2 /* ActivityBatchDetailView.swift */,
+			);
+			path = Activity;
+			sourceTree = "<group>";
+		};
+		CD00000000000000000001D4 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				CD00000000000000000001C4 /* MaskedTokenField.swift */,
+				CD00000000000000000001C6 /* WebhookTestView.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		CD000000000000000000000C /* ConduitTests */ = {
+			isa = PBXGroup;
+			children = (
+				CD000000000000000000010E /* ConduitTests.swift */,
+				CD0000000000000000000150 /* HealthTypeRegistryTests.swift */,
+				CD00000000000000000001E0 /* HealthKitAuthorizerTests.swift */,
+				CD0000000000000000000152 /* DatabaseMigrationTests.swift */,
+				CD0000000000000000000154 /* OutboxDAOTests.swift */,
+				CD00000000000000000001F2 /* HistoryImportTests.swift */,
+				CD00000000000000000001F4 /* ForwardCaptureFloorTests.swift */,
+				CD00000000000000000002A0 /* RegistryReconcileTests.swift */,
+				CD0000000000000000000156 /* StorageDAOTests.swift */,
+				CD000000000000000000F0F3 /* SyncStateTests.swift */,
+				CD0000000000000000000170 /* ThrottleTests.swift */,
+				CD0000000000000000000172 /* BatcherTests.swift */,
+				CD0000000000000000000174 /* BackoffPolicyTests.swift */,
+				CD0000000000000000000176 /* UploaderResponseTests.swift */,
+				CD0000000000000000000178 /* CrashRecoveryTests.swift */,
+				CD0000000000000000000510 /* SnapshotSupport.swift */,
+				CD0000000000000000000512 /* ScreenSnapshotTests.swift */,
+				CD0000000000000000000520 /* AppStoreScreenshotTests.swift */,
+			);
+			path = ConduitTests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		CD0000000000000000000010 /* Conduit */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CD0000000000000000000021 /* Build configuration list for PBXNativeTarget "Conduit" */;
+			buildPhases = (
+				CD0000000000000000000040 /* Sources */,
+				CD0000000000000000000041 /* Frameworks */,
+				CD0000000000000000000042 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Conduit;
+			packageProductDependencies = (
+				CD0000000000000000000072 /* SwiftProtobuf */,
+				CD0000000000000000000073 /* GRDB */,
+			);
+			productName = Conduit;
+			productReference = CD0000000000000000000050 /* Conduit.app */;
+			productType = "com.apple.product-type.application";
+		};
+		CD0000000000000000000011 /* ConduitTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CD0000000000000000000022 /* Build configuration list for PBXNativeTarget "ConduitTests" */;
+			buildPhases = (
+				CD0000000000000000000043 /* Sources */,
+				CD0000000000000000000044 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CD0000000000000000000060 /* PBXTargetDependency */,
+			);
+			name = ConduitTests;
+			packageProductDependencies = (
+				CD0000000000000000000158 /* SwiftProtobuf */,
+				CD000000000000000000015A /* GRDB */,
+				CD0000000000000000000501 /* SnapshotTesting */,
+			);
+			productName = ConduitTests;
+			productReference = CD0000000000000000000051 /* ConduitTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		CD0000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					CD0000000000000000000010 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+					CD0000000000000000000011 = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = CD0000000000000000000010;
+					};
+				};
+			};
+			buildConfigurationList = CD0000000000000000000020 /* Build configuration list for PBXProject "Conduit" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = CD0000000000000000000002;
+			packageReferences = (
+				CD0000000000000000000070 /* XCRemoteSwiftPackageReference "swift-protobuf" */,
+				CD0000000000000000000071 /* XCRemoteSwiftPackageReference "GRDB.swift" */,
+				CD0000000000000000000500 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
+			);
+			productRefGroup = CD0000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				CD0000000000000000000010 /* Conduit */,
+				CD0000000000000000000011 /* ConduitTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		CD0000000000000000000042 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CD000000000000000000010D /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		CD0000000000000000000040 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CD0000000000000000000101 /* ConduitApp.swift in Sources */,
+				CD0000000000000000000103 /* AppDelegate.swift in Sources */,
+				CD0000000000000000000107 /* HomeView.swift in Sources */,
+				CD0000000000000000000109 /* KeychainStore.swift in Sources */,
+				CD000000000000000000010B /* sync.pb.swift in Sources */,
+				CD0000000000000000000121 /* WebhookConfig.swift in Sources */,
+				CD0000000000000000000123 /* DataTypeConfig.swift in Sources */,
+				CD0000000000000000000125 /* OutboxRow.swift in Sources */,
+				CD0000000000000000000127 /* HealthTypeRegistry.swift in Sources */,
+				CD0000000000000000000129 /* HealthKitAuthorizer.swift in Sources */,
+				CD000000000000000000012B /* AnchoredReader.swift in Sources */,
+				CD000000000000000000012D /* Database.swift in Sources */,
+				CD000000000000000000012F /* WebhookConfigDAO.swift in Sources */,
+				CD0000000000000000000131 /* DataTypeConfigDAO.swift in Sources */,
+				CD0000000000000000000133 /* OutboxDAO.swift in Sources */,
+				CD0000000000000000000161 /* ObserverCoordinator.swift in Sources */,
+				CD0000000000000000000163 /* SyncEngine.swift in Sources */,
+				CD00000000000000000001F1 /* HistoryImporter.swift in Sources */,
+				CD0000000000000000000165 /* Throttle.swift in Sources */,
+				CD0000000000000000000167 /* Batcher.swift in Sources */,
+				CD0000000000000000000169 /* Uploader.swift in Sources */,
+				CD000000000000000000016B /* BackoffPolicy.swift in Sources */,
+				CD00000000000000000001A1 /* AppState.swift in Sources */,
+				CD00000000000000000001A3 /* DeliveryLogEntry.swift in Sources */,
+				CD00000000000000000001A5 /* DeliveryLogDAO.swift in Sources */,
+				CD000000000000000000F0F2 /* SyncStateDAO.swift in Sources */,
+				CD00000000000000000001A7 /* BackgroundSession.swift in Sources */,
+				CD00000000000000000001A9 /* WebhookTester.swift in Sources */,
+				CD00000000000000000001AB /* OnboardingViewModel.swift in Sources */,
+				CD00000000000000000001AD /* HomeViewModel.swift in Sources */,
+				CD00000000000000000001AF /* SettingsViewModel.swift in Sources */,
+				CD00000000000000000001B1 /* ActivityLogViewModel.swift in Sources */,
+				CD00000000000000000001B3 /* OnboardingView.swift in Sources */,
+				CD00000000000000000001B5 /* WelcomeStepView.swift in Sources */,
+				CD00000000000000000001B7 /* WebhookSetupStepView.swift in Sources */,
+				CD00000000000000000001B9 /* DataTypePickerStepView.swift in Sources */,
+				CD00000000000000000001BB /* HKPermissionStepView.swift in Sources */,
+				CD00000000000000000001BD /* SettingsView.swift in Sources */,
+				CD00000000000000000001BF /* HKPermissionsDetailView.swift in Sources */,
+				CD00000000000000000001C1 /* ActivityLogView.swift in Sources */,
+				CD00000000000000000001C3 /* ActivityBatchDetailView.swift in Sources */,
+				CD00000000000000000001C5 /* MaskedTokenField.swift in Sources */,
+				CD00000000000000000001C7 /* WebhookTestView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CD0000000000000000000043 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CD000000000000000000010F /* ConduitTests.swift in Sources */,
+				CD0000000000000000000151 /* HealthTypeRegistryTests.swift in Sources */,
+				CD00000000000000000001E1 /* HealthKitAuthorizerTests.swift in Sources */,
+				CD0000000000000000000153 /* DatabaseMigrationTests.swift in Sources */,
+				CD0000000000000000000155 /* OutboxDAOTests.swift in Sources */,
+				CD00000000000000000001F3 /* HistoryImportTests.swift in Sources */,
+				CD00000000000000000001F5 /* ForwardCaptureFloorTests.swift in Sources */,
+				CD00000000000000000002A1 /* RegistryReconcileTests.swift in Sources */,
+				CD0000000000000000000157 /* StorageDAOTests.swift in Sources */,
+				CD000000000000000000F0F4 /* SyncStateTests.swift in Sources */,
+				CD0000000000000000000171 /* ThrottleTests.swift in Sources */,
+				CD0000000000000000000173 /* BatcherTests.swift in Sources */,
+				CD0000000000000000000175 /* BackoffPolicyTests.swift in Sources */,
+				CD0000000000000000000177 /* UploaderResponseTests.swift in Sources */,
+				CD0000000000000000000179 /* CrashRecoveryTests.swift in Sources */,
+				CD0000000000000000000511 /* SnapshotSupport.swift in Sources */,
+				CD0000000000000000000513 /* ScreenSnapshotTests.swift in Sources */,
+				CD0000000000000000000521 /* AppStoreScreenshotTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		CD0000000000000000000060 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CD0000000000000000000010 /* Conduit */;
+			targetProxy = CD0000000000000000000061 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		CD0000000000000000000030 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 3K72BT899D;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
+		};
+		CD0000000000000000000031 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 3K72BT899D;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
+		CD0000000000000000000032 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Conduit/App/Conduit.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3K72BT899D;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Conduit/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.Conduit;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		CD0000000000000000000033 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Conduit/App/Conduit.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3K72BT899D;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Conduit/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.Conduit;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		CD0000000000000000000034 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3K72BT899D;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.ConduitTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Conduit.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Conduit";
+			};
+			name = Debug;
+		};
+		CD0000000000000000000035 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3K72BT899D;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.ConduitTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Conduit.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Conduit";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		CD0000000000000000000020 /* Build configuration list for PBXProject "Conduit" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CD0000000000000000000030 /* Debug */,
+				CD0000000000000000000031 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CD0000000000000000000021 /* Build configuration list for PBXNativeTarget "Conduit" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CD0000000000000000000032 /* Debug */,
+				CD0000000000000000000033 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CD0000000000000000000022 /* Build configuration list for PBXNativeTarget "ConduitTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CD0000000000000000000034 /* Debug */,
+				CD0000000000000000000035 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		CD0000000000000000000070 /* XCRemoteSwiftPackageReference "swift-protobuf" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-protobuf";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.26.0;
+			};
+		};
+		CD0000000000000000000071 /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/groue/GRDB.swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 6.0.0;
+			};
+		};
+		CD0000000000000000000500 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pointfreeco/swift-snapshot-testing";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.17.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		CD0000000000000000000072 /* SwiftProtobuf */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD0000000000000000000070 /* XCRemoteSwiftPackageReference "swift-protobuf" */;
+			productName = SwiftProtobuf;
+		};
+		CD0000000000000000000073 /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD0000000000000000000071 /* XCRemoteSwiftPackageReference "GRDB.swift" */;
+			productName = GRDB;
+		};
+		CD0000000000000000000158 /* SwiftProtobuf */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD0000000000000000000070 /* XCRemoteSwiftPackageReference "swift-protobuf" */;
+			productName = SwiftProtobuf;
+		};
+		CD000000000000000000015A /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD0000000000000000000071 /* XCRemoteSwiftPackageReference "GRDB.swift" */;
+			productName = GRDB;
+		};
+		CD0000000000000000000501 /* SnapshotTesting */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD0000000000000000000500 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */;
+			productName = SnapshotTesting;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = CD0000000000000000000001 /* Project object */;
+}
