@@ -1,0 +1,31 @@
+# Deliverfile — shared, SAFE-by-default `deliver` (upload_to_app_store) options.
+#
+# These defaults make every `deliver` run in this project NON-destructive and
+# incapable of submitting the app for review or touching the binary. The lanes in
+# the Fastfile pass the per-run toggles (`skip_metadata` / `skip_screenshots`) so a
+# screenshots-only run never clobbers metadata (and vice-versa).
+#
+# Auth (team / ASC context) is provided at runtime by the App Store Connect API
+# key — see the Fastfile `asc_api_key` helper. Nothing secret lives here.
+
+app_identifier("dev.noebrito.Conduit")
+
+# --- Safety rails (apply to every lane) ---------------------------------------
+# Never upload/alter the binary from these marketing lanes.
+skip_binary_upload(true)
+# NEVER submit for review, and never auto-release. This tooling only stages
+# marketing assets; a human submits from App Store Connect.
+submit_for_review(false)
+automatic_release(false)
+# Don't run precheck (it can hold up a run and isn't wanted for asset-only pushes).
+run_precheck_before_submit(false)
+# Replace the whole screenshot set for each device/locale we upload, so re-runs
+# are idempotent instead of appending duplicates.
+overwrite_screenshots(true)
+# Non-interactive: skip the HTML preview / confirmation prompt so the lane runs
+# unattended (it is already non-destructive per the rails above).
+force(true)
+
+# The locale we ship marketing assets for. The prepare step writes screenshots to
+# fastlane/screenshots/en-US/ to match.
+languages(["en-US"])

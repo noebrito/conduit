@@ -1,0 +1,8 @@
+# Appfile — Conduit iOS
+#
+# The App Store Connect *account* context (team, Apple ID) is supplied at runtime
+# by the App Store Connect API key (see the Fastfile's `asc_api_key` helper and
+# fastlane/README.md), NOT by a hardcoded Apple ID here. Only the app identifier
+# is committed.
+
+app_identifier("dev.noebrito.Conduit")
