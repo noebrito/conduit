@@ -21,6 +21,13 @@ struct AnchoredReader {
     struct Result {
         /// Newly observed samples, already converted to wire format.
         let samples: [Conduit_V1_Sample]
+        /// UUIDs of samples HealthKit reported as DELETED since the last anchor
+        /// (from the anchored query's `deletedObjects`). Because an anchored read
+        /// is per `HealthDataType`, every uuid here belongs to this read's type,
+        /// so the caller knows which stream each tombstone routes to. Empty for
+        /// the import path (a point-in-time snapshot has nothing to delete) and
+        /// for any read with no deletions — so the upsert flow is unchanged.
+        let deletedUuids: [String]
         /// The anchor to persist (atomically with `samples`) so the next read
         /// resumes from here. `nil` only if HealthKit returned no anchor.
         let newAnchor: HKQueryAnchor?
@@ -83,7 +90,7 @@ struct AnchoredReader {
         limit: Int = HKObjectQueryNoLimit
     ) async throws -> Result {
         guard let sampleType = type.sampleType else {
-            return Result(samples: [], newAnchor: anchor)
+            return Result(samples: [], deletedUuids: [], newAnchor: anchor)
         }
 
         // Forward-only floor applies ONLY on the first (anchor-less) read.
@@ -140,7 +147,7 @@ struct AnchoredReader {
         limit: Int
     ) async throws -> Result {
         guard let sampleType = type.sampleType else {
-            return Result(samples: [], newAnchor: nil)
+            return Result(samples: [], deletedUuids: [], newAnchor: nil)
         }
         let predicate = Self.importWindowPredicate(since: since, before: before)
         let sort = [NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)]
@@ -156,7 +163,9 @@ struct AnchoredReader {
                     return
                 }
                 let mapped = (samples ?? []).compactMap { Self.makeSample(from: $0, type: type) }
-                continuation.resume(returning: Result(samples: mapped, newAnchor: nil))
+                // Import is a point-in-time snapshot of current Health — nothing
+                // to delete.
+                continuation.resume(returning: Result(samples: mapped, deletedUuids: [], newAnchor: nil))
             }
             store.execute(query)
         }
@@ -191,19 +200,24 @@ struct AnchoredReader {
     ) async throws -> Result {
         try await withCheckedThrowingContinuation { continuation in
             // One-shot anchored read: a results handler with no update handler
-            // fires exactly once with the batch newer than `anchor`.
+            // fires exactly once with the batch newer than `anchor`. The third
+            // handler param is `deletedObjects` — samples HealthKit removed since
+            // the anchor (a LoseIt edit/remove deletes the old sample). We used
+            // to discard it (`_`); now we collect each deleted uuid so the caller
+            // can stage a tombstone, so an edited food doesn't leave a ghost doc.
             let query = HKAnchoredObjectQuery(
                 type: sampleType,
                 predicate: predicate,
                 anchor: anchor,
                 limit: limit
-            ) { _, samples, _, newAnchor, error in
+            ) { _, samples, deletedObjects, newAnchor, error in
                 if let error {
                     continuation.resume(throwing: error)
                     return
                 }
                 let mapped = (samples ?? []).compactMap { Self.makeSample(from: $0, type: type) }
-                continuation.resume(returning: Result(samples: mapped, newAnchor: newAnchor))
+                let deletedUuids = (deletedObjects ?? []).map { $0.uuid.uuidString }
+                continuation.resume(returning: Result(samples: mapped, deletedUuids: deletedUuids, newAnchor: newAnchor))
             }
             store.execute(query)
         }
@@ -269,6 +283,15 @@ struct AnchoredReader {
                 .compactMap { $0 as? HKQuantitySample }
                 .map { makeCorrelationComponent($0, unitString: "mmHg") }
             sample.correlation = value
+
+        case .route:
+            // Routes are NOT produced here: a route is a two-step async read
+            // (find the workout's route objects, then stream their locations),
+            // which this synchronous 1:1 map cannot express. `WorkoutRouteReader`
+            // owns them, driven off the workout observer wake. Returning nil keeps
+            // any accidental generic read of the route series type a harmless
+            // no-op rather than a malformed sample.
+            return nil
         }
 
         return sample
@@ -290,7 +313,9 @@ struct AnchoredReader {
         return sample
     }
 
-    private static func makeSource(_ hkSample: HKSample) -> Conduit_V1_Source {
+    /// Wire `Source` for any HK sample. Shared with `WorkoutRouteReader`, whose
+    /// route samples carry the route's own source revision.
+    static func makeSource(_ hkSample: HKSample) -> Conduit_V1_Source {
         let revision = hkSample.sourceRevision
         var source = Conduit_V1_Source()
         source.name = revision.source.name
@@ -299,7 +324,7 @@ struct AnchoredReader {
         return source
     }
 
-    private static func unixMillis(_ date: Date) -> Int64 {
+    static func unixMillis(_ date: Date) -> Int64 {
         Int64((date.timeIntervalSince1970 * 1000).rounded())
     }
 

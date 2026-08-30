@@ -277,6 +277,8 @@ private struct ImportHistoryView: View {
 
     var body: some View {
         List {
+            importStatusSection
+
             Section {
                 Picker("Time range", selection: $viewModel.importRange) {
                     ForEach(ImportRange.allCases) { range in
@@ -301,57 +303,77 @@ private struct ImportHistoryView: View {
             }
 
             Section {
-                if viewModel.isImporting {
-                    HStack(spacing: 12) {
-                        ProgressView()
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(viewModel.importProgressText)
-                                .font(.subheadline)
-                            Text("\(viewModel.importStagedCount.formatted()) staged so far (newest first)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .accessibilityElement(children: .combine)
-
+                if viewModel.isImportActive {
+                    // Live progress lives in the Status section above, so this
+                    // section stays purely the action the user can take. Cancel is
+                    // offered for ANY live run, including one onboarding started.
                     Button(role: .cancel) {
                         viewModel.cancelImport()
                     } label: {
-                        Label("Cancel Import", systemImage: "stop.circle")
-                            .frame(maxWidth: .infinity)
+                        Label(
+                            viewModel.isCancellingImport ? "Cancelling…" : "Cancel Import",
+                            systemImage: "stop.circle"
+                        )
+                        .frame(maxWidth: .infinity)
                     }
-                    .accessibilityLabel("Cancel import")
-                    .accessibilityHint("Stops the import; anything already queued still uploads")
+                    // The run stops at its next page boundary, so a second tap
+                    // would be a no-op — don't invite one.
+                    .disabled(viewModel.isCancellingImport)
+                    .accessibilityLabel(viewModel.isCancellingImport ? "Cancelling import" : "Cancel import")
+                    .accessibilityHint(
+                        viewModel.isCancellingImport
+                            ? "Stopping at the end of the page it's already reading"
+                            : "Stops the import; anything already queued still uploads"
+                    )
                 } else {
-                    Button {
-                        showConfirm = true
-                    } label: {
-                        Label("Import History", systemImage: "square.and.arrow.down")
-                            .frame(maxWidth: .infinity)
+                    if viewModel.canResumeImport {
+                        Button {
+                            viewModel.resumeImport()
+                        } label: {
+                            Label("Resume Import", systemImage: "play.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityLabel("Resume import")
+                        .accessibilityHint("Continues from where the import stopped instead of starting over")
+
+                        Button {
+                            showConfirm = true
+                        } label: {
+                            Label("Start Over", systemImage: "arrow.counterclockwise")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel("Start import over")
+                        .accessibilityHint("Discards the paused progress and re-reads \(viewModel.importRange.label) from the most recent data")
+                    } else {
+                        Button {
+                            showConfirm = true
+                        } label: {
+                            Label("Import History", systemImage: "square.and.arrow.down")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        // An import started elsewhere (onboarding's opt-in) is
+                        // still a live run — don't offer to start a second one.
+                        .disabled(viewModel.isImportActive)
+                        .accessibilityLabel("Start import")
+                        .accessibilityHint("Imports \(viewModel.importRange.label) of past Health data, most recent first")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityLabel("Start import")
-                    .accessibilityHint("Imports \(viewModel.importRange.label) of past Health data, most recent first")
-                }
-
-                if viewModel.importFinished, !viewModel.isImporting {
-                    let warned = viewModel.importHitCap || viewModel.importCancelled
-                    Label(viewModel.importProgressText, systemImage: warned ? "exclamationmark.triangle" : "checkmark.circle")
-                        .font(.subheadline)
-                        .foregroundStyle(warned ? .orange : .green)
-                }
-
-                if let error = viewModel.importError {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .font(.subheadline)
-                        .foregroundStyle(.red)
                 }
             }
         }
         .navigationTitle("Import History")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("Import \(viewModel.importRange.label)?", isPresented: $showConfirm) {
-            Button("Import", role: viewModel.importNeedsVolumeWarning ? .destructive : nil) {
+        // Status is read back out of the database, so an import interrupted by a
+        // force-quit still reports "interrupted / resumable" after a relaunch.
+        .onAppear {
+            viewModel.loadImportState()
+            viewModel.observeImportState()
+        }
+        .alert(alertTitle, isPresented: $showConfirm) {
+            Button(alertConfirmLabel, role: viewModel.importNeedsVolumeWarning ? .destructive : nil) {
+                viewModel.discardImportRun()
                 viewModel.startImport()
             }
             Button("Cancel", role: .cancel) {}
@@ -360,11 +382,124 @@ private struct ImportHistoryView: View {
         }
     }
 
-    private var confirmMessage: String {
-        if viewModel.importNeedsVolumeWarning {
-            return "This can stage a large amount of data — potentially hundreds of thousands to millions of samples for a multi-year range. It's paged and capped so it won't overwhelm the queue, but it may take a while and use significant network to upload. Continue?"
+    // MARK: - Status
+
+    /// The truthful, relaunch-surviving status of the most recent run.
+    ///
+    /// Its styling is driven by the persisted `ImportRunStatus`, so a truncated
+    /// (interrupted / failed) import can never render as a green checkmark.
+    @ViewBuilder
+    private var importStatusSection: some View {
+        if viewModel.isImportActive || viewModel.importRun != nil {
+            Section {
+                if viewModel.isImportActive {
+                    statusRow(
+                        icon: "arrow.triangle.2.circlepath",
+                        tint: viewModel.isCancellingImport ? .orange : .accentColor,
+                        title: viewModel.isCancellingImport ? "Cancelling…" : "Importing…",
+                        detail: viewModel.importProgressText
+                    )
+                } else if let run = viewModel.importRun {
+                    statusRow(
+                        icon: icon(for: run.status),
+                        tint: tint(for: run.status),
+                        title: title(for: run),
+                        detail: viewModel.importProgressText
+                    )
+                }
+
+                LabeledContent("Staged this run", value: viewModel.importStagedCount.formatted())
+                    .font(.subheadline)
+
+                if let oldest = viewModel.importOldestReached {
+                    LabeledContent(
+                        "Every type reached back to",
+                        value: oldest.formatted(date: .abbreviated, time: .omitted)
+                    )
+                    .font(.subheadline)
+                }
+
+                if let run = viewModel.importRun {
+                    LabeledContent("Data types finished", value: "\(run.typesCompleted)/\(run.typesTotal)")
+                        .font(.subheadline)
+                }
+
+                if let error = viewModel.importError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+                        .accessibilityLabel("Import failed: \(error)")
+                }
+            } header: {
+                Text("Status")
+            } footer: {
+                Text("You can leave the app. The import stops at a clean point, keeps its place, and continues automatically when you reopen Conduit. iOS may also grant background time to continue sooner — that's up to iOS, so it isn't guaranteed.")
+            }
         }
-        return "Conduit will read past Health data for the selected range and queue it for upload. Continue?"
+    }
+
+    private func statusRow(icon: String, tint: Color, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            if viewModel.isImportActive {
+                ProgressView()
+            } else {
+                Image(systemName: icon).foregroundStyle(tint)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(tint)
+                if !detail.isEmpty {
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func icon(for status: ImportRunStatus) -> String {
+        switch status {
+        case .completed: return "checkmark.circle.fill"
+        case .failed: return "xmark.octagon.fill"
+        case .interrupted: return "pause.circle.fill"
+        case .running: return "arrow.triangle.2.circlepath"
+        }
+    }
+
+    private func tint(for status: ImportRunStatus) -> Color {
+        switch status {
+        case .completed: return .green
+        case .failed: return .red
+        case .interrupted: return .orange
+        case .running: return .accentColor
+        }
+    }
+
+    private func title(for run: ImportRunState) -> String {
+        SettingsViewModel.statusTitle(for: run)
+    }
+
+    // MARK: - Confirmation
+
+    private var alertTitle: String {
+        viewModel.canResumeImport
+            ? "Start over from the beginning?"
+            : "Import \(viewModel.importRange.label)?"
+    }
+
+    private var alertConfirmLabel: String {
+        viewModel.canResumeImport ? "Start Over" : "Import"
+    }
+
+    private var confirmMessage: String {
+        // Honest about what leaving the app does: a clean pause that resumes
+        // itself — NOT "it keeps importing in the background".
+        let keepOpen = "You can leave the app: the import pauses at a clean point and picks itself back up when you return, or in background time iOS grants it."
+        if viewModel.canResumeImport {
+            return "This discards the paused import's progress and re-reads \(viewModel.importRange.label) from the most recent data. \(keepOpen)"
+        }
+        if viewModel.importNeedsVolumeWarning {
+            return "This can stage a large amount of data — potentially hundreds of thousands to millions of samples for a multi-year range. It's paged and capped so it won't overwhelm the queue, but it may take a while and use significant network to upload. \(keepOpen) Continue?"
+        }
+        return "Conduit will read past Health data for the selected range and queue it for upload. \(keepOpen) Continue?"
     }
 }
 

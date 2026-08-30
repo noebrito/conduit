@@ -156,6 +156,125 @@ final class RegistryReconcileTests: XCTestCase {
         XCTAssertEqual(authorizeCalls, 2, "the prompt must be retried after a prior failure")
     }
 
+    // MARK: - Nutrition upgrade path (v1.0 → v1.1)
+
+    /// The end-to-end v1.1 upgrade: a user who onboarded on v1.0 (rows + stored
+    /// signature for every type EXCEPT the ten dietary ones) launches the new
+    /// build. Both gates must fire off the same reconcile — nutrition lands
+    /// enabled by default, and the grown read set re-prompts exactly once with the
+    /// nutrition types in the sheet.
+    @MainActor
+    func testNutritionIsAutoEnabledAndRePromptedOnceOnUpgrade() async throws {
+        let appState = AppState(database: appDB)
+        let dao = DataTypeConfigDAO(appDB)
+        let defaults = try makeCleanDefaults()
+        let nutritionIDs = HealthTypeRegistry.shared.types(in: .nutrition).map(\.identifier)
+        XCTAssertEqual(nutritionIDs.count, 10, "precondition: the ten dietary types")
+
+        // Seed a v1.0 install: every pre-nutrition type configured, and the stored
+        // signature is the pre-nutrition read set.
+        for type in HealthTypeRegistry.shared.all where type.category != .nutrition {
+            try dao.setEnabled(true, hkTypeId: type.identifier)
+        }
+        let v1Signature = HealthTypeRegistry.shared.readTypes
+            .map(\.identifier)
+            .filter { !nutritionIDs.contains($0) }
+            .sorted()
+            .joined(separator: ",")
+        defaults.set(v1Signature, forKey: AppState.authorizedSignatureKey)
+        XCTAssertNotEqual(v1Signature, AppState.authorizedTypesSignature(),
+                          "registering nutrition must GROW the signature — that growth is what triggers the re-prompt")
+
+        var authorizeCalls = 0
+        var lastRequested: [HealthDataType] = []
+        let authorize: (_ types: [HealthDataType]) async throws -> Void = { types in
+            authorizeCalls += 1
+            lastRequested = types
+        }
+
+        await appState.reconcileRegistry(registry: .shared, defaults: defaults, authorize: authorize)
+
+        // Gate 1: nutrition is on by default — no manual toggling on upgrade.
+        for id in nutritionIDs {
+            let row = try XCTUnwrap(try dao.find(hkTypeId: id), "no config row written for \(id)")
+            XCTAssertTrue(row.enabled, "\(id) must be enabled by default after upgrade")
+        }
+
+        // Gate 2: exactly one authorization request, and the sheet lists nutrition.
+        XCTAssertEqual(authorizeCalls, 1, "the grown read set must re-prompt exactly once")
+        let requestedIDs = Set(lastRequested.map(\.identifier))
+        for id in nutritionIDs {
+            XCTAssertTrue(requestedIDs.contains(id), "authorization request must include \(id)")
+        }
+
+        // A second launch does not re-prompt.
+        await appState.reconcileRegistry(registry: .shared, defaults: defaults, authorize: authorize)
+        XCTAssertEqual(authorizeCalls, 1, "the persisted signature must suppress a second prompt")
+    }
+
+    // MARK: - Running dynamics upgrade path
+
+    /// The end-to-end upgrade for a user who onboarded before the running-dynamics
+    /// batch shipped: rows + stored signature for every type EXCEPT these five.
+    /// Both gates must fire off the same reconcile — running dynamics lands
+    /// enabled by default, and the grown read set re-prompts exactly once with the
+    /// five new types in the sheet. Unlike nutrition (its own new category), these
+    /// land inside the pre-existing Activity & Fitness category, so the seed here
+    /// filters by identifier rather than by category.
+    @MainActor
+    func testRunningDynamicsIsAutoEnabledAndRePromptedOnceOnUpgrade() async throws {
+        let appState = AppState(database: appDB)
+        let dao = DataTypeConfigDAO(appDB)
+        let defaults = try makeCleanDefaults()
+        let runningDynamicsIDs = [
+            HealthDataType.runningPower.identifier,
+            HealthDataType.runningSpeed.identifier,
+            HealthDataType.runningStrideLength.identifier,
+            HealthDataType.runningVerticalOscillation.identifier,
+            HealthDataType.runningGroundContactTime.identifier,
+        ]
+
+        // Seed a pre-upgrade install: every other type configured, and the stored
+        // signature is the pre-upgrade read set.
+        for type in HealthTypeRegistry.shared.all where !runningDynamicsIDs.contains(type.identifier) {
+            try dao.setEnabled(true, hkTypeId: type.identifier)
+        }
+        let priorSignature = HealthTypeRegistry.shared.readTypes
+            .map(\.identifier)
+            .filter { !runningDynamicsIDs.contains($0) }
+            .sorted()
+            .joined(separator: ",")
+        defaults.set(priorSignature, forKey: AppState.authorizedSignatureKey)
+        XCTAssertNotEqual(priorSignature, AppState.authorizedTypesSignature(),
+                          "registering running dynamics must GROW the signature — that growth is what triggers the re-prompt")
+
+        var authorizeCalls = 0
+        var lastRequested: [HealthDataType] = []
+        let authorize: (_ types: [HealthDataType]) async throws -> Void = { types in
+            authorizeCalls += 1
+            lastRequested = types
+        }
+
+        await appState.reconcileRegistry(registry: .shared, defaults: defaults, authorize: authorize)
+
+        // Gate 1: running dynamics is on by default — no manual toggling on upgrade.
+        for id in runningDynamicsIDs {
+            let row = try XCTUnwrap(try dao.find(hkTypeId: id), "no config row written for \(id)")
+            XCTAssertTrue(row.enabled, "\(id) must be enabled by default after upgrade")
+        }
+
+        // Gate 2: exactly one authorization request, and the sheet lists running dynamics.
+        XCTAssertEqual(authorizeCalls, 1, "the grown read set must re-prompt exactly once")
+        let requestedIDs = Set(lastRequested.map(\.identifier))
+        for id in runningDynamicsIDs {
+            XCTAssertTrue(requestedIDs.contains(id), "authorization request must include \(id)")
+        }
+
+        // A second launch does not re-prompt.
+        await appState.reconcileRegistry(registry: .shared, defaults: defaults, authorize: authorize)
+        XCTAssertEqual(authorizeCalls, 1, "the persisted signature must suppress a second prompt")
+    }
+
     // MARK: - Helpers
 
     /// A private, empty `UserDefaults` suite so tests never read or mutate the

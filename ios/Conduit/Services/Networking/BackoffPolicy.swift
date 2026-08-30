@@ -35,9 +35,11 @@ struct BackoffPolicy {
         now.addingTimeInterval(delay(attemptCount: attemptCount, retryAfter: retryAfter))
     }
 
-    // ±20% uniform jitter
+    /// ±20% uniform jitter bounds, applied as a multiplier to the base delay.
+    private static let jitterRange: ClosedRange<Double> = 0.8...1.2
+
     private static func jittered(_ base: TimeInterval) -> TimeInterval {
-        let factor = Double.random(in: 0.8...1.2)
+        let factor = Double.random(in: jitterRange)
         return base * factor
     }
 }

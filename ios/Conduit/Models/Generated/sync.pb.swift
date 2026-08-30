@@ -54,6 +54,16 @@ public nonisolated struct Conduit_V1_SampleBatch: Sendable {
 
   public var samples: [Conduit_V1_Sample] = []
 
+  /// UUIDs of samples HealthKit reported as DELETED for this hk_type_id since the
+  /// last read (from HKAnchoredObjectQuery's deletedObjects). The ingester emits a
+  /// bulk `delete` per uuid to the stream this hk_type_id routes to, so an edited/
+  /// removed food (LoseIt delete+recreate) doesn't leave a ghost doc that inflates
+  /// nutrition totals. Additive/back-compat: an old ingester ignores it
+  /// (DiscardUnknown) and an old client never sets it, so the field is empty for
+  /// upsert-only batches and the wire stays byte-identical when there are no
+  /// deletions.
+  public var deletedUuids: [String] = []
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -114,6 +124,14 @@ public nonisolated struct Conduit_V1_Sample: Sendable {
     set {value = .correlation(newValue)}
   }
 
+  public var route: Conduit_V1_RouteValue {
+    get {
+      if case .route(let v)? = value {return v}
+      return Conduit_V1_RouteValue()
+    }
+    set {value = .route(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Value: Equatable, Sendable {
@@ -121,6 +139,7 @@ public nonisolated struct Conduit_V1_Sample: Sendable {
     case category(Conduit_V1_CategoryValue)
     case workout(Conduit_V1_WorkoutValue)
     case correlation(Conduit_V1_CorrelationValue)
+    case route(Conduit_V1_RouteValue)
 
   }
 
@@ -208,6 +227,64 @@ public nonisolated struct Conduit_V1_CorrelationValue: Sendable {
   public init() {}
 }
 
+/// A workout's GPS route: a foreign key to its workout plus an ordered series of
+/// location points. One RouteValue == one HKWorkoutRoute == one document, so the
+/// whole route dedupes atomically under the enclosing Sample.uuid.
+public nonisolated struct Conduit_V1_RouteValue: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// FK: the Workout sample.uuid this route belongs to
+  public var workoutUuid: String = String()
+
+  /// denormalized (e.g. "walking") for filtering/labels
+  public var activityType: String = String()
+
+  /// ordered oldest -> newest; may be downsampled on-device
+  public var points: [Conduit_V1_RoutePoint] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// One CLLocation, flattened to primitives. Units are canonical/SI on the wire
+/// (metres, m/s, degrees, unix-ms); clients convert for display.
+public nonisolated struct Conduit_V1_RoutePoint: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// CLLocation.coordinate.latitude
+  public var lat: Double = 0
+
+  /// CLLocation.coordinate.longitude
+  public var lng: Double = 0
+
+  /// CLLocation.altitude (ellipsoidal metres)
+  public var altitudeM: Double = 0
+
+  /// CLLocation.timestamp
+  public var timestampUnixMs: Int64 = 0
+
+  /// CLLocation.horizontalAccuracy (metres)
+  public var horizontalAccuracyM: Double = 0
+
+  /// CLLocation.verticalAccuracy (metres, <0 = invalid)
+  public var verticalAccuracyM: Double = 0
+
+  /// CLLocation.speed (m/s, <0 = invalid)
+  public var speedMps: Double = 0
+
+  /// CLLocation.course (degrees, <0 = invalid)
+  public var courseDeg: Double = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 fileprivate nonisolated let _protobuf_package = "conduit.v1"
@@ -264,7 +341,7 @@ nonisolated extension Conduit_V1_Envelope: SwiftProtobuf.Message, SwiftProtobuf.
 
 nonisolated extension Conduit_V1_SampleBatch: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SampleBatch"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}hk_type_id\0\u{1}samples\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}hk_type_id\0\u{1}samples\0\u{3}deleted_uuids\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -274,6 +351,7 @@ nonisolated extension Conduit_V1_SampleBatch: SwiftProtobuf.Message, SwiftProtob
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.hkTypeID) }()
       case 2: try { try decoder.decodeRepeatedMessageField(value: &self.samples) }()
+      case 3: try { try decoder.decodeRepeatedStringField(value: &self.deletedUuids) }()
       default: break
       }
     }
@@ -286,12 +364,16 @@ nonisolated extension Conduit_V1_SampleBatch: SwiftProtobuf.Message, SwiftProtob
     if !self.samples.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.samples, fieldNumber: 2)
     }
+    if !self.deletedUuids.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.deletedUuids, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Conduit_V1_SampleBatch, rhs: Conduit_V1_SampleBatch) -> Bool {
     if lhs.hkTypeID != rhs.hkTypeID {return false}
     if lhs.samples != rhs.samples {return false}
+    if lhs.deletedUuids != rhs.deletedUuids {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -299,7 +381,7 @@ nonisolated extension Conduit_V1_SampleBatch: SwiftProtobuf.Message, SwiftProtob
 
 nonisolated extension Conduit_V1_Sample: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Sample"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}uuid\0\u{3}start_unix_ms\0\u{3}end_unix_ms\0\u{1}source\0\u{2}\u{6}quantity\0\u{1}category\0\u{1}workout\0\u{1}correlation\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}uuid\0\u{3}start_unix_ms\0\u{3}end_unix_ms\0\u{1}source\0\u{2}\u{6}quantity\0\u{1}category\0\u{1}workout\0\u{1}correlation\0\u{1}route\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -363,6 +445,19 @@ nonisolated extension Conduit_V1_Sample: SwiftProtobuf.Message, SwiftProtobuf._M
           self.value = .correlation(v)
         }
       }()
+      case 14: try {
+        var v: Conduit_V1_RouteValue?
+        var hadOneofValue = false
+        if let current = self.value {
+          hadOneofValue = true
+          if case .route(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.value = .route(v)
+        }
+      }()
       default: break
       }
     }
@@ -401,6 +496,10 @@ nonisolated extension Conduit_V1_Sample: SwiftProtobuf.Message, SwiftProtobuf._M
     case .correlation?: try {
       guard case .correlation(let v)? = self.value else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
+    }()
+    case .route?: try {
+      guard case .route(let v)? = self.value else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 14)
     }()
     case nil: break
     }
@@ -598,6 +697,111 @@ nonisolated extension Conduit_V1_CorrelationValue: SwiftProtobuf.Message, SwiftP
 
   public static func ==(lhs: Conduit_V1_CorrelationValue, rhs: Conduit_V1_CorrelationValue) -> Bool {
     if lhs.components != rhs.components {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Conduit_V1_RouteValue: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".RouteValue"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}workout_uuid\0\u{3}activity_type\0\u{1}points\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.workoutUuid) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.activityType) }()
+      case 3: try { try decoder.decodeRepeatedMessageField(value: &self.points) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.workoutUuid.isEmpty {
+      try visitor.visitSingularStringField(value: self.workoutUuid, fieldNumber: 1)
+    }
+    if !self.activityType.isEmpty {
+      try visitor.visitSingularStringField(value: self.activityType, fieldNumber: 2)
+    }
+    if !self.points.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.points, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Conduit_V1_RouteValue, rhs: Conduit_V1_RouteValue) -> Bool {
+    if lhs.workoutUuid != rhs.workoutUuid {return false}
+    if lhs.activityType != rhs.activityType {return false}
+    if lhs.points != rhs.points {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Conduit_V1_RoutePoint: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".RoutePoint"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}lat\0\u{1}lng\0\u{3}altitude_m\0\u{3}timestamp_unix_ms\0\u{3}horizontal_accuracy_m\0\u{3}vertical_accuracy_m\0\u{3}speed_mps\0\u{3}course_deg\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularDoubleField(value: &self.lat) }()
+      case 2: try { try decoder.decodeSingularDoubleField(value: &self.lng) }()
+      case 3: try { try decoder.decodeSingularDoubleField(value: &self.altitudeM) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.timestampUnixMs) }()
+      case 5: try { try decoder.decodeSingularDoubleField(value: &self.horizontalAccuracyM) }()
+      case 6: try { try decoder.decodeSingularDoubleField(value: &self.verticalAccuracyM) }()
+      case 7: try { try decoder.decodeSingularDoubleField(value: &self.speedMps) }()
+      case 8: try { try decoder.decodeSingularDoubleField(value: &self.courseDeg) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.lat.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.lat, fieldNumber: 1)
+    }
+    if self.lng.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.lng, fieldNumber: 2)
+    }
+    if self.altitudeM.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.altitudeM, fieldNumber: 3)
+    }
+    if self.timestampUnixMs != 0 {
+      try visitor.visitSingularInt64Field(value: self.timestampUnixMs, fieldNumber: 4)
+    }
+    if self.horizontalAccuracyM.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.horizontalAccuracyM, fieldNumber: 5)
+    }
+    if self.verticalAccuracyM.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.verticalAccuracyM, fieldNumber: 6)
+    }
+    if self.speedMps.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.speedMps, fieldNumber: 7)
+    }
+    if self.courseDeg.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.courseDeg, fieldNumber: 8)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Conduit_V1_RoutePoint, rhs: Conduit_V1_RoutePoint) -> Bool {
+    if lhs.lat != rhs.lat {return false}
+    if lhs.lng != rhs.lng {return false}
+    if lhs.altitudeM != rhs.altitudeM {return false}
+    if lhs.timestampUnixMs != rhs.timestampUnixMs {return false}
+    if lhs.horizontalAccuracyM != rhs.horizontalAccuracyM {return false}
+    if lhs.verticalAccuracyM != rhs.verticalAccuracyM {return false}
+    if lhs.speedMps != rhs.speedMps {return false}
+    if lhs.courseDeg != rhs.courseDeg {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

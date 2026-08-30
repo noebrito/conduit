@@ -146,6 +146,80 @@ final class OutboxDAOTests: XCTestCase {
         XCTAssertEqual(config?.anchorBlob, Data([0xAA]), "Anchor advances when the whole batch fits under the cap")
     }
 
+    // MARK: - Tombstones (honor HealthKit deletions)
+
+    /// A deleted UUID passed to `ingest` stages a `.delete` tombstone in the SAME
+    /// transaction that advances the anchor. The tombstone carries an empty
+    /// payload and round-trips through the `v6-outbox-op` migration.
+    func testIngestStagesTombstoneForDeletedUuidAndRoundTrips() throws {
+        let inserted = try outbox.ingest(
+            samples: [makeSample(uuid: "live-1")],
+            hkTypeId: heartRateID,
+            webhookId: webhookId,
+            anchorBlob: Data([0x07]),
+            deletedUuids: ["ghost-1"]
+        )
+
+        // Deletions are NOT counted as "inserted samples".
+        XCTAssertEqual(inserted, 1, "only the live sample counts as inserted")
+        XCTAssertEqual(try outbox.totalCount(), 2, "one upsert + one tombstone row")
+
+        let tombstone = try XCTUnwrap(try outbox.find(hkSampleUuid: "ghost-1"))
+        XCTAssertEqual(tombstone.op, .delete, "the deleted uuid must be staged as a delete op")
+        XCTAssertTrue(tombstone.payloadBlob.isEmpty, "a tombstone carries no payload")
+        XCTAssertEqual(tombstone.hkTypeId, heartRateID)
+        XCTAssertEqual(tombstone.state, .pending)
+
+        let live = try XCTUnwrap(try outbox.find(hkSampleUuid: "live-1"))
+        XCTAssertEqual(live.op, .upsert, "an ordinary sample defaults to the upsert op")
+        XCTAssertFalse(live.payloadBlob.isEmpty)
+
+        // The anchor advanced in the same transaction.
+        let config = try DataTypeConfigDAO(appDB).find(hkTypeId: heartRateID)
+        XCTAssertEqual(config?.anchorBlob, Data([0x07]))
+    }
+
+    /// A re-delivered deletion (HealthKit hands the same tombstone again before
+    /// the anchor advances) must not double-stage.
+    func testTombstoneDedupesOnReDelivery() throws {
+        try appDB.dbWriter.write { db in
+            try OutboxDAO.stageTombstone(db, hkSampleUuid: "ghost", hkTypeId: heartRateID, webhookId: webhookId, createdAt: Date())
+            try OutboxDAO.stageTombstone(db, hkSampleUuid: "ghost", hkTypeId: heartRateID, webhookId: webhookId, createdAt: Date())
+        }
+        XCTAssertEqual(try outbox.totalCount(), 1, "the same deletion staged twice must dedupe to one row")
+    }
+
+    /// Deleting a sample that is still staged locally as an un-sent upsert cancels
+    /// that upsert (so we don't ship a doomed sample and then race a delete of it).
+    func testTombstoneCancelsPendingLocalUpsert() throws {
+        _ = try outbox.enqueue(sample: makeSample(uuid: "edited"), hkTypeId: heartRateID, webhookId: webhookId)
+        XCTAssertEqual(try outbox.totalCount(), 1)
+
+        try appDB.dbWriter.write { db in
+            try OutboxDAO.stageTombstone(db, hkSampleUuid: "edited", hkTypeId: heartRateID, webhookId: webhookId, createdAt: Date())
+        }
+
+        // The pending upsert is gone, replaced by a tombstone (still one row).
+        let row = try XCTUnwrap(try outbox.find(hkSampleUuid: "edited"))
+        XCTAssertEqual(row.op, .delete, "the un-sent upsert must be replaced by a delete tombstone")
+        XCTAssertTrue(row.payloadBlob.isEmpty)
+        XCTAssertEqual(try outbox.totalCount(), 1)
+    }
+
+    /// The deletion path must not perturb the "staged today" tally — a tombstone
+    /// isn't a staged sample.
+    func testTombstoneDoesNotBumpStagedTally() throws {
+        let tally = StagedDailyCountDAO(appDB)
+        _ = try outbox.ingest(
+            samples: [makeSample(uuid: "s1")],
+            hkTypeId: heartRateID,
+            webhookId: webhookId,
+            anchorBlob: Data([0x01]),
+            deletedUuids: ["g1", "g2"]
+        )
+        XCTAssertEqual(try tally.count(), 1, "only the one live sample counts toward the daily tally, not the two tombstones")
+    }
+
     // MARK: - Import staging (enqueue-only, forward anchor untouched)
 
     func testStageImportEnqueuesWithoutAdvancingForwardAnchor() throws {
@@ -289,6 +363,97 @@ final class OutboxDAOTests: XCTestCase {
         XCTAssertFalse(resumed.hitCap, "Room under the cap means the page no longer trips back-pressure")
     }
 
+    // MARK: - Stale inflight reclaim (time-based backstop, distinct from
+    // Uploader.reconcileInflight's launch-time/session-based check)
+
+    /// Insert a row already in `.inflight` state with an explicit `inflight_at`,
+    /// bypassing `Batcher` so the staleness cutoff can be controlled precisely.
+    private func insertInflightRow(uuid: String, batchID: String, inflightAt: Date?) throws {
+        try appDB.dbWriter.write { db in
+            var s = Conduit_V1_Sample(); s.uuid = uuid
+            let payload = (try? s.jsonUTF8Data()) ?? Data()
+            try db.execute(
+                sql: """
+                    INSERT INTO outbox
+                        (webhook_id, hk_sample_uuid, hk_type_id, payload_blob,
+                         created_at, state, batch_id, attempt_count, inflight_at)
+                    VALUES (?, ?, ?, ?, ?, 'inflight', ?, 0, ?)
+                    """,
+                arguments: [webhookId, uuid, heartRateID, payload, Date(), batchID, inflightAt]
+            )
+        }
+    }
+
+    /// The exact stuck-outbox condition reported after the 2026-08-11 outage:
+    /// a batch marked `.inflight` well past any sane single-upload duration,
+    /// with its background task effectively lost — reclaiming it makes the
+    /// row eligible to be re-batched, instead of sitting stranded forever.
+    func testReclaimStaleInflightResetsRowsPastTheTimeout() throws {
+        try insertInflightRow(uuid: "stuck", batchID: "batch-old", inflightAt: Date().addingTimeInterval(-3600))
+
+        let reclaimed = try outbox.reclaimStaleInflight(staleAfter: 1800)
+
+        XCTAssertEqual(reclaimed, 1)
+        let row = try XCTUnwrap(outbox.find(hkSampleUuid: "stuck"))
+        XCTAssertEqual(row.state, .pending, "a stale inflight row must become retryable")
+        XCTAssertNil(row.batchId, "the stale batch id must be cleared so it doesn't look claimed")
+    }
+
+    /// A batch that started uploading moments ago is not stuck — reclaiming it
+    /// early would race a real, still-in-flight upload for no reason.
+    func testReclaimStaleInflightLeavesRecentInflightRowsAlone() throws {
+        try insertInflightRow(uuid: "fresh", batchID: "batch-new", inflightAt: Date().addingTimeInterval(-5))
+
+        let reclaimed = try outbox.reclaimStaleInflight(staleAfter: 1800)
+
+        XCTAssertEqual(reclaimed, 0)
+        XCTAssertEqual(try outbox.count(state: .inflight), 1)
+    }
+
+    /// A row marked inflight before migration v10 shipped has no `inflight_at`
+    /// at all. It must not be permanently unreclaimable just because its age is
+    /// unknown — treat "unknown" as "eligible now", same conservative direction
+    /// as every other nullable-timestamp backstop in this codebase.
+    func testReclaimStaleInflightTreatsMissingTimestampAsEligible() throws {
+        try insertInflightRow(uuid: "legacy", batchID: "batch-legacy", inflightAt: nil)
+
+        let reclaimed = try outbox.reclaimStaleInflight(staleAfter: 1800)
+
+        XCTAssertEqual(reclaimed, 1)
+        XCTAssertEqual(try outbox.count(state: .pending), 1)
+    }
+
+    /// Pending and sent-then-deleted rows are untouched — only `.inflight`
+    /// rows are ever in scope for this reclaim.
+    func testReclaimStaleInflightDoesNotTouchPendingRows() throws {
+        _ = try outbox.enqueue(sample: makeSample(uuid: "still-pending"), hkTypeId: heartRateID, webhookId: webhookId)
+
+        let reclaimed = try outbox.reclaimStaleInflight(staleAfter: 0)
+
+        XCTAssertEqual(reclaimed, 0)
+        XCTAssertEqual(try outbox.count(state: .pending), 1)
+    }
+
+    /// Composed end-to-end at the DB layer (no SyncEngine/network involved):
+    /// a stuck batch is invisible to `Batcher.buildBatch` (which only ever
+    /// drains `.pending` rows) until reclaimed — this reproduces why the
+    /// outbox never drained no matter how many times "Sync Now" was tapped,
+    /// and confirms the reclaim is what makes it retryable again.
+    func testStaleInflightRowIsInvisibleToBatcherUntilReclaimed() throws {
+        try insertInflightRow(uuid: "stuck", batchID: "batch-old", inflightAt: Date().addingTimeInterval(-3600))
+
+        let batcher = Batcher(database: appDB)
+        XCTAssertNil(
+            try batcher.buildBatch(webhookID: webhookId, limit: 100, deviceID: "dev-1"),
+            "a stuck inflight row must not be silently re-drained without an explicit reclaim"
+        )
+
+        _ = try outbox.reclaimStaleInflight(staleAfter: 1800)
+
+        let rebuilt = try XCTUnwrap(batcher.buildBatch(webhookID: webhookId, limit: 100, deviceID: "dev-1"))
+        XCTAssertEqual(rebuilt.rowIDs.count, 1, "once reclaimed, the row is eligible for a fresh batch")
+    }
+
     // MARK: - Purge (one-time remediation)
 
     func testDeleteAllPurgesEveryRowRegardlessOfState() throws {
@@ -377,6 +542,62 @@ final class OutboxDAOTests: XCTestCase {
 
         XCTAssertEqual(try staged.count(on: now), 2, "Today's bucket counts only today's stages")
         XCTAssertEqual(try staged.count(on: yesterday), 3, "Yesterday's bucket is separate")
+    }
+
+    /// The tally is now bumped **once per page** (batched) instead of once per
+    /// sample, but the total must be byte-for-byte identical to the per-sample
+    /// baseline. Stage the same set two ways — a batched `ingest` page vs. N
+    /// single-sample `enqueue`s — and assert the day tallies match exactly.
+    func testStagedTodayTallyBatchedMatchesPerSampleBaseline() throws {
+        // Per-sample baseline: N individual enqueues (bumpTally per row).
+        let baselineDB = try AppDatabase.makeInMemory()
+        let baselineWebhookDAO = WebhookConfigDAO(baselineDB)
+        var baselineConfig = WebhookConfig.makeDefault(
+            url: "https://example.com/hook", bearerTokenKeychainRef: "webhook_bearer_token")
+        try baselineWebhookDAO.save(&baselineConfig)
+        let baselineWebhookId = try XCTUnwrap(baselineConfig.id)
+        let baselineOutbox = OutboxDAO(baselineDB)
+        let baselineStaged = StagedDailyCountDAO(baselineDB)
+        let syncedAt = Date()
+        for i in 0..<7 {
+            _ = try baselineOutbox.enqueue(
+                sample: makeSample(uuid: "s-\(i)"),
+                hkTypeId: heartRateID, webhookId: baselineWebhookId, createdAt: syncedAt)
+        }
+        let baselineTally = try baselineStaged.count(on: syncedAt)
+        XCTAssertEqual(baselineTally, 7)
+
+        // Batched: one ingest page staging the same 7 samples.
+        let staged = StagedDailyCountDAO(appDB)
+        _ = try outbox.ingest(
+            samples: (0..<7).map { makeSample(uuid: "s-\($0)") },
+            hkTypeId: heartRateID, webhookId: webhookId,
+            anchorBlob: Data([0x01]), syncedAt: syncedAt)
+
+        XCTAssertEqual(try staged.count(on: syncedAt), baselineTally,
+                       "Batched per-page tally must equal the per-sample baseline")
+
+        // An all-duplicate re-page must bump nothing (increment no-ops on 0).
+        _ = try outbox.ingest(
+            samples: (0..<7).map { makeSample(uuid: "s-\($0)") },
+            hkTypeId: heartRateID, webhookId: webhookId,
+            anchorBlob: Data([0x02]), syncedAt: syncedAt)
+        XCTAssertEqual(try staged.count(on: syncedAt), baselineTally,
+                       "Duplicate page must not inflate the tally")
+
+        // stageImport batches the same way.
+        let importDB = try AppDatabase.makeInMemory()
+        let importWebhookDAO = WebhookConfigDAO(importDB)
+        var importConfig = WebhookConfig.makeDefault(
+            url: "https://example.com/hook", bearerTokenKeychainRef: "webhook_bearer_token")
+        try importWebhookDAO.save(&importConfig)
+        let importWebhookId = try XCTUnwrap(importConfig.id)
+        let importOutbox = OutboxDAO(importDB)
+        _ = try importOutbox.stageImport(
+            samples: (0..<7).map { makeSample(uuid: "s-\($0)") },
+            hkTypeId: heartRateID, webhookId: importWebhookId, syncedAt: syncedAt)
+        XCTAssertEqual(try StagedDailyCountDAO(importDB).count(on: syncedAt), baselineTally,
+                       "stageImport batched tally must equal the per-sample baseline")
     }
 
     /// The destructive reset clears the tally alongside the emptied outbox.

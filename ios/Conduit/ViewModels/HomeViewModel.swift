@@ -37,26 +37,17 @@ final class HomeViewModel {
 
     private let appState: AppState
     private var observationCancellable: AnyDatabaseCancellable?
-    private var statusRefreshTimer: Timer?
 
     init(appState: AppState) {
         self.appState = appState
     }
 
-    deinit {
-        statusRefreshTimer?.invalidate()
-    }
-
     func start() {
-        loadInitialStatus()
+        Task { await loadInitialStatus() }
         observeOutbox()
-        startStatusRefreshTimer()
     }
 
-    func stop() {
-        statusRefreshTimer?.invalidate()
-        statusRefreshTimer = nil
-    }
+    func stop() {}
 
     func syncNow() async {
         isSyncing = true
@@ -66,7 +57,7 @@ final class HomeViewModel {
         // inside flushNow, so this reflects it immediately. For a batch upload the
         // stamp lands later on the background URLSession completion — the outbox
         // observation picks that up reactively (see `observeOutbox`).
-        loadInitialStatus()
+        await loadInitialStatus()
     }
 
     // MARK: - Private
@@ -92,30 +83,40 @@ final class HomeViewModel {
         return .idle
     }
 
-    private func loadInitialStatus() {
+    /// Load the Home stats **off the main thread**, then publish on the main
+    /// actor. The reads run inside a single `dbWriter.read` block on a background
+    /// executor so a large import's in-flight write transaction can't stall the
+    /// main thread while Home is on screen (the old synchronous main-thread read
+    /// blocked behind bulk import inserts → visible UI hitches). Steady-state
+    /// updates flow reactively through `observeOutbox`; this async load only
+    /// primes the very first frame and refreshes after a manual "Sync Now".
+    private func loadInitialStatus() async {
         do {
-            let outboxDAO = OutboxDAO(appState.database)
-            let deliveryDAO = DeliveryLogDAO(appState.database)
-            let stagedDAO = StagedDailyCountDAO(appState.database)
-            let syncStateDAO = SyncStateDAO(appState.database)
-
-            pendingCount = try outboxDAO.count(state: .pending) + outboxDAO.count(state: .inflight)
-            failedCount = try outboxDAO.count(state: .failed)
-            stagedTodayCount = try stagedDAO.count()
-
-            syncStatus = Self.deriveStatus(
-                lastSynced: try syncStateDAO.lastSyncedAt(),
-                latestDelivery: try deliveryDAO.latest()
-            )
+            let snapshot = try await appState.database.dbWriter.read { db -> StatusSnapshot in
+                let pending = try OutboxRow
+                    .filter(Column("state") == OutboxState.pending.rawValue ||
+                            Column("state") == OutboxState.inflight.rawValue)
+                    .fetchCount(db)
+                let failed = try OutboxRow
+                    .filter(Column("state") == OutboxState.failed.rawValue)
+                    .fetchCount(db)
+                let today = try StagedDailyCountDAO.count(db)
+                let status = Self.deriveStatus(
+                    lastSynced: try SyncStateDAO.lastSyncedAt(db),
+                    latestDelivery: try DeliveryLogEntry
+                        .order(Column("sent_at").desc, Column("id").desc)
+                        .fetchOne(db)
+                )
+                return StatusSnapshot(pending: pending, failed: failed, today: today, status: status)
+            }
+            await MainActor.run {
+                self.pendingCount = snapshot.pending
+                self.failedCount = snapshot.failed
+                self.stagedTodayCount = snapshot.today
+                self.syncStatus = snapshot.status
+            }
         } catch {
             logger.error("Failed to load home stats: \(error.localizedDescription, privacy: .public)")
-        }
-    }
-
-    private func startStatusRefreshTimer() {
-        statusRefreshTimer?.invalidate()
-        statusRefreshTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
-            self?.loadInitialStatus()
         }
     }
 
@@ -141,7 +142,8 @@ final class HomeViewModel {
             let today = try StagedDailyCountDAO.count(db)
             // Track the sync-completion stamp + latest delivery so the "Synced X
             // ago" label updates reactively the moment a background upload lands
-            // (or an empty flush stamps), not only on the 10 s poll timer.
+            // (or an empty flush stamps). The relative-time wording itself is
+            // ticked forward by the HomeView TimelineView, not a DB-reading timer.
             let status = Self.deriveStatus(
                 lastSynced: try SyncStateDAO.lastSyncedAt(db),
                 latestDelivery: try DeliveryLogEntry

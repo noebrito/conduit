@@ -35,9 +35,11 @@ private struct HomeContent: View {
                         .font(.title2)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(viewModel.syncStatusLabel)
-                            .font(.subheadline.bold())
-                            .foregroundStyle(viewModel.statusIsError ? .red : .primary)
+                        TimelineView(.periodic(from: .now, by: 30)) { _ in
+                            Text(viewModel.syncStatusLabel)
+                                .font(.subheadline.bold())
+                                .foregroundStyle(viewModel.statusIsError ? .red : .primary)
+                        }
                         if viewModel.isSyncing {
                             ProgressView()
                                 .progressViewStyle(.linear)

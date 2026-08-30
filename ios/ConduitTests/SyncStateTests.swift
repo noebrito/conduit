@@ -155,4 +155,29 @@ final class SyncStateTests: XCTestCase {
             .synced(deliveredAt)
         )
     }
+
+    // MARK: - SyncEngine.outboxIsFullyDrained (2026-08-11 post-outage masking bug)
+
+    /// The bug this guards: a flush with nothing NEW to batch (every candidate
+    /// row already `.inflight` — e.g. a batch stuck after a destination
+    /// outage) used to stamp "last synced" anyway, because the empty-flush
+    /// branch only checked `count(state: .pending) == 0`, which is blind to
+    /// `.inflight` rows. The captain saw a green "Synced 0 seconds ago" while
+    /// 336 samples sat permanently undelivered and repeated "Sync Now" taps
+    /// did nothing. See `OutboxDAO.reclaimStaleInflight` for the companion fix
+    /// that actually un-sticks those rows.
+    func test_outboxIsFullyDrained_pendingZeroButInflightOutstanding_isNotDrained() {
+        XCTAssertFalse(
+            SyncEngine.outboxIsFullyDrained(pendingCount: 0, inflightCount: 336),
+            "an inflight batch is still undelivered data — must not report a fresh sync"
+        )
+    }
+
+    func test_outboxIsFullyDrained_pendingOutstanding_isNotDrained() {
+        XCTAssertFalse(SyncEngine.outboxIsFullyDrained(pendingCount: 5, inflightCount: 0))
+    }
+
+    func test_outboxIsFullyDrained_bothZero_isDrained() {
+        XCTAssertTrue(SyncEngine.outboxIsFullyDrained(pendingCount: 0, inflightCount: 0))
+    }
 }

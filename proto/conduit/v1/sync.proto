@@ -14,6 +14,15 @@ message Envelope {
 message SampleBatch {
   string hk_type_id = 1;                  // e.g. "HKQuantityTypeIdentifierHeartRate"
   repeated Sample samples = 2;
+  // UUIDs of samples HealthKit reported as DELETED for this hk_type_id since the
+  // last read (from HKAnchoredObjectQuery's deletedObjects). The ingester emits a
+  // bulk `delete` per uuid to the stream this hk_type_id routes to, so an edited/
+  // removed food (LoseIt delete+recreate) doesn't leave a ghost doc that inflates
+  // nutrition totals. Additive/back-compat: an old ingester ignores it
+  // (DiscardUnknown) and an old client never sets it, so the field is empty for
+  // upsert-only batches and the wire stays byte-identical when there are no
+  // deletions.
+  repeated string deleted_uuids = 3;
 }
 
 message Sample {
@@ -27,6 +36,7 @@ message Sample {
     CategoryValue    category    = 11;
     WorkoutValue     workout     = 12;
     CorrelationValue correlation = 13;
+    RouteValue       route       = 14;
   }
 }
 
@@ -55,4 +65,26 @@ message WorkoutValue {
 
 message CorrelationValue {
   repeated Sample components = 1;         // e.g. blood pressure = [systolic, diastolic]
+}
+
+// A workout's GPS route: a foreign key to its workout plus an ordered series of
+// location points. One RouteValue == one HKWorkoutRoute == one document, so the
+// whole route dedupes atomically under the enclosing Sample.uuid.
+message RouteValue {
+  string workout_uuid = 1;                // FK: the Workout sample.uuid this route belongs to
+  string activity_type = 2;               // denormalized (e.g. "walking") for filtering/labels
+  repeated RoutePoint points = 3;         // ordered oldest -> newest; may be downsampled on-device
+}
+
+// One CLLocation, flattened to primitives. Units are canonical/SI on the wire
+// (metres, m/s, degrees, unix-ms); clients convert for display.
+message RoutePoint {
+  double lat = 1;                         // CLLocation.coordinate.latitude
+  double lng = 2;                         // CLLocation.coordinate.longitude
+  double altitude_m = 3;                  // CLLocation.altitude (ellipsoidal metres)
+  int64  timestamp_unix_ms = 4;           // CLLocation.timestamp
+  double horizontal_accuracy_m = 5;       // CLLocation.horizontalAccuracy (metres)
+  double vertical_accuracy_m = 6;         // CLLocation.verticalAccuracy (metres, <0 = invalid)
+  double speed_mps = 7;                   // CLLocation.speed (m/s, <0 = invalid)
+  double course_deg = 8;                  // CLLocation.course (degrees, <0 = invalid)
 }

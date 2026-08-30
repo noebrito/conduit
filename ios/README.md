@@ -32,7 +32,8 @@ conduit/ios/
 │   │   └── DeliveryLogEntry.swift
 │   ├── Services/
 │   │   ├── HealthKit/   HealthTypeRegistry, HealthKitAuthorizer,
-│   │   │                ObserverCoordinator, AnchoredReader
+│   │   │                ObserverCoordinator, AnchoredReader,
+│   │   │                WorkoutRouteReader (GPS routes)
 │   │   ├── Sync/        SyncEngine, Throttle, Batcher
 │   │   ├── Networking/  Uploader, BackgroundSession, BackoffPolicy,
 │   │   │                WebhookTester (foreground Test Connection probe)
@@ -96,8 +97,11 @@ command line. The bundle identifier is `dev.noebrito.Conduit`.
 
 - HealthKit + HealthKit background delivery (`Conduit/App/Conduit.entitlements`)
 - Background Modes: `fetch`, `processing` (`Conduit/Info.plist`)
-- `NSHealthShareUsageDescription` — placeholder copy, finalized in Phase I5
-- `BGTaskSchedulerPermittedIdentifiers` — `dev.noebrito.Conduit.flush`
+- `NSHealthShareUsageDescription` — the shipped reason string; it names the data
+  Conduit reads (App Review reads it, so keep it honest and specific)
+- `BGTaskSchedulerPermittedIdentifiers` — `dev.noebrito.Conduit.flush` (upload drain,
+  `BGAppRefreshTask`) and `dev.noebrito.Conduit.import` (history-import resumption,
+  `BGProcessingTask`)
 
 ## Continuous integration
 

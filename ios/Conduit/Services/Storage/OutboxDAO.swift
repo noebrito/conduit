@@ -32,13 +32,23 @@ struct OutboxDAO {
     /// "Staged today" counter can never drift from what was actually staged, and
     /// — because duplicates return early without incrementing — it never
     /// double-counts a re-observed sample. See `StagedDailyCountDAO`.
+    ///
+    /// `bumpTally` lets a batch caller (`ingest`/`stageImport`) suppress the
+    /// per-sample tally upsert and instead bump the day bucket **once** by the
+    /// page's inserted count — halving the write-statement count for a large
+    /// import. All samples in a batch share one `createdAt` (the page's
+    /// `syncedAt`), so one upsert-by-N is byte-for-byte identical to N upserts-
+    /// by-1. The increment stays inside the same transaction, preserving the
+    /// no-drift invariant. The convenience single-sample `enqueue` keeps
+    /// `bumpTally: true`.
     @discardableResult
     static func enqueue(
         _ db: Database,
         sample: Conduit_V1_Sample,
         hkTypeId: String,
         webhookId: Int64,
-        createdAt: Date
+        createdAt: Date,
+        bumpTally: Bool = true
     ) throws -> Bool {
         let payload = try sample.jsonUTF8Data()
         try db.execute(
@@ -58,7 +68,7 @@ struct OutboxDAO {
             ]
         )
         let inserted = db.changesCount > 0
-        if inserted {
+        if inserted && bumpTally {
             try StagedDailyCountDAO.increment(db, enqueuedAt: createdAt, by: 1)
         }
         return inserted
@@ -83,6 +93,58 @@ struct OutboxDAO {
         }
     }
 
+    // MARK: - Tombstones (honor HealthKit deletions)
+
+    /// Stage a delete tombstone for a HealthKit-deleted sample within an existing
+    /// transaction. A tombstone is an `op == .delete` row carrying only
+    /// `{hk_sample_uuid, hk_type_id}` and an empty payload; the batcher serializes
+    /// it into the envelope's `deleted_uuids` and the ingester removes the ghost
+    /// document from OpenSearch.
+    ///
+    /// Two steps, both correctness-driven:
+    /// 1. **Cancel a not-yet-sent local upsert** for the same uuid
+    ///    (`op == .upsert && state == .pending`). If the sample was staged but
+    ///    never uploaded, shipping it and then deleting it is wasteful and — if
+    ///    the two ever split across batches that race — unsafe; dropping the
+    ///    un-sent upsert makes the outcome unambiguous.
+    /// 2. **Insert the tombstone** with `INSERT OR IGNORE`, which dedupes a
+    ///    re-delivered deletion. In the rare race where an *in-flight* upsert
+    ///    still holds this uuid (the `hk_sample_uuid` UNIQUE blocks a second
+    ///    row), the tombstone is skipped for now; the one-time backfill /
+    ///    reconcile is the backstop for such residue.
+    static func stageTombstone(
+        _ db: Database,
+        hkSampleUuid: String,
+        hkTypeId: String,
+        webhookId: Int64,
+        createdAt: Date
+    ) throws {
+        try db.execute(
+            sql: """
+                DELETE FROM outbox
+                WHERE hk_sample_uuid = ? AND op = ? AND state = ?
+                """,
+            arguments: [hkSampleUuid, OutboxOp.upsert.rawValue, OutboxState.pending.rawValue]
+        )
+        try db.execute(
+            sql: """
+                INSERT OR IGNORE INTO outbox
+                    (webhook_id, hk_sample_uuid, hk_type_id, op, payload_blob,
+                     created_at, state, attempt_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+                """,
+            arguments: [
+                webhookId,
+                hkSampleUuid,
+                hkTypeId,
+                OutboxOp.delete.rawValue,
+                Data(),
+                createdAt,
+                OutboxState.pending.rawValue,
+            ]
+        )
+    }
+
     // MARK: - Atomic ingest (§4.4 critical invariant)
 
     /// Persist the result of an `AnchoredReader.read(...)`: enqueue every sample
@@ -96,11 +158,20 @@ struct OutboxDAO {
     /// does.
     ///
     /// - Parameters:
+    ///   - deletedUuids: UUIDs HealthKit reported as DELETED for this type since
+    ///     the last read (`AnchoredReader.Result.deletedUuids`). Each is staged
+    ///     as a **tombstone** (`op == .delete`) in this same transaction so the
+    ///     ingester removes the ghost document — preserving the §4.4
+    ///     anchor-advance-with-enqueue atomicity. Empty for upsert-only reads, so
+    ///     the flow is unchanged when there are no deletions.
     ///   - cap: optional hard limit on total outbox rows. When set and the
     ///     outbox is already at/over `cap`, ingest stops staging further samples
     ///     as back-pressure. Crucially, if the cap forces us to drop any sample
     ///     the anchor is **NOT** advanced (see below) so nothing is lost. `nil`
-    ///     disables the guard.
+    ///     disables the guard. Tombstones are tiny and correctness-critical, so
+    ///     they are staged regardless of the cap (a dropped tombstone would
+    ///     re-create the ghost problem); an over-cap tombstone is re-delivered +
+    ///     deduped on the next read anyway if the anchor didn't advance.
     /// - Returns: the number of *newly* inserted (non-duplicate) rows.
     @discardableResult
     func ingest(
@@ -108,6 +179,7 @@ struct OutboxDAO {
         hkTypeId: String,
         webhookId: Int64,
         anchorBlob: Data?,
+        deletedUuids: [String] = [],
         cap: Int? = nil,
         syncedAt: Date = Date()
     ) throws -> Int {
@@ -127,12 +199,29 @@ struct OutboxDAO {
                     sample: sample,
                     hkTypeId: hkTypeId,
                     webhookId: webhookId,
-                    createdAt: syncedAt
+                    createdAt: syncedAt,
+                    bumpTally: false
                 )
                 if inserted {
                     insertedCount += 1
                     currentTotal += 1
                 }
+            }
+            // Batch the "staged today" tally: one upsert per page (all samples
+            // share `syncedAt`'s day) instead of one per row. `increment` no-ops
+            // on 0, so an all-duplicate page bumps nothing — same as before.
+            try StagedDailyCountDAO.increment(db, enqueuedAt: syncedAt, by: insertedCount)
+            // Stage a tombstone per deleted UUID, in this SAME transaction as the
+            // enqueues + anchor advance. Tombstones are NOT counted in the tally
+            // (they aren't staged samples) and are exempt from the cap.
+            for uuid in deletedUuids {
+                try OutboxDAO.stageTombstone(
+                    db,
+                    hkSampleUuid: uuid,
+                    hkTypeId: hkTypeId,
+                    webhookId: webhookId,
+                    createdAt: syncedAt
+                )
             }
             // §4.4 invariant: advancing the anchor only "counts" if the enqueues
             // above also committed — AND only if we staged the ENTIRE batch. If
@@ -192,16 +281,65 @@ struct OutboxDAO {
                     sample: sample,
                     hkTypeId: hkTypeId,
                     webhookId: webhookId,
-                    createdAt: syncedAt
+                    createdAt: syncedAt,
+                    bumpTally: false
                 )
                 if inserted {
                     insertedCount += 1
                     currentTotal += 1
                 }
             }
+            // Batch the "staged today" tally: one upsert per page (all samples
+            // share `syncedAt`'s day) instead of one per row. `increment` no-ops
+            // on 0, so an all-duplicate page bumps nothing — same as before.
+            try StagedDailyCountDAO.increment(db, enqueuedAt: syncedAt, by: insertedCount)
             // Intentionally NO advanceAnchor: the forward anchor is owned by the
             // observer-wake path and must not move for an import.
             return (insertedCount, hitCap)
+        }
+    }
+
+    // MARK: - Stale inflight reclaim (time-based backstop)
+
+    /// Reclaim `.inflight` rows that have sat that way longer than
+    /// `staleAfter`, back to `.pending` for retry.
+    ///
+    /// This is deliberately a DIFFERENT mechanism from `Uploader.reconcileInflight`
+    /// (ARCHITECTURE.md §4.6): that check asks the background `URLSession` for
+    /// its currently-active tasks and only runs **once, at app launch** — it
+    /// was designed as crash recovery ("a single crash can permanently strand
+    /// samples"), not for a long-lived app session that outlives a
+    /// connectivity outage without ever being relaunched. A batch's upload can
+    /// go silently quiet mid-request (e.g. the destination drops off the
+    /// network for hours) while the app process never dies, so launch-time
+    /// reconciliation never re-runs and nothing else ever reconsiders that
+    /// batch — it stays `.inflight` (and invisible to `Batcher.buildBatch`,
+    /// which only ever drains `.pending` rows) indefinitely. This purely
+    /// time-based check is the backstop, independent of whatever the session
+    /// currently reports for that batch. A row with no `inflight_at` (staged
+    /// before migration `v10-outbox-inflight-at`, or a defensive gap) is
+    /// treated as immediately eligible.
+    ///
+    /// Reclaiming a row that turns out to still be genuinely in flight is
+    /// safe: the ingester indexes by `sample.uuid` with `op_type: create`, so
+    /// a redundant delivery 409s and dedupes rather than duplicating — the
+    /// same idempotency §4.6's crash recovery already relies on to re-batch
+    /// orphaned rows.
+    ///
+    /// - Returns: the number of rows reclaimed.
+    @discardableResult
+    func reclaimStaleInflight(staleAfter interval: TimeInterval, now: Date = Date()) throws -> Int {
+        let cutoff = now.addingTimeInterval(-interval)
+        return try database.dbWriter.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE outbox
+                    SET state = ?, batch_id = NULL
+                    WHERE state = ? AND (inflight_at IS NULL OR inflight_at <= ?)
+                    """,
+                arguments: [OutboxState.pending.rawValue, OutboxState.inflight.rawValue, cutoff]
+            )
+            return db.changesCount
         }
     }
 

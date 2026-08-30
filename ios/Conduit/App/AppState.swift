@@ -30,6 +30,10 @@ final class AppState {
     /// Registers the HealthKit observer queries that actually drive data capture.
     /// Without starting this, nothing is ever read or enqueued (§4.4).
     let observerCoordinator: ObserverCoordinator
+    /// Keeps a paused "Import history" run resumable across backgrounding: takes
+    /// the checkpoint assertion, schedules the BGProcessingTask resume, and
+    /// auto-resumes on foreground. See `ImportBackgroundCoordinator`.
+    let importBackground: ImportBackgroundCoordinator
 
     private(set) var isOnboardingComplete: Bool
 
@@ -40,6 +44,7 @@ final class AppState {
         let engine = SyncEngine(database: database, store: store)
         self.syncEngine = engine
         self.observerCoordinator = ObserverCoordinator(store: store, syncEngine: engine)
+        self.importBackground = ImportBackgroundCoordinator(database: database, engine: engine)
         self.isOnboardingComplete = UserDefaults.standard.bool(forKey: "conduit.onboardingComplete")
     }
 

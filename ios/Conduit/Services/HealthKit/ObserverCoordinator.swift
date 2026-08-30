@@ -32,6 +32,11 @@ final class ObserverCoordinator {
     /// in `types`. Already-registered types are skipped (idempotent).
     func start(for types: [HealthDataType]) {
         for type in types {
+            // Routes have no observer of their own: HealthKit only associates a
+            // route forward (workout → route), so capture is driven off the
+            // WORKOUT wake, which re-scans recent workouts for routes that Apple
+            // finalized after their workout arrived. See `WorkoutRouteReader`.
+            guard type.stream != .route else { continue }
             guard let sampleType = type.sampleType else { continue }
             guard activeQueries[type.identifier] == nil else { continue }
 

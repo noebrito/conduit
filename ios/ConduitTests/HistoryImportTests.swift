@@ -27,7 +27,7 @@ final class HistoryImportTests: XCTestCase {
             let upper = before.map { Int64(($0.timeIntervalSince1970 * 1000).rounded()) } ?? Int64.max
             let page = endMsNewestFirst.filter { $0 < upper }.prefix(pageSize)
             let samples = page.map { self.makeSample(uuid: "e\($0)", endMs: $0) }
-            return AnchoredReader.Result(samples: Array(samples), newAnchor: nil)
+            return AnchoredReader.Result(samples: Array(samples), deletedUuids: [], newAnchor: nil)
         }
     }
 
@@ -242,6 +242,7 @@ final class HistoryImportTests: XCTestCase {
                 // page each time the cursor doesn't advance.
                 AnchoredReader.Result(
                     samples: (0..<5).map { self.makeSample(uuid: "same\($0)", endMs: 500) },
+                    deletedUuids: [],
                     newAnchor: nil
                 )
             },

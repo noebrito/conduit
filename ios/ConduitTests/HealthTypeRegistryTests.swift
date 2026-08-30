@@ -20,7 +20,7 @@ final class HealthTypeRegistryTests: XCTestCase {
             switch type.stream {
             case .quantity:
                 XCTAssertNotNil(type.defaultUnit, "Quantity type missing unit: \(type.identifier)")
-            case .category, .workout, .correlation:
+            case .category, .workout, .correlation, .route:
                 XCTAssertNil(type.defaultUnit, "Non-quantity type should not carry a unit: \(type.identifier)")
             }
         }
@@ -124,6 +124,101 @@ final class HealthTypeRegistryTests: XCTestCase {
             [HKCategoryTypeIdentifier.appleStandHour.rawValue]
         )
         XCTAssertTrue(registry.readTypes.contains { $0.identifier == HKCategoryTypeIdentifier.appleStandHour.rawValue })
+    }
+
+    // MARK: - Nutrition (v1.1)
+
+    /// The ten dietary types LoseIt (and any other food logger) writes into Health.
+    /// They ride the plain quantity stream — the pipeline routes by value *shape*,
+    /// not by metric — so registering them here is the whole feature on the wire.
+    func testNutritionTypesAreRegisteredAsQuantitiesWithCanonicalUnits() {
+        let expected: [HKQuantityTypeIdentifier: String] = [
+            .dietaryEnergyConsumed: "kcal",
+            .dietaryProtein: "g",
+            .dietaryCarbohydrates: "g",
+            .dietaryFatTotal: "g",
+            .dietaryFatSaturated: "g",
+            .dietaryFiber: "g",
+            .dietarySugar: "g",
+            .dietarySodium: "mg",
+            .dietaryCholesterol: "mg",
+            .dietaryWater: "mL",
+        ]
+
+        for (identifier, unit) in expected {
+            guard let type = registry.type(forIdentifier: identifier.rawValue) else {
+                return XCTFail("Nutrition type missing from registry: \(identifier.rawValue)")
+            }
+            XCTAssertEqual(type.stream, .quantity, "\(identifier.rawValue) must ride the quantity stream")
+            XCTAssertEqual(type.category, .nutrition, "\(identifier.rawValue) belongs in the Nutrition picker group")
+            XCTAssertEqual(type.defaultUnit, unit, "\(identifier.rawValue) unit")
+            XCTAssertTrue(
+                registry.readTypes.contains { $0.identifier == identifier.rawValue },
+                "\(identifier.rawValue) must be in the HealthKit read-authorization set"
+            )
+        }
+
+        XCTAssertEqual(registry.types(in: .nutrition).count, expected.count)
+    }
+
+    // MARK: - Running Dynamics
+
+    /// The five Apple Watch running-dynamics types added in response to real App
+    /// Store feedback. Like nutrition, they ride the plain quantity stream — the
+    /// pipeline routes by value shape, not by metric — so registering them here is
+    /// the whole feature on the wire. HealthKit has no standalone "running cadence"
+    /// type (only cycling cadence exists); Apple derives running cadence from
+    /// stride length + speed, so it is deliberately not registered.
+    func testRunningDynamicsTypesAreRegisteredAsQuantitiesWithCanonicalUnits() {
+        let expected: [HKQuantityTypeIdentifier: String] = [
+            .runningPower: "W",
+            .runningSpeed: "m/s",
+            .runningStrideLength: "m",
+            .runningVerticalOscillation: "cm",
+            .runningGroundContactTime: "ms",
+        ]
+
+        for (identifier, unit) in expected {
+            guard let type = registry.type(forIdentifier: identifier.rawValue) else {
+                return XCTFail("Running dynamics type missing from registry: \(identifier.rawValue)")
+            }
+            XCTAssertEqual(type.stream, .quantity, "\(identifier.rawValue) must ride the quantity stream")
+            XCTAssertEqual(type.category, .activityFitness, "\(identifier.rawValue) belongs in the Activity & Fitness picker group")
+            XCTAssertEqual(type.defaultUnit, unit, "\(identifier.rawValue) unit")
+            XCTAssertTrue(
+                registry.readTypes.contains { $0.identifier == identifier.rawValue },
+                "\(identifier.rawValue) must be in the HealthKit read-authorization set"
+            )
+        }
+    }
+
+    /// HealthKit does not expose a standalone running-cadence quantity type —
+    /// confirm we haven't accidentally invented an identifier for it.
+    func testNoRunningCadenceTypeExists() {
+        XCTAssertNil(
+            registry.all.first { $0.displayName.localizedCaseInsensitiveContains("cadence") && $0.identifier.contains("Running") },
+            "HealthKit has no HKQuantityTypeIdentifierRunningCadence — only CyclingCadence exists"
+        )
+    }
+
+    /// `AnchoredReader.makeSample` converts every quantity with
+    /// `HKUnit(from: type.defaultUnit)`, and `doubleValue(for:)` traps on a unit
+    /// that is incompatible with the quantity type. So an incompatible unit is a
+    /// crash at read time, not a bad number — assert every registered unit is
+    /// compatible with its HK type.
+    func testEveryQuantityUnitIsCompatibleWithItsHealthKitType() {
+        for type in registry.all where type.stream == .quantity {
+            guard
+                let quantityType = type.sampleType as? HKQuantityType,
+                let unitString = type.defaultUnit
+            else {
+                return XCTFail("Quantity type without an HKQuantityType/unit: \(type.identifier)")
+            }
+            XCTAssertTrue(
+                quantityType.is(compatibleWith: HKUnit(from: unitString)),
+                "\(type.identifier) is not compatible with unit '\(unitString)' — makeSample would trap"
+            )
+        }
     }
 
     func testStandHourCategoryValueNamesStoodAndIdle() {

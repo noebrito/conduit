@@ -7,13 +7,32 @@ import SnapshotTesting
 
 /// Shared knobs for the screen snapshot suite.
 ///
-/// Baselines are recorded on the CI simulator (see AGENTS.md, "Conduit iOS
-/// snapshot tests"): the `conduit-ios` job provisions the newest iOS runtime on
-/// the `iPhone 16` device type, so the rendering OS + scale are identical
-/// run-to-run. The tolerances below only absorb sub-pixel anti-aliasing drift
-/// between two runs on that same runner image (e.g. a simulator-runtime patch
-/// bump); genuine layout changes still exceed them and fail loudly.
+/// The committed baselines were recorded on the `conduit-ios` GitHub Actions
+/// simulator, which pinned the rendering OS + scale run-to-run. The tolerances
+/// below only absorb sub-pixel anti-aliasing drift between two runs on that same
+/// image; genuine layout changes still exceed them and fail loudly — which is
+/// also why the comparison is now opt-in (see `isEnabled`).
 enum SnapshotEnv {
+    /// Whether the pixel-diff assertions actually run.
+    ///
+    /// They are **opt-in**, because the environment the baselines were recorded
+    /// on no longer exists: the `conduit-ios` job was deleted along with all
+    /// GitHub Actions macOS CI (10x billing — see the root AGENTS.md), and Xcode
+    /// Cloud, now the only CI that runs this bundle, renders on a different
+    /// simulator image. Every reference mismatched there on every commit, so all
+    /// five screens failed unconditionally — a red gate carrying no signal, which
+    /// only masked the logic tests around it. A pixel-diff is only meaningful on
+    /// a host whose renderer matches the references, so the suite runs when a
+    /// human opts in on such a host (`SNAPSHOT_TESTS=1`) or re-records
+    /// (`SNAPSHOT_RECORD=1`), and otherwise `XCTSkip`s. Same shape as
+    /// `AppStoreScreenshotTests`' `GENERATE_APPSTORE_SCREENSHOTS` gate. Under
+    /// `xcodebuild`, prefix the var with `TEST_RUNNER_` so it reaches the test
+    /// process. See AGENTS.md.
+    static var isEnabled: Bool {
+        let env = ProcessInfo.processInfo.environment
+        return env["SNAPSHOT_TESTS"] == "1" || env["SNAPSHOT_RECORD"] == "1"
+    }
+
     /// Fixed logical canvas (iPhone-class portrait). The layout is pinned here so
     /// it never depends on whatever device the test host happens to be; the
     /// rendering device only supplies the OS renderer + display scale.

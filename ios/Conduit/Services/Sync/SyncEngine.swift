@@ -13,6 +13,7 @@ actor SyncEngine {
     private let database: AppDatabase
     private let store: HKHealthStore
     private let reader: AnchoredReader
+    private let routeReader: WorkoutRouteReader
     private let outboxDAO: OutboxDAO
     private let webhookConfigDAO: WebhookConfigDAO
     private let dataTypeConfigDAO: DataTypeConfigDAO
@@ -21,6 +22,15 @@ actor SyncEngine {
     private let uploader: Uploader
     private let keychain: KeychainStore
     private let logger = Logger(subsystem: "dev.noebrito.Conduit", category: "SyncEngine")
+
+    /// Workouts whose route we have already staged this session, so the recent-
+    /// workout re-scan doesn't re-run the two-step read for a route we've already
+    /// got. Deliberately memoizes ONLY definitive captures: a workout that had no
+    /// route is re-attempted on the next wake, which is exactly how a route Apple
+    /// finalizes *after* its workout gets picked up. In-memory by design — losing
+    /// it on relaunch costs one cheap re-scan, and UUID dedupe makes a redundant
+    /// capture a no-op, so it never needs to be durable.
+    private var workoutsWithCapturedRoute: Set<String> = []
 
     /// BGAppRefreshTask identifier for the background catch-up flush. MUST match
     /// an entry in `Info.plist`'s `BGTaskSchedulerPermittedIdentifiers` — iOS
@@ -33,6 +43,18 @@ actor SyncEngine {
     /// practical minimum iOS honours for `BGAppRefreshTask`.
     static let bgRefreshInterval: TimeInterval = 15 * 60
 
+    /// How long a row may sit `.inflight` before `flush` treats it as stuck
+    /// and reclaims it back to `.pending` for retry, regardless of what the
+    /// background `URLSession` currently reports for its batch. See
+    /// `OutboxDAO.reclaimStaleInflight`.
+    ///
+    /// Generous relative to how long a single upload of an at-most-8-MiB
+    /// batch should ever genuinely take on any real connection (including its
+    /// own transport-level retries), but short enough to self-heal within one
+    /// app session rather than requiring the user to force-quit/relaunch to
+    /// un-stick the queue.
+    static let staleInflightTimeout: TimeInterval = 30 * 60
+
     init(
         database: AppDatabase,
         store: HKHealthStore = HKHealthStore(),
@@ -42,6 +64,7 @@ actor SyncEngine {
         self.database = database
         self.store = store
         self.reader = AnchoredReader(store: store)
+        self.routeReader = WorkoutRouteReader(store: store)
         self.outboxDAO = OutboxDAO(database)
         self.webhookConfigDAO = WebhookConfigDAO(database)
         self.dataTypeConfigDAO = DataTypeConfigDAO(database)
@@ -140,9 +163,20 @@ actor SyncEngine {
                 hkTypeId: typeIdentifier,
                 webhookId: webhookID,
                 anchorBlob: result.newAnchorData,
+                deletedUuids: result.deletedUuids,
                 cap: webhook.outboxCap
             )
-            logger.info("Observer wake for \(typeIdentifier, privacy: .public): \(inserted) new samples staged")
+            if result.deletedUuids.isEmpty {
+                logger.info("Observer wake for \(typeIdentifier, privacy: .public): \(inserted) new samples staged")
+            } else {
+                logger.info("Observer wake for \(typeIdentifier, privacy: .public): \(inserted) new samples staged, \(result.deletedUuids.count) deletion(s) tombstoned")
+            }
+
+            // A workout wake is also the trigger for GPS route capture — routes
+            // have no observer of their own (see `captureRecentRoutes`).
+            if dataType.stream == .workout {
+                await captureRecentRoutes(webhookID: webhookID, cap: webhook.outboxCap)
+            }
 
             let pendingCount = try outboxDAO.count(state: .pending)
             guard throttle.shouldFlush(pendingCount: pendingCount) else {
@@ -154,6 +188,94 @@ actor SyncEngine {
             try await flush(webhook: webhook, webhookID: webhookID)
         } catch {
             logger.error("handleObserverWake(\(typeIdentifier, privacy: .public)) error: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    // MARK: - GPS route capture (workout-driven)
+
+    /// Capture GPS routes for recent workouts, called after every **workout**
+    /// observer wake.
+    ///
+    /// ## Why a re-scan rather than "read the route of the workout we just read"
+    ///
+    /// Apple attaches a workout's route **shortly after** the workout ends, so the
+    /// wake that delivers the workout very often precedes the route existing — and
+    /// by then the workout anchor has advanced past it, so that workout is never
+    /// handed to us again. Instead of trying to time it, this walks **every**
+    /// workout in the last `rescanWindowDays` that we haven't already captured a
+    /// route for, and attempts the read. A route that wasn't ready on wake N is
+    /// therefore picked up on wake N+1 (workouts wake often, and the
+    /// `BGAppRefreshTask` fallback drives it too).
+    ///
+    /// The re-scan is cheap and safe to repeat because nothing about it is
+    /// stateful: the outbox's `hk_sample_uuid` UNIQUE + `INSERT OR IGNORE` means a
+    /// re-read route is silently ignored rather than double-staged. Workouts with
+    /// no route (treadmill, strength, GPS off) are the common case — they capture
+    /// nothing and are re-attempted next wake, which costs one bounded query.
+    ///
+    /// Routes never advance a HealthKit anchor: capture is driven by the workout
+    /// and made idempotent by dedupe, so there is no anchor to keep. That's why
+    /// this stages via `stageImport` (enqueue-only) and not `ingest`.
+    private func captureRecentRoutes(webhookID: Int64, cap: Int?) async {
+        do {
+            guard
+                let routeConfig = try dataTypeConfigDAO.find(hkTypeId: HealthDataType.workoutRoute.identifier),
+                routeConfig.enabled
+            else {
+                logger.debug("Route capture disabled — skipping route pass")
+                return
+            }
+
+            let since = Calendar.current.date(
+                byAdding: .day,
+                value: -WorkoutRouteReader.rescanWindowDays,
+                to: Date()
+            )
+            let workouts = try await routeReader.workouts(since: since, limit: HKObjectQueryNoLimit)
+
+            var stagedRoutes = 0
+            for workout in workouts {
+                let workoutUUID = workout.uuid.uuidString
+                guard !workoutsWithCapturedRoute.contains(workoutUUID) else { continue }
+
+                // One workout's route read failing must not block the rest of the
+                // window: log it and move on, leaving it unmemoized so a later
+                // wake retries it.
+                let samples: [Conduit_V1_Sample]
+                do {
+                    samples = try await routeReader.routeSamples(for: workout)
+                } catch {
+                    logger.error("Route read failed for workout \(workoutUUID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    continue
+                }
+                // No route is the NORMAL outcome for most workouts: stage nothing,
+                // don't memoize, and try again next wake in case Apple hasn't
+                // finished attaching one yet.
+                guard !samples.isEmpty else { continue }
+
+                let staged = try outboxDAO.stageImport(
+                    samples: samples,
+                    hkTypeId: HealthDataType.workoutRoute.identifier,
+                    webhookId: webhookID,
+                    cap: cap
+                )
+                stagedRoutes += staged.inserted
+                // The route exists and is now ours — a re-read would only ever be
+                // deduped away, so stop asking for it. Memoize even when the row
+                // was a duplicate (staged 0): that also means we already have it.
+                workoutsWithCapturedRoute.insert(workoutUUID)
+                if staged.hitCap {
+                    logger.info("Route capture paused: outbox at cap")
+                    break
+                }
+            }
+            if stagedRoutes > 0 {
+                logger.info("Route capture: staged \(stagedRoutes) new route(s)")
+            }
+        } catch {
+            // Route capture is strictly additive to the workout read that already
+            // committed — never let it fail the wake.
+            logger.error("captureRecentRoutes error: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -199,62 +321,210 @@ actor SyncEngine {
     ///   - since: the user-chosen start of the window; `nil` imports all history.
     ///   - onProgress: called with the running staged total (across pages) so the
     ///     UI can show live progress during a long import.
-    /// - Returns: how many rows were staged, whether the outbox cap stopped the
-    ///   import early (queue never drained), and whether it was cancelled.
+    ///   - startCursor: the persisted resume point from an interrupted run of the
+    ///     same import; `nil` starts at the newest end.
+    ///   - onCheckpoint: called after each page with the resume cursor and the
+    ///     running staged total, so the caller can persist durable progress.
+    /// - Returns: how many rows were staged, the resume cursor, whether the range
+    ///   was exhausted, whether the outbox cap stopped the import early (queue
+    ///   never drained), and whether it was cancelled.
+    /// - Throws: whatever the HealthKit read or the outbox staging threw, plus
+    ///   `ImportError.noWebhookConfigured`. **This method must never turn a
+    ///   failure into a success-shaped summary** — a swallowed read error (e.g.
+    ///   protected data unavailable while the device is locked) silently truncates
+    ///   the user's health history while the UI claims it worked.
     func importHistory(
         typeIdentifier: String,
         since: Date?,
         pageSize: Int = SyncEngine.importPageSize,
-        onProgress: @escaping (Int) -> Void = { _ in }
-    ) async -> HistoryImporter.Summary {
-        do {
-            guard let webhook = try webhookConfigDAO.first(), let webhookID = webhook.id else {
-                logger.debug("importHistory: no webhook configured — skipping")
-                return HistoryImporter.Summary(staged: 0, hitCap: false, cancelled: false)
-            }
-            guard let dataType = HealthTypeRegistry.shared.type(forIdentifier: typeIdentifier) else {
-                logger.debug("importHistory: unknown type \(typeIdentifier, privacy: .public) — skipping")
-                return HistoryImporter.Summary(staged: 0, hitCap: false, cancelled: false)
-            }
+        startCursor: Date? = nil,
+        isCancelled: @escaping () -> Bool = { Task.isCancelled },
+        onProgress: @escaping (Int) -> Void = { _ in },
+        onCheckpoint: @escaping (Date?, Int) throws -> Void = { _, _ in }
+    ) async throws -> HistoryImporter.Summary {
+        guard let webhook = try webhookConfigDAO.first(), let webhookID = webhook.id else {
+            logger.error("importHistory: no webhook configured")
+            throw ImportError.noWebhookConfigured
+        }
+        guard let dataType = HealthTypeRegistry.shared.type(forIdentifier: typeIdentifier) else {
+            // Not a failure: there is genuinely nothing to import for a type this
+            // build doesn't know about, so the range is trivially exhausted.
+            logger.debug("importHistory: unknown type \(typeIdentifier, privacy: .public) — skipping")
+            return HistoryImporter.Summary(staged: 0, hitCap: false, cancelled: false, exhausted: true)
+        }
 
-            // Resume once the outbox has room for at least a full page again, so
-            // resuming doesn't immediately re-trip the cap after staging a few rows.
-            let resumeThreshold = max(0, webhook.outboxCap - pageSize)
-
-            let summary = try await HistoryImporter.run(
+        // Routes can't be imported by the generic anchored/sample read — they
+        // are found FROM their workout — so the route type's import is its own
+        // workout-driven pass over the same user-chosen window. Because
+        // `SettingsViewModel.runImport` iterates the enabled registry, this is
+        // what gives "Import History" historical routes, behind the same
+        // volume-warning confirmation.
+        if dataType.stream == .route {
+            return try await importRoutes(
+                since: since,
+                webhook: webhook,
+                webhookID: webhookID,
                 pageSize: pageSize,
-                isCancelled: { Task.isCancelled },
-                readPage: { before in
-                    try await self.reader.readImportPage(
-                        type: dataType,
-                        since: since,
-                        before: before,
-                        limit: pageSize
-                    )
-                },
-                stagePage: { samples in
-                    try self.outboxDAO.stageImport(
+                startCursor: startCursor,
+                isCancelled: isCancelled,
+                onProgress: onProgress,
+                onCheckpoint: onCheckpoint
+            )
+        }
+
+        // Resume once the outbox has room for at least a full page again, so
+        // resuming doesn't immediately re-trip the cap after staging a few rows.
+        let resumeThreshold = max(0, webhook.outboxCap - pageSize)
+
+        let summary = try await HistoryImporter.run(
+            pageSize: pageSize,
+            startCursor: startCursor,
+            isCancelled: isCancelled,
+            readPage: { before in
+                try await self.reader.readImportPage(
+                    type: dataType,
+                    since: since,
+                    before: before,
+                    limit: pageSize
+                )
+            },
+            stagePage: { samples in
+                try self.outboxDAO.stageImport(
+                    samples: samples,
+                    hkTypeId: typeIdentifier,
+                    webhookId: webhookID,
+                    cap: webhook.outboxCap
+                )
+            },
+            onProgress: onProgress,
+            onCheckpoint: onCheckpoint,
+            waitForCapacity: {
+                await self.drainBelowCap(
+                    webhook: webhook,
+                    webhookID: webhookID,
+                    resumeThreshold: resumeThreshold,
+                    isCancelled: isCancelled
+                )
+            }
+        )
+        logger.info("importHistory(\(typeIdentifier, privacy: .public)): staged \(summary.staged) rows, hitCap=\(summary.hitCap), cancelled=\(summary.cancelled), exhausted=\(summary.exhausted)")
+        return summary
+    }
+
+    /// Import GPS routes for every workout in the user-chosen window — the route
+    /// type's counterpart to `HistoryImporter.run`.
+    ///
+    /// It mirrors the sample import's contract deliberately: workouts are paged
+    /// **newest-first** so recent routes stage and upload first; staging goes
+    /// through `stageImport`, so no HealthKit anchor is ever touched; the outbox
+    /// `cap` bounds volume and the loop **auto-resumes** by draining below it
+    /// (routes are the heaviest data Conduit stages, so an "All time" import of
+    /// years of outdoor workouts is exactly what that machinery is for); and
+    /// `Task.isCancelled` stops it promptly at a workout boundary.
+    ///
+    /// A route read that fails for ONE workout is skipped and logged (a routeless
+    /// or unreadable workout is the common case and must not fail the import),
+    /// but an error from the workout scan or from staging propagates — the caller
+    /// records a real failure rather than a success-shaped summary.
+    ///
+    /// - Returns: rows staged, the resume cursor, whether the range was
+    ///   exhausted, whether a stuck queue stopped it, and cancellation.
+    private func importRoutes(
+        since: Date?,
+        webhook: WebhookConfig,
+        webhookID: Int64,
+        pageSize: Int,
+        startCursor: Date?,
+        isCancelled: @escaping () -> Bool,
+        onProgress: @escaping (Int) -> Void,
+        onCheckpoint: @escaping (Date?, Int) throws -> Void
+    ) async throws -> HistoryImporter.Summary {
+        let routeTypeID = HealthDataType.workoutRoute.identifier
+        let resumeThreshold = max(0, webhook.outboxCap - pageSize)
+        var staged = 0
+        var cursor: Date? = startCursor
+
+        // Same hard ceiling HistoryImporter.run applies, for the same reason:
+        // a reader that never advances its cursor cannot loop forever.
+        for _ in 0..<HistoryImporter.defaultMaxPages {
+            if isCancelled() {
+                return HistoryImporter.Summary(staged: staged, hitCap: false, cancelled: true, cursor: cursor)
+            }
+
+            let workouts = try await routeReader.workouts(
+                since: since,
+                before: cursor,
+                limit: pageSize
+            )
+            guard !workouts.isEmpty else {
+                return HistoryImporter.Summary(
+                    staged: staged, hitCap: false, cancelled: false, cursor: cursor, exhausted: true
+                )
+            }
+
+            for workout in workouts {
+                if isCancelled() {
+                    return HistoryImporter.Summary(staged: staged, hitCap: false, cancelled: true, cursor: cursor)
+                }
+                let samples: [Conduit_V1_Sample]
+                do {
+                    samples = try await routeReader.routeSamples(for: workout)
+                } catch {
+                    logger.error("Route read failed for workout \(workout.uuid.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    continue
+                }
+                guard !samples.isEmpty else { continue }
+
+                var result = try outboxDAO.stageImport(
+                    samples: samples,
+                    hkTypeId: routeTypeID,
+                    webhookId: webhookID,
+                    cap: webhook.outboxCap
+                )
+                if result.hitCap {
+                    // Wait for uploads to free room, then re-stage this same
+                    // workout — dedupe skips whatever already landed, so the
+                    // retry can't duplicate. A queue that never drains means a
+                    // stuck upload, and we stop rather than spin.
+                    guard await drainBelowCap(
+                        webhook: webhook,
+                        webhookID: webhookID,
+                        resumeThreshold: resumeThreshold,
+                        isCancelled: isCancelled
+                    ) else {
+                        staged += result.inserted
+                        try onCheckpoint(cursor, staged)
+                        return HistoryImporter.Summary(
+                            staged: staged, hitCap: true, cancelled: false, cursor: cursor
+                        )
+                    }
+                    let retried = try outboxDAO.stageImport(
                         samples: samples,
-                        hkTypeId: typeIdentifier,
+                        hkTypeId: routeTypeID,
                         webhookId: webhookID,
                         cap: webhook.outboxCap
                     )
-                },
-                onProgress: onProgress,
-                waitForCapacity: {
-                    await self.drainBelowCap(
-                        webhook: webhook,
-                        webhookID: webhookID,
-                        resumeThreshold: resumeThreshold
-                    )
+                    result.inserted += retried.inserted
                 }
-            )
-            logger.info("importHistory(\(typeIdentifier, privacy: .public)): staged \(summary.staged) rows, hitCap=\(summary.hitCap), cancelled=\(summary.cancelled)")
-            return summary
-        } catch {
-            logger.error("importHistory(\(typeIdentifier, privacy: .public)) error: \(error.localizedDescription, privacy: .public)")
-            return HistoryImporter.Summary(staged: 0, hitCap: false, cancelled: false)
+                staged += result.inserted
+                workoutsWithCapturedRoute.insert(workout.uuid.uuidString)
+                onProgress(staged)
+            }
+
+            // Newest-first paging cursor: continue from the oldest workout of
+            // this page. Inclusive bounds mean that workout is re-read once and
+            // deduped, which is safer than risking a same-timestamp sibling.
+            guard let oldest = workouts.last?.endDate, oldest != cursor else {
+                return HistoryImporter.Summary(
+                    staged: staged, hitCap: false, cancelled: false, cursor: cursor, exhausted: true
+                )
+            }
+            cursor = oldest
+            try onCheckpoint(cursor, staged)
         }
+
+        logger.info("importRoutes: staged \(staged) route(s)")
+        return HistoryImporter.Summary(staged: staged, hitCap: false, cancelled: false, cursor: cursor)
     }
 
     /// Drive uploads and wait until the outbox drains to at/below
@@ -270,11 +540,12 @@ actor SyncEngine {
     private func drainBelowCap(
         webhook: WebhookConfig,
         webhookID: Int64,
-        resumeThreshold: Int
+        resumeThreshold: Int,
+        isCancelled: @escaping () -> Bool = { Task.isCancelled }
     ) async -> Bool {
         let deadline = Date().addingTimeInterval(SyncEngine.importDrainTimeout)
         while Date() < deadline {
-            if Task.isCancelled { return false }
+            if isCancelled() { return false }
             try? await flush(webhook: webhook, webhookID: webhookID)
             try? await Task.sleep(nanoseconds: UInt64(SyncEngine.importDrainPollInterval * 1_000_000_000))
             let total = (try? outboxDAO.totalCount()) ?? webhook.outboxCap
@@ -357,9 +628,34 @@ actor SyncEngine {
         }
     }
 
+    // MARK: - Outbox drain status
+
+    /// Whether the outbox is fully drained: no rows waiting to send, and none
+    /// currently `.inflight`. Only this state may stamp "last synced" on an
+    /// otherwise-empty flush — an empty *pending* count alone is not enough,
+    /// since a `.inflight` batch (genuinely still uploading, or stuck and
+    /// awaiting `reclaimStaleInflight`) is still undelivered data. Pure so the
+    /// decision is unit-testable without a database.
+    static func outboxIsFullyDrained(pendingCount: Int, inflightCount: Int) -> Bool {
+        pendingCount == 0 && inflightCount == 0
+    }
+
     // MARK: - Private
 
     private func flush(webhook: WebhookConfig, webhookID: Int64) async throws {
+        // Reclaim any batch that's been `.inflight` long enough to be stuck
+        // rather than genuinely still uploading (see `staleInflightTimeout`),
+        // BEFORE draining — so a reclaimed row is immediately eligible for the
+        // batch this same flush is about to build. Without this, a batch whose
+        // upload silently wedges (e.g. mid-request during a connectivity
+        // outage) sits `.inflight` forever: `Batcher.buildBatch` only ever
+        // drains `.pending` rows, and `Uploader.reconcileInflight` only runs
+        // once, at app launch — which a long-lived session may never reach.
+        let reclaimed = try outboxDAO.reclaimStaleInflight(staleAfter: SyncEngine.staleInflightTimeout)
+        if reclaimed > 0 {
+            logger.info("flush: reclaimed \(reclaimed) stale inflight row(s) for retry")
+        }
+
         let deviceID = keychain.deviceID
         guard let batch = try batcher.buildBatch(
             webhookID: webhookID,
@@ -367,12 +663,22 @@ actor SyncEngine {
             deviceID: deviceID
         ) else {
             logger.debug("Nothing to upload")
-            // An empty flush is still a successful sync when the outbox is clean
-            // (no pending work waiting) — e.g. a "Sync Now" with nothing new to
-            // send. Stamp "last synced" so the timestamp advances even though zero
-            // items were uploaded. When pending rows exist but are all in backoff,
-            // there IS undelivered data, so we don't claim a fresh sync.
-            if try outboxDAO.count(state: .pending) == 0 {
+            // An empty flush is still a successful sync only when the outbox
+            // is FULLY drained — no pending work waiting AND nothing still
+            // `.inflight` — e.g. a "Sync Now" with nothing new to send. Stamp
+            // "last synced" so the timestamp advances even though zero items
+            // were uploaded. Checking pending alone was the bug: a batch
+            // sitting `.inflight` (whether genuinely still uploading, or stuck
+            // and awaiting the next reclaim above) is still undelivered data,
+            // so a "Synced just now" status while it sits there is misleading
+            // — this is what let a stuck outbox report success. When pending
+            // rows exist but are all in backoff, there IS undelivered data
+            // too, so we don't claim a fresh sync either way.
+            let drained = SyncEngine.outboxIsFullyDrained(
+                pendingCount: try outboxDAO.count(state: .pending),
+                inflightCount: try outboxDAO.count(state: .inflight)
+            )
+            if drained {
                 try SyncStateDAO(database).setLastSyncedAt()
             }
             return

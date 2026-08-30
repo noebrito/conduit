@@ -180,6 +180,107 @@ final class AppDatabase {
             }
         }
 
+        // v6 — outbox row op discriminator. Lets a row be either an `upsert`
+        // (the sample's document, the default) or a `delete` tombstone (a
+        // HealthKit-deleted sample whose OpenSearch doc must be removed so an
+        // edited/removed food doesn't leave a ghost that inflates nutrition
+        // totals). Additive + DEFAULT 'upsert', so every existing row and the
+        // unchanged upsert insert path (which omits the column) stay `upsert` —
+        // the upsert flow is byte-identical when there are no deletions.
+        migrator.registerMigration("v6-outbox-op") { db in
+            try db.alter(table: "outbox") { t in
+                t.add(column: "op", .text).notNull().defaults(to: OutboxOp.upsert.rawValue)
+            }
+        }
+
+        // v7 — durable "Import history" progress. Purely additive (two NEW
+        // tables; no existing table, column or row is touched), so it is safe on
+        // a populated production database and the forward-capture path is
+        // byte-identical.
+        //
+        // Why it exists: the importer's paging cursor lived only in memory, so an
+        // import interrupted by backgrounding/force-quit had NO resume point and
+        // restarted from the newest end; and a failed import returned a
+        // success-shaped summary, so the UI showed a green "Imported N samples"
+        // over a truncated history. These tables give the resume point and the
+        // terminal outcome (including a failure reason) that the UI reads back
+        // after a relaunch. See `ImportProgressDAO`.
+        migrator.registerMigration("v7-import-progress") { db in
+            try db.create(table: "import_run") { t in
+                // Singleton row (id is always `ImportProgressDAO.singletonID`).
+                t.column("id", .integer).primaryKey()
+                t.column("run_id", .text).notNull()
+                t.column("range_id", .text).notNull()
+                t.column("range_start", .datetime)
+                t.column("status", .text).notNull()
+                t.column("staged_count", .integer).notNull().defaults(to: 0)
+                t.column("failure_reason", .text)
+                t.column("types_total", .integer).notNull().defaults(to: 0)
+                t.column("types_completed", .integer).notNull().defaults(to: 0)
+                t.column("oldest_reached_at", .datetime)
+                t.column("started_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+
+            try db.create(table: "import_type_progress") { t in
+                t.column("hk_type_id", .text).notNull().primaryKey()
+                t.column("run_id", .text).notNull().indexed()
+                // Newest-first paging cursor: samples with endDate <= cursor are
+                // still unread. NULL = this type hasn't started.
+                t.column("cursor", .datetime)
+                t.column("staged_count", .integer).notNull().defaults(to: 0)
+                t.column("status", .text).notNull()
+                t.column("failure_reason", .text)
+                t.column("updated_at", .datetime).notNull()
+            }
+        }
+
+        // v8 — does the paused run deserve to be picked back up on its own?
+        // Purely additive (one nullable-by-default column with a literal default),
+        // so an existing v7 row keeps working unchanged and the forward-capture
+        // path is untouched.
+        //
+        // "Interrupted" alone can't answer it: an import the USER cancelled and an
+        // import iOS suspended are the same status, but only the second should be
+        // auto-resumed on the next foreground / background window. Defaulting to 0
+        // is the conservative direction — a pre-existing paused run is only ever
+        // resumed by an explicit tap until it stops for a reason we recorded.
+        migrator.registerMigration("v8-import-auto-resume") { db in
+            try db.alter(table: "import_run") { t in
+                t.add(column: "auto_resume", .boolean).notNull().defaults(to: false)
+            }
+        }
+
+        // v9 — WHY the run stopped, so the honest reason survives a relaunch.
+        // Additive in exactly the same shape as v8 (one nullable column, no
+        // existing column altered), so a v8 row keeps working unchanged.
+        //
+        // `auto_resume` answers "may we continue this on our own"; it cannot
+        // answer "why did it stop". A run halted because the upload queue never
+        // drained is a real problem the user has to see, and after a relaunch the
+        // generic "interrupted" line is exactly the comforting-but-vague status
+        // this work exists to eliminate. A NULL cause (any pre-existing row) is
+        // unknown, which stays on the conservative generic copy.
+        migrator.registerMigration("v9-import-stop-cause") { db in
+            try db.alter(table: "import_run") { t in
+                t.add(column: "stop_cause", .text)
+            }
+        }
+
+        // v10 — WHEN a row was marked inflight, so a stuck batch can be
+        // reclaimed by elapsed time alone rather than relying only on whether
+        // the background URLSession still reports its task active (the §4.6
+        // crash-recovery check, which only ever runs at app launch). Purely
+        // additive: one nullable column, no existing row touched. A row
+        // already `inflight` from before this migration simply has
+        // `inflight_at == NULL`, which `OutboxDAO.reclaimStaleInflight`
+        // treats as immediately eligible for reclaim.
+        migrator.registerMigration("v10-outbox-inflight-at") { db in
+            try db.alter(table: "outbox") { t in
+                t.add(column: "inflight_at", .datetime)
+            }
+        }
+
         return migrator
     }
 }

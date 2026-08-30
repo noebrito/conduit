@@ -73,6 +73,20 @@ final class OnboardingViewModel {
         testResult?.isSuccess == true
     }
 
+    /// Skip the webhook step without configuring a destination. The user can set
+    /// up (and Test) a webhook later in Settings. This is the App Review escape
+    /// hatch: onboarding must never hard-gate the whole app behind a *live*
+    /// webhook (a dead/expired reviewer URL previously locked the app out).
+    /// Skipping simply advances; `finishOnboarding` writes NO webhook_config row
+    /// when the URL/token are empty, so capture stays dormant (gracefully, no
+    /// crash) until a webhook is added.
+    func skipWebhookSetup() {
+        webhookURL = ""
+        tokenInput = ""
+        testResult = nil
+        advance()
+    }
+
     // MARK: - Test Connection
 
     func testConnection() async {
@@ -118,14 +132,20 @@ final class OnboardingViewModel {
             try typeDAO.setEnabled(enabledTypeIDs.contains(type.identifier), hkTypeId: type.identifier)
         }
 
-        // Store bearer token in Keychain, save webhook config row
-        let keychainRef = "webhook_bearer_token"
-        guard appState.keychain.setWebhookBearerToken(tokenInput) else {
-            throw OnboardingError.keychainWriteFailed
+        // Store bearer token in Keychain, save webhook config row — ONLY when the
+        // user actually configured a webhook. On the "Skip for now" path both
+        // fields are empty, so we write no webhook_config row: the app still
+        // completes onboarding and is fully usable, and the sync path skips
+        // capture gracefully until a webhook is added later in Settings.
+        if !webhookURL.isEmpty && !tokenInput.isEmpty {
+            let keychainRef = "webhook_bearer_token"
+            guard appState.keychain.setWebhookBearerToken(tokenInput) else {
+                throw OnboardingError.keychainWriteFailed
+            }
+            var config = WebhookConfig.makeDefault(url: webhookURL, bearerTokenKeychainRef: keychainRef)
+            let webhookDAO = WebhookConfigDAO(appState.database)
+            try webhookDAO.save(&config)
         }
-        var config = WebhookConfig.makeDefault(url: webhookURL, bearerTokenKeychainRef: keychainRef)
-        let webhookDAO = WebhookConfigDAO(appState.database)
-        try webhookDAO.save(&config)
 
         // Clear pending onboarding state from UserDefaults
         UserDefaults.standard.removeObject(forKey: kPendingURL)
@@ -156,11 +176,13 @@ final class OnboardingViewModel {
             let enabledTypes = HealthTypeRegistry.shared.all.filter {
                 enabledTypeIDs.contains($0.identifier)
             }
-            let engine = appState.syncEngine
+            // Driven through ImportRunner so this import gets the same durable
+            // resume point and truthful outcome as the Settings one — its status
+            // is then visible (and resumable) in Settings → Import History.
+            let runner = ImportRunner(database: appState.database, engine: appState.syncEngine)
+            let range = importRange
             Task.detached(priority: .utility) {
-                for type in enabledTypes {
-                    _ = await engine.importHistory(typeIdentifier: type.identifier, since: since)
-                }
+                _ = await runner.start(range: range, since: since, types: enabledTypes)
             }
         }
     }

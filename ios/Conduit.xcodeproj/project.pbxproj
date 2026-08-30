@@ -13,12 +13,18 @@
 		CD0000000000000000000109 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000108 /* KeychainStore.swift */; };
 		CD000000000000000000010B /* sync.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000010A /* sync.pb.swift */; };
 		CD000000000000000000010D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000010C /* Assets.xcassets */; };
+		CD0000000000000000000A31 /* RunningDynamicsEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000A30 /* RunningDynamicsEvidenceTests.swift */; };
 		CD000000000000000000010F /* ConduitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000010E /* ConduitTests.swift */; };
 		CD0000000000000000000110 /* SwiftProtobuf in Frameworks */ = {isa = PBXBuildFile; productRef = CD0000000000000000000072 /* SwiftProtobuf */; };
 		CD0000000000000000000111 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CD0000000000000000000073 /* GRDB */; };
 		CD00000000000000000001A1 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001A0 /* AppState.swift */; };
 		CD00000000000000000001A3 /* DeliveryLogEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001A2 /* DeliveryLogEntry.swift */; };
 		CD00000000000000000001A5 /* DeliveryLogDAO.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001A4 /* DeliveryLogDAO.swift */; };
+		CD0000000000000000000702 /* ImportProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000701 /* ImportProgress.swift */; };
+		CD0000000000000000000704 /* ImportProgressDAO.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000703 /* ImportProgressDAO.swift */; };
+		CD0000000000000000000706 /* ImportRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000705 /* ImportRunner.swift */; };
+		CD0000000000000000000802 /* ImportBackgroundCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000801 /* ImportBackgroundCoordinator.swift */; };
+		CD0000000000000000000804 /* ImportBackgroundTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000803 /* ImportBackgroundTests.swift */; };
 		CD000000000000000000F0F2 /* SyncStateDAO.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000F0F1 /* SyncStateDAO.swift */; };
 		CD00000000000000000001A7 /* BackgroundSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001A6 /* BackgroundSession.swift */; };
 		CD00000000000000000001A9 /* WebhookTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001A8 /* WebhookTester.swift */; };
@@ -42,6 +48,7 @@
 		CD0000000000000000000125 /* OutboxRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000124 /* OutboxRow.swift */; };
 		CD0000000000000000000127 /* HealthTypeRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000126 /* HealthTypeRegistry.swift */; };
 		CD0000000000000000000129 /* HealthKitAuthorizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000128 /* HealthKitAuthorizer.swift */; };
+		CD00000000000000000009A1 /* WorkoutRouteReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000009A0 /* WorkoutRouteReader.swift */; };
 		CD000000000000000000012B /* AnchoredReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000012A /* AnchoredReader.swift */; };
 		CD000000000000000000012D /* Database.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000012C /* Database.swift */; };
 		CD000000000000000000012F /* WebhookConfigDAO.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000012E /* WebhookConfigDAO.swift */; };
@@ -51,6 +58,8 @@
 		CD00000000000000000001E1 /* HealthKitAuthorizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001E0 /* HealthKitAuthorizerTests.swift */; };
 		CD0000000000000000000153 /* DatabaseMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000152 /* DatabaseMigrationTests.swift */; };
 		CD0000000000000000000155 /* OutboxDAOTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000154 /* OutboxDAOTests.swift */; };
+		CD00000000000000000009B1 /* WorkoutRouteReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000009B0 /* WorkoutRouteReaderTests.swift */; };
+		CD0000000000000000000708 /* ImportResumeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000707 /* ImportResumeTests.swift */; };
 		CD00000000000000000001F3 /* HistoryImportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001F2 /* HistoryImportTests.swift */; };
 		CD00000000000000000001F5 /* ForwardCaptureFloorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000001F4 /* ForwardCaptureFloorTests.swift */; };
 		CD00000000000000000002A1 /* RegistryReconcileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000002A0 /* RegistryReconcileTests.swift */; };
@@ -74,6 +83,8 @@
 		CD0000000000000000000511 /* SnapshotSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000510 /* SnapshotSupport.swift */; };
 		CD0000000000000000000513 /* ScreenSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000512 /* ScreenSnapshotTests.swift */; };
 		CD0000000000000000000521 /* AppStoreScreenshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000520 /* AppStoreScreenshotTests.swift */; };
+		CD0000000000000000000A11 /* OnboardingSkipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000A10 /* OnboardingSkipTests.swift */; };
+		CD0000000000000000000A21 /* AnchoredReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000A20 /* AnchoredReaderTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -97,12 +108,14 @@
 		CD0000000000000000000108 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		CD000000000000000000010A /* sync.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = sync.pb.swift; sourceTree = "<group>"; };
 		CD000000000000000000010C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		CD0000000000000000000A30 /* RunningDynamicsEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunningDynamicsEvidenceTests.swift; sourceTree = "<group>"; };
 		CD000000000000000000010E /* ConduitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConduitTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000120 /* WebhookConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookConfig.swift; sourceTree = "<group>"; };
 		CD0000000000000000000122 /* DataTypeConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataTypeConfig.swift; sourceTree = "<group>"; };
 		CD0000000000000000000124 /* OutboxRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutboxRow.swift; sourceTree = "<group>"; };
 		CD0000000000000000000126 /* HealthTypeRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthTypeRegistry.swift; sourceTree = "<group>"; };
 		CD0000000000000000000128 /* HealthKitAuthorizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitAuthorizer.swift; sourceTree = "<group>"; };
+		CD00000000000000000009A0 /* WorkoutRouteReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutRouteReader.swift; sourceTree = "<group>"; };
 		CD000000000000000000012A /* AnchoredReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnchoredReader.swift; sourceTree = "<group>"; };
 		CD000000000000000000012C /* Database.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Database.swift; sourceTree = "<group>"; };
 		CD000000000000000000012E /* WebhookConfigDAO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookConfigDAO.swift; sourceTree = "<group>"; };
@@ -118,6 +131,11 @@
 		CD00000000000000000001A0 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		CD00000000000000000001A2 /* DeliveryLogEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeliveryLogEntry.swift; sourceTree = "<group>"; };
 		CD00000000000000000001A4 /* DeliveryLogDAO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeliveryLogDAO.swift; sourceTree = "<group>"; };
+		CD0000000000000000000701 /* ImportProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportProgress.swift; sourceTree = "<group>"; };
+		CD0000000000000000000703 /* ImportProgressDAO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportProgressDAO.swift; sourceTree = "<group>"; };
+		CD0000000000000000000705 /* ImportRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportRunner.swift; sourceTree = "<group>"; };
+		CD0000000000000000000801 /* ImportBackgroundCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportBackgroundCoordinator.swift; sourceTree = "<group>"; };
+		CD0000000000000000000803 /* ImportBackgroundTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportBackgroundTests.swift; sourceTree = "<group>"; };
 		CD000000000000000000F0F1 /* SyncStateDAO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStateDAO.swift; sourceTree = "<group>"; };
 		CD00000000000000000001A6 /* BackgroundSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSession.swift; sourceTree = "<group>"; };
 		CD00000000000000000001A8 /* WebhookTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookTester.swift; sourceTree = "<group>"; };
@@ -145,6 +163,8 @@
 		CD00000000000000000001E0 /* HealthKitAuthorizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitAuthorizerTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000152 /* DatabaseMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseMigrationTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000154 /* OutboxDAOTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutboxDAOTests.swift; sourceTree = "<group>"; };
+		CD00000000000000000009B0 /* WorkoutRouteReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutRouteReaderTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000707 /* ImportResumeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportResumeTests.swift; sourceTree = "<group>"; };
 		CD00000000000000000001F2 /* HistoryImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryImportTests.swift; sourceTree = "<group>"; };
 		CD00000000000000000001F4 /* ForwardCaptureFloorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForwardCaptureFloorTests.swift; sourceTree = "<group>"; };
 		CD00000000000000000002A0 /* RegistryReconcileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegistryReconcileTests.swift; sourceTree = "<group>"; };
@@ -153,6 +173,8 @@
 		CD0000000000000000000510 /* SnapshotSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotSupport.swift; sourceTree = "<group>"; };
 		CD0000000000000000000512 /* ScreenSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenSnapshotTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000520 /* AppStoreScreenshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStoreScreenshotTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000A10 /* OnboardingSkipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingSkipTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000A20 /* AnchoredReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnchoredReaderTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -238,6 +260,7 @@
 				CD0000000000000000000007 /* Generated */,
 				CD0000000000000000000120 /* WebhookConfig.swift */,
 				CD0000000000000000000122 /* DataTypeConfig.swift */,
+				CD0000000000000000000701 /* ImportProgress.swift */,
 				CD0000000000000000000124 /* OutboxRow.swift */,
 				CD00000000000000000001A2 /* DeliveryLogEntry.swift */,
 			);
@@ -277,6 +300,7 @@
 			children = (
 				CD0000000000000000000126 /* HealthTypeRegistry.swift */,
 				CD0000000000000000000128 /* HealthKitAuthorizer.swift */,
+				CD00000000000000000009A0 /* WorkoutRouteReader.swift */,
 				CD000000000000000000012A /* AnchoredReader.swift */,
 				CD0000000000000000000160 /* ObserverCoordinator.swift */,
 			);
@@ -288,6 +312,8 @@
 			children = (
 				CD0000000000000000000162 /* SyncEngine.swift */,
 				CD00000000000000000001F0 /* HistoryImporter.swift */,
+				CD0000000000000000000705 /* ImportRunner.swift */,
+				CD0000000000000000000801 /* ImportBackgroundCoordinator.swift */,
 				CD0000000000000000000164 /* Throttle.swift */,
 				CD0000000000000000000166 /* Batcher.swift */,
 			);
@@ -314,6 +340,7 @@
 				CD0000000000000000000132 /* OutboxDAO.swift */,
 				CD00000000000000000001A4 /* DeliveryLogDAO.swift */,
 				CD000000000000000000F0F1 /* SyncStateDAO.swift */,
+				CD0000000000000000000703 /* ImportProgressDAO.swift */,
 			);
 			path = Storage;
 			sourceTree = "<group>";
@@ -385,7 +412,10 @@
 				CD00000000000000000001E0 /* HealthKitAuthorizerTests.swift */,
 				CD0000000000000000000152 /* DatabaseMigrationTests.swift */,
 				CD0000000000000000000154 /* OutboxDAOTests.swift */,
+				CD00000000000000000009B0 /* WorkoutRouteReaderTests.swift */,
 				CD00000000000000000001F2 /* HistoryImportTests.swift */,
+				CD0000000000000000000707 /* ImportResumeTests.swift */,
+				CD0000000000000000000803 /* ImportBackgroundTests.swift */,
 				CD00000000000000000001F4 /* ForwardCaptureFloorTests.swift */,
 				CD00000000000000000002A0 /* RegistryReconcileTests.swift */,
 				CD0000000000000000000156 /* StorageDAOTests.swift */,
@@ -398,6 +428,9 @@
 				CD0000000000000000000510 /* SnapshotSupport.swift */,
 				CD0000000000000000000512 /* ScreenSnapshotTests.swift */,
 				CD0000000000000000000520 /* AppStoreScreenshotTests.swift */,
+				CD0000000000000000000A10 /* OnboardingSkipTests.swift */,
+				CD0000000000000000000A20 /* AnchoredReaderTests.swift */,
+				CD0000000000000000000A30 /* RunningDynamicsEvidenceTests.swift */,
 			);
 			path = ConduitTests;
 			sourceTree = "<group>";
@@ -517,6 +550,7 @@
 				CD0000000000000000000125 /* OutboxRow.swift in Sources */,
 				CD0000000000000000000127 /* HealthTypeRegistry.swift in Sources */,
 				CD0000000000000000000129 /* HealthKitAuthorizer.swift in Sources */,
+				CD00000000000000000009A1 /* WorkoutRouteReader.swift in Sources */,
 				CD000000000000000000012B /* AnchoredReader.swift in Sources */,
 				CD000000000000000000012D /* Database.swift in Sources */,
 				CD000000000000000000012F /* WebhookConfigDAO.swift in Sources */,
@@ -532,6 +566,10 @@
 				CD00000000000000000001A1 /* AppState.swift in Sources */,
 				CD00000000000000000001A3 /* DeliveryLogEntry.swift in Sources */,
 				CD00000000000000000001A5 /* DeliveryLogDAO.swift in Sources */,
+				CD0000000000000000000702 /* ImportProgress.swift in Sources */,
+				CD0000000000000000000704 /* ImportProgressDAO.swift in Sources */,
+				CD0000000000000000000706 /* ImportRunner.swift in Sources */,
+				CD0000000000000000000802 /* ImportBackgroundCoordinator.swift in Sources */,
 				CD000000000000000000F0F2 /* SyncStateDAO.swift in Sources */,
 				CD00000000000000000001A7 /* BackgroundSession.swift in Sources */,
 				CD00000000000000000001A9 /* WebhookTester.swift in Sources */,
@@ -562,7 +600,10 @@
 				CD00000000000000000001E1 /* HealthKitAuthorizerTests.swift in Sources */,
 				CD0000000000000000000153 /* DatabaseMigrationTests.swift in Sources */,
 				CD0000000000000000000155 /* OutboxDAOTests.swift in Sources */,
+				CD00000000000000000009B1 /* WorkoutRouteReaderTests.swift in Sources */,
 				CD00000000000000000001F3 /* HistoryImportTests.swift in Sources */,
+				CD0000000000000000000708 /* ImportResumeTests.swift in Sources */,
+				CD0000000000000000000804 /* ImportBackgroundTests.swift in Sources */,
 				CD00000000000000000001F5 /* ForwardCaptureFloorTests.swift in Sources */,
 				CD00000000000000000002A1 /* RegistryReconcileTests.swift in Sources */,
 				CD0000000000000000000157 /* StorageDAOTests.swift in Sources */,
@@ -575,6 +616,9 @@
 				CD0000000000000000000511 /* SnapshotSupport.swift in Sources */,
 				CD0000000000000000000513 /* ScreenSnapshotTests.swift in Sources */,
 				CD0000000000000000000521 /* AppStoreScreenshotTests.swift in Sources */,
+				CD0000000000000000000A11 /* OnboardingSkipTests.swift in Sources */,
+				CD0000000000000000000A21 /* AnchoredReaderTests.swift in Sources */,
+				CD0000000000000000000A31 /* RunningDynamicsEvidenceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -729,7 +773,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.4;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.Conduit;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -755,7 +799,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.4;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.Conduit;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -773,7 +817,7 @@
 				DEVELOPMENT_TEAM = 3K72BT899D;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.4;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.ConduitTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -792,7 +836,7 @@
 				DEVELOPMENT_TEAM = 3K72BT899D;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.4;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.ConduitTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;

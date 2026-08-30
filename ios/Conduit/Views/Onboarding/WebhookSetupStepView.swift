@@ -65,22 +65,39 @@ struct WebhookSetupStepView: View {
             .padding(24)
         }
         .safeAreaInset(edge: .bottom) {
-            Button(action: { viewModel.advance() }) {
-                Text("Continue")
+            VStack(spacing: 12) {
+                Button(action: { viewModel.advance() }) {
+                    Text("Continue")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(!viewModel.canAdvanceFromWebhookSetup || viewModel.webhookURL.isEmpty || viewModel.tokenInput.isEmpty)
+                .accessibilityLabel("Continue to data type selection")
+                .accessibilityHint(
+                    viewModel.canAdvanceFromWebhookSetup
+                        ? "Tap to continue"
+                        : "Test Connection must succeed first"
+                )
+
+                Button(action: { viewModel.skipWebhookSetup() }) {
+                    VStack(spacing: 2) {
+                        Text("Skip for now")
+                            .font(.body.weight(.semibold))
+                        Text("Set up later in Settings")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.large)
+                .accessibilityLabel("Skip for now")
+                .accessibilityHint("You can add and test a webhook later in Settings. The app works without one.")
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(!viewModel.canAdvanceFromWebhookSetup || viewModel.webhookURL.isEmpty || viewModel.tokenInput.isEmpty)
             .padding(.horizontal, 24)
             .padding(.vertical, 16)
             .background(.regularMaterial)
-            .accessibilityLabel("Continue to data type selection")
-            .accessibilityHint(
-                viewModel.canAdvanceFromWebhookSetup
-                    ? "Tap to continue"
-                    : "Test Connection must succeed first"
-            )
         }
         .navigationTitle("Webhook")
     }

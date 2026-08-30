@@ -21,6 +21,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // observer background delivery is throttled/skipped, so sync no longer
         // depends solely on observer wakes (§4.4).
         AppState.shared.syncEngine.registerBackgroundTask()
+        // Second, separate background task: resuming a paused "Import history"
+        // run. Registered here for the same reason (all handlers must exist by
+        // the end of launch) and on its own identifier, so the upload-drain task
+        // above is completely unaffected.
+        AppState.shared.importBackground.registerBackgroundTask()
         // Returning users: first reconcile the persisted config + HealthKit
         // authorization against the current registry, so data types added in an
         // app update (e.g. appleStandHour) are auto-enabled and get a one-time
@@ -34,6 +39,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             Task { @MainActor in
                 await AppState.shared.reconcileRegistry()
                 AppState.shared.startDataCapture()
+                // A run the app died in the middle of is reconciled to
+                // "interrupted, auto-resumable" when its status is read, so this
+                // launch continues it instead of waiting for the user to find
+                // Settings → Import History and tap Resume.
+                await AppState.shared.importBackground.resumePausedRun(trigger: "launch")
             }
         }
         return true
@@ -42,9 +52,21 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     /// Refresh the pending background flush whenever we background, so iOS always
     /// has a request to run while we're suspended (belt-and-suspenders alongside
     /// the observer-wake and post-flush scheduling).
+    ///
+    /// A live import is also stopped **cleanly** here: we hold a background-task
+    /// assertion just long enough for the page it is reading to finish and
+    /// checkpoint, then ask iOS for a window to continue in.
     func applicationDidEnterBackground(_ application: UIApplication) {
         guard AppState.shared.isOnboardingComplete else { return }
         AppState.shared.syncEngine.scheduleBackgroundFlush()
+        AppState.shared.importBackground.applicationDidEnterBackground(application)
+    }
+
+    /// Continue a paused import as soon as the user comes back, rather than
+    /// making them tap Resume. An import they cancelled stays cancelled.
+    func applicationWillEnterForeground(_ application: UIApplication) {
+        guard AppState.shared.isOnboardingComplete else { return }
+        AppState.shared.importBackground.applicationWillEnterForeground()
     }
 
     /// iOS relaunches the app to deliver background URLSession events when it
