@@ -1,0 +1,398 @@
+{
+  "$defs": {
+    "CategoryValue": {
+      "properties": {
+        "value": {
+          "description": "The raw HealthKit category enum integer. Absent entirely (not 0) when it is 0 — see valueName for the trap this causes in practice (e.g. AppleStandHour's \"stood\" value is 0).",
+          "type": "integer"
+        },
+        "valueName": {
+          "description": "The stable, non-localized HealthKit enum name, e.g. \"asleepREM\", \"stood\". Prefer this over the raw integer — it never changes across OS locales or versions.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "CorrelationValue": {
+      "properties": {
+        "components": {
+          "description": "The correlation's component samples, each a full Sample with its own uuid/source. v1 supports only blood pressure: exactly two quantity components, systolic then diastolic ordering is by VALUE (the higher reading is systolic), both in mmHg.",
+          "items": {
+            "$ref": "#/$defs/Sample"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "Envelope": {
+      "properties": {
+        "batchId": {
+          "description": "Dedupe key for the whole batch. NOT a sample key: the same sample can legitimately arrive again under a new batchId after a client-side retry.",
+          "type": "string"
+        },
+        "batches": {
+          "description": "Samples grouped by HealthKit type. Absent entirely (not an empty array) on the zero-batch Test Connection probe — see the HTTP contract.",
+          "items": {
+            "$ref": "#/$defs/SampleBatch"
+          },
+          "type": "array"
+        },
+        "deviceId": {
+          "description": "Keychain-stable UUID identifying the sending device. Stable across reinstalls; not a secret.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": "v1",
+          "description": "Wire format version. Always \"v1\" — reject anything else.",
+          "type": "string"
+        },
+        "sentAtUnixMs": {
+          "description": "Unix time in milliseconds when the client sent this envelope.",
+          "pattern": "^-?[0-9]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion"
+      ],
+      "type": "object"
+    },
+    "QuantityValue": {
+      "properties": {
+        "unit": {
+          "description": "A HealthKit unit string, e.g. \"count/min\", \"kg\", \"m\", \"kcal\".",
+          "type": "string"
+        },
+        "value": {
+          "description": "The measurement. Absent entirely (not 0) when the true value is zero — proto3 canonical JSON omits default-valued scalars. Treat a missing value as 0, not as \"no data\".",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "RoutePoint": {
+      "properties": {
+        "altitudeM": {
+          "description": "Ellipsoidal altitude, metres.",
+          "type": "number"
+        },
+        "courseDeg": {
+          "description": "Direction of travel, degrees. Negative means invalid — do not treat it as a real reading.",
+          "type": "number"
+        },
+        "horizontalAccuracyM": {
+          "description": "Horizontal accuracy, metres.",
+          "type": "number"
+        },
+        "lat": {
+          "description": "Latitude, degrees.",
+          "type": "number"
+        },
+        "lng": {
+          "description": "Longitude, degrees.",
+          "type": "number"
+        },
+        "speedMps": {
+          "description": "Ground speed, metres/second. Negative means invalid — do not treat it as a real reading.",
+          "type": "number"
+        },
+        "timestampUnixMs": {
+          "description": "Point timestamp, Unix milliseconds.",
+          "pattern": "^-?[0-9]+$",
+          "type": "string"
+        },
+        "verticalAccuracyM": {
+          "description": "Vertical accuracy, metres. Negative means invalid — do not treat it as a real reading.",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "RouteValue": {
+      "properties": {
+        "activityType": {
+          "description": "The parent workout's activity type, denormalized here for convenience.",
+          "type": "string"
+        },
+        "points": {
+          "description": "Ordered oldest-to-newest location points. May be downsampled on-device — treat point_count/distance as describing the delivered path, not a guaranteed raw series.",
+          "items": {
+            "$ref": "#/$defs/RoutePoint"
+          },
+          "type": "array"
+        },
+        "workoutUuid": {
+          "description": "Foreign key: the uuid of the workout Sample this route belongs to.",
+          "format": "uuid",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Sample": {
+      "allOf": [
+        {
+          "not": {
+            "required": [
+              "quantity",
+              "category"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "quantity",
+              "workout"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "quantity",
+              "correlation"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "quantity",
+              "route"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "category",
+              "workout"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "category",
+              "correlation"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "category",
+              "route"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "workout",
+              "correlation"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "workout",
+              "route"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "correlation",
+              "route"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "category": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/CategoryValue"
+            }
+          ],
+          "description": "Present when this sample is a HealthKit category value (sleep stage, stand hour, ...). Exactly one of quantity/category/workout/correlation/route is ever present."
+        },
+        "correlation": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/CorrelationValue"
+            }
+          ],
+          "description": "Present when this sample is a HealthKit correlation (v1: blood pressure). Exactly one of quantity/category/workout/correlation/route is ever present."
+        },
+        "endUnixMs": {
+          "description": "Sample end time, Unix milliseconds. Equal to startUnixMs for an instantaneous sample.",
+          "pattern": "^-?[0-9]+$",
+          "type": "string"
+        },
+        "quantity": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/QuantityValue"
+            }
+          ],
+          "description": "Present when this sample is a scalar measurement (heart rate, steps, weight, ...). Exactly one of quantity/category/workout/correlation/route is ever present."
+        },
+        "route": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/RouteValue"
+            }
+          ],
+          "description": "Present when this sample is a workout's GPS route. Exactly one of quantity/category/workout/correlation/route is ever present."
+        },
+        "source": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Source"
+            }
+          ],
+          "description": "The HealthKit source (app/device) that recorded this sample."
+        },
+        "startUnixMs": {
+          "description": "Sample start time, Unix milliseconds.",
+          "pattern": "^-?[0-9]+$",
+          "type": "string"
+        },
+        "uuid": {
+          "description": "The HealthKit sample UUID — this is the dedupe key. Delivery is at-least-once; a receiver MUST treat a repeated uuid as a no-op.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "workout": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/WorkoutValue"
+            }
+          ],
+          "description": "Present when this sample is a workout summary. Exactly one of quantity/category/workout/correlation/route is ever present."
+        }
+      },
+      "type": "object"
+    },
+    "SampleBatch": {
+      "properties": {
+        "deletedUuids": {
+          "description": "UUIDs of samples HealthKit reported deleted for this hkTypeId since the last read. Delete or tombstone them in your store — ignoring this list leaves ghost rows behind. A repeated delete for an already-absent UUID is normal and must not be treated as an error.",
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "hkTypeId": {
+          "description": "The HealthKit type identifier for every sample in this batch, e.g. \"HKQuantityTypeIdentifierHeartRate\".",
+          "type": "string"
+        },
+        "samples": {
+          "description": "The samples in this batch.",
+          "items": {
+            "$ref": "#/$defs/Sample"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "Source": {
+      "properties": {
+        "bundleId": {
+          "description": "The recording app or device's bundle identifier. May be empty.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Human-readable source name, e.g. \"Noe's Apple Watch\". May be empty.",
+          "type": "string"
+        },
+        "productType": {
+          "description": "Device model identifier, e.g. \"Watch7,1\". May be empty.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "WorkoutEvent": {
+      "properties": {
+        "endUnixMs": {
+          "description": "Event end time, Unix milliseconds. Only lap and segment events span time; every other type is an instant, where this equals startUnixMs.",
+          "pattern": "^-?[0-9]+$",
+          "type": "string"
+        },
+        "startUnixMs": {
+          "description": "Event start time, Unix milliseconds.",
+          "pattern": "^-?[0-9]+$",
+          "type": "string"
+        },
+        "type": {
+          "description": "The event kind: \"pause\", \"resume\", \"lap\", \"marker\", \"motionPaused\", \"motionResumed\", \"segment\", \"pauseOrResumeRequest\", or \"eventType\u003cN\u003e\" for a raw HKWorkoutEventType not in that set.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "WorkoutValue": {
+      "properties": {
+        "activityType": {
+          "description": "A compact activity name from a curated set (e.g. \"running\", \"cycling\"), or \"activityTypeN\" for a raw HKWorkoutActivityType value not in that set. Stable but not exhaustive.",
+          "type": "string"
+        },
+        "avgHeartRateBpm": {
+          "description": "Average heart rate over the samples HealthKit itself associates with this workout — not a time-window guess. Absent entirely (not 0) when the workout carries no heart-rate samples.",
+          "type": "number"
+        },
+        "brandName": {
+          "description": "HKMetadataKeyWorkoutBrandName. HealthKit has no user-entered workout name; this is the closest thing it exposes, and only some third-party / gym-class / Fitness+ writers set it. Absent for most Apple Watch workouts — that is the expected steady state, not missing data.",
+          "type": "string"
+        },
+        "durationSeconds": {
+          "description": "Workout duration in seconds.",
+          "type": "number"
+        },
+        "events": {
+          "description": "HKWorkout.workoutEvents, ordered oldest to newest. Absent for most workouts — only laps, segments and pause/resume activity produce entries.",
+          "items": {
+            "$ref": "#/$defs/WorkoutEvent"
+          },
+          "type": "array"
+        },
+        "isIndoor": {
+          "description": "HKMetadataKeyIndoorWorkout. Absent and false are DIFFERENT answers here: absent means the writer never said, false means it explicitly said outdoor. Present as false on the wire when the writer said outdoor.",
+          "type": "boolean"
+        },
+        "maxHeartRateBpm": {
+          "description": "Maximum heart rate over the samples HealthKit itself associates with this workout. Absent entirely (not 0) when the workout carries no heart-rate samples.",
+          "type": "number"
+        },
+        "minHeartRateBpm": {
+          "description": "Minimum heart rate over the samples HealthKit itself associates with this workout. Absent entirely (not 0) when the workout carries no heart-rate samples.",
+          "type": "number"
+        },
+        "totalDistanceM": {
+          "description": "Total distance, metres. 0 for a non-distance workout (absent on the wire in that case).",
+          "type": "number"
+        },
+        "totalEnergyKcal": {
+          "description": "Total active energy burned, kilocalories.",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/noebrito/conduit/blob/main/docs/webhook/envelope.schema.json",
+  "$ref": "#/$defs/Envelope",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The JSON body Conduit POSTs to your webhook. Generated from proto/conduit/v1/sync.proto — see PAYLOADS.md for the human-readable reference.",
+  "title": "Conduit webhook envelope"
+}

@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "v1",
+  "batchId": "6a3f8c15-2d94-4e7b-8f01-3c6a9e2d5f84",
+  "deviceId": "6d2f9b0c-7a41-4e58-b0d3-9c1e4f7a2b66",
+  "sentAtUnixMs": "1756661104512",
+  "batches": [
+    {
+      "hkTypeId": "HKWorkoutRouteTypeIdentifier",
+      "samples": [
+        {
+          "uuid": "8c4e1a76-5b39-4d0f-9a72-4e8c1b6d3a95",
+          "startUnixMs": "1756656000000",
+          "endUnixMs": "1756657800000",
+          "source": {
+            "name": "Noe's Apple Watch",
+            "bundleId": "com.apple.health.9E1F2C3D-4A5B-6C7D-8E9F-0A1B2C3D4E5F",
+            "productType": "Watch7,1"
+          },
+          "route": {
+            "workoutUuid": "f4a8d1e6-2b73-4c9f-8e05-1a6c3d8f4b92",
+            "activityType": "running",
+            "points": [
+              {
+                "lat": 34.0967,
+                "lng": -117.7198,
+                "altitudeM": 365.2,
+                "timestampUnixMs": "1756656000000",
+                "horizontalAccuracyM": 5.0,
+                "verticalAccuracyM": 3.0,
+                "speedMps": 2.8,
+                "courseDeg": 145.0
+              },
+              {
+                "lat": 34.0951,
+                "lng": -117.7183,
+                "altitudeM": 371.8,
+                "timestampUnixMs": "1756657800000",
+                "horizontalAccuracyM": 5.0,
+                "verticalAccuracyM": 3.0,
+                "speedMps": 3.1,
+                "courseDeg": 138.0
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

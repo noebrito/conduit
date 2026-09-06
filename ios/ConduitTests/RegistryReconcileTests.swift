@@ -275,6 +275,87 @@ final class RegistryReconcileTests: XCTestCase {
         XCTAssertEqual(authorizeCalls, 1, "the persisted signature must suppress a second prompt")
     }
 
+    // MARK: - Athlete metrics ("Batch 1") upgrade path
+
+    /// The end-to-end upgrade for a user who onboarded before the athlete-metrics
+    /// batch shipped: rows + stored signature for every type EXCEPT these nine.
+    /// Both gates must fire off the same reconcile — athlete metrics land enabled
+    /// by default, and the grown read set re-prompts exactly once with the new
+    /// types in the sheet. Like running dynamics (and unlike nutrition), these
+    /// land inside the pre-existing Activity & Fitness category, so the seed here
+    /// filters by identifier rather than by category.
+    ///
+    /// Two of the nine (the workout effort scores) are iOS 18+, and the app's
+    /// deployment target is iOS 17.0 — on an iOS 17.x test runner
+    /// `HealthDataType.authorizationTypes` contributes nothing for those two, so
+    /// they never appear in `readTypes`/`lastRequested`. Gate 2's per-identifier
+    /// assertion is therefore scoped to identifiers actually available on the
+    /// running OS, mirroring the same gate in `HealthTypeRegistryTests`.
+    @MainActor
+    func testAthleteMetricsAreAutoEnabledAndRePromptedOnceOnUpgrade() async throws {
+        let appState = AppState(database: appDB)
+        let dao = DataTypeConfigDAO(appDB)
+        let defaults = try makeCleanDefaults()
+        let athleteMetricIDs = [
+            HealthDataType.heartRateRecoveryOneMinute.identifier,
+            HealthDataType.physicalEffort.identifier,
+            HealthDataType.cyclingPower.identifier,
+            HealthDataType.cyclingCadence.identifier,
+            HealthDataType.cyclingSpeed.identifier,
+            HealthDataType.cyclingFunctionalThresholdPower.identifier,
+            HealthDataType.swimmingStrokeCount.identifier,
+            HealthDataType.workoutEffortScore.identifier,
+            HealthDataType.estimatedWorkoutEffortScore.identifier,
+        ]
+        let availableAthleteMetricIDs = athleteMetricIDs.filter {
+            HealthTypeRegistry.shared.type(forIdentifier: $0)?.sampleType != nil
+        }
+
+        // Seed a pre-upgrade install: every other type configured, and the stored
+        // signature is the pre-upgrade read set.
+        for type in HealthTypeRegistry.shared.all where !athleteMetricIDs.contains(type.identifier) {
+            try dao.setEnabled(true, hkTypeId: type.identifier)
+        }
+        let priorSignature = HealthTypeRegistry.shared.readTypes
+            .map(\.identifier)
+            .filter { !athleteMetricIDs.contains($0) }
+            .sorted()
+            .joined(separator: ",")
+        defaults.set(priorSignature, forKey: AppState.authorizedSignatureKey)
+        XCTAssertNotEqual(priorSignature, AppState.authorizedTypesSignature(),
+                          "registering athlete metrics must GROW the signature — that growth is what triggers the re-prompt")
+
+        var authorizeCalls = 0
+        var lastRequested: [HealthDataType] = []
+        let authorize: (_ types: [HealthDataType]) async throws -> Void = { types in
+            authorizeCalls += 1
+            lastRequested = types
+        }
+
+        await appState.reconcileRegistry(registry: .shared, defaults: defaults, authorize: authorize)
+
+        // Gate 1: athlete metrics are on by default — no manual toggling on
+        // upgrade. This is a static registry-driven insert, independent of
+        // whether the identifier resolves on the running OS, so it applies to
+        // all nine unconditionally.
+        for id in athleteMetricIDs {
+            let row = try XCTUnwrap(try dao.find(hkTypeId: id), "no config row written for \(id)")
+            XCTAssertTrue(row.enabled, "\(id) must be enabled by default after upgrade")
+        }
+
+        // Gate 2: exactly one authorization request, and the sheet lists every
+        // athlete metric available on the running OS.
+        XCTAssertEqual(authorizeCalls, 1, "the grown read set must re-prompt exactly once")
+        let requestedIDs = Set(lastRequested.map(\.identifier))
+        for id in availableAthleteMetricIDs {
+            XCTAssertTrue(requestedIDs.contains(id), "authorization request must include \(id)")
+        }
+
+        // A second launch does not re-prompt.
+        await appState.reconcileRegistry(registry: .shared, defaults: defaults, authorize: authorize)
+        XCTAssertEqual(authorizeCalls, 1, "the persisted signature must suppress a second prompt")
+    }
+
     // MARK: - Helpers
 
     /// A private, empty `UserDefaults` suite so tests never read or mutate the

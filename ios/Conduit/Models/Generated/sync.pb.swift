@@ -209,6 +209,82 @@ public nonisolated struct Conduit_V1_WorkoutValue: Sendable {
 
   public var totalDistanceM: Double = 0
 
+  /// HKMetadataKeyWorkoutBrandName. HealthKit has NO user-entered workout name;
+  /// this is the closest thing HealthKit exposes and is set only by some
+  /// third-party / gym-class / Fitness+ writers. Empty for most Apple Watch
+  /// workouts — that is the expected steady state, not a bug.
+  public var brandName: String = String()
+
+  /// HKMetadataKeyIndoorWorkout. `optional` because false ("outdoor") and absent
+  /// ("the writer didn't say") are genuinely different answers.
+  public var isIndoor: Bool {
+    get {_isIndoor ?? false}
+    set {_isIndoor = newValue}
+  }
+  /// Returns true if `isIndoor` has been explicitly set.
+  public var hasIsIndoor: Bool {self._isIndoor != nil}
+  /// Clears the value of `isIndoor`. Subsequent reads from it will return its default value.
+  public mutating func clearIsIndoor() {self._isIndoor = nil}
+
+  /// HKWorkout.statistics(for: .heartRate) — statistics HealthKit itself computed
+  /// over the samples ASSOCIATED WITH this workout, NOT a time-window guess.
+  /// Absent entirely (not 0) when the workout carries no heart-rate samples.
+  public var avgHeartRateBpm: Double {
+    get {_avgHeartRateBpm ?? 0}
+    set {_avgHeartRateBpm = newValue}
+  }
+  /// Returns true if `avgHeartRateBpm` has been explicitly set.
+  public var hasAvgHeartRateBpm: Bool {self._avgHeartRateBpm != nil}
+  /// Clears the value of `avgHeartRateBpm`. Subsequent reads from it will return its default value.
+  public mutating func clearAvgHeartRateBpm() {self._avgHeartRateBpm = nil}
+
+  public var maxHeartRateBpm: Double {
+    get {_maxHeartRateBpm ?? 0}
+    set {_maxHeartRateBpm = newValue}
+  }
+  /// Returns true if `maxHeartRateBpm` has been explicitly set.
+  public var hasMaxHeartRateBpm: Bool {self._maxHeartRateBpm != nil}
+  /// Clears the value of `maxHeartRateBpm`. Subsequent reads from it will return its default value.
+  public mutating func clearMaxHeartRateBpm() {self._maxHeartRateBpm = nil}
+
+  public var minHeartRateBpm: Double {
+    get {_minHeartRateBpm ?? 0}
+    set {_minHeartRateBpm = newValue}
+  }
+  /// Returns true if `minHeartRateBpm` has been explicitly set.
+  public var hasMinHeartRateBpm: Bool {self._minHeartRateBpm != nil}
+  /// Clears the value of `minHeartRateBpm`. Subsequent reads from it will return its default value.
+  public mutating func clearMinHeartRateBpm() {self._minHeartRateBpm = nil}
+
+  /// HKWorkout.workoutEvents, ordered oldest -> newest. Empty for most workouts.
+  public var events: [Conduit_V1_WorkoutEvent] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _isIndoor: Bool? = nil
+  fileprivate var _avgHeartRateBpm: Double? = nil
+  fileprivate var _maxHeartRateBpm: Double? = nil
+  fileprivate var _minHeartRateBpm: Double? = nil
+}
+
+/// One HKWorkoutEvent. Only `lap` and `segment` carry a nonzero duration; every
+/// other type is an instant, where end == start.
+public nonisolated struct Conduit_V1_WorkoutEvent: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// "pause"|"resume"|"lap"|"marker"|"motionPaused"|
+  public var type: String = String()
+
+  /// "motionResumed"|"segment"|"pauseOrResumeRequest"|"eventType<N>"
+  public var startUnixMs: Int64 = 0
+
+  /// dateInterval.end
+  public var endUnixMs: Int64 = 0
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -629,7 +705,7 @@ nonisolated extension Conduit_V1_CategoryValue: SwiftProtobuf.Message, SwiftProt
 
 nonisolated extension Conduit_V1_WorkoutValue: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".WorkoutValue"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}activity_type\0\u{3}duration_seconds\0\u{3}total_energy_kcal\0\u{3}total_distance_m\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}activity_type\0\u{3}duration_seconds\0\u{3}total_energy_kcal\0\u{3}total_distance_m\0\u{3}brand_name\0\u{3}is_indoor\0\u{3}avg_heart_rate_bpm\0\u{3}max_heart_rate_bpm\0\u{3}min_heart_rate_bpm\0\u{1}events\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -641,12 +717,22 @@ nonisolated extension Conduit_V1_WorkoutValue: SwiftProtobuf.Message, SwiftProto
       case 2: try { try decoder.decodeSingularDoubleField(value: &self.durationSeconds) }()
       case 3: try { try decoder.decodeSingularDoubleField(value: &self.totalEnergyKcal) }()
       case 4: try { try decoder.decodeSingularDoubleField(value: &self.totalDistanceM) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.brandName) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self._isIndoor) }()
+      case 7: try { try decoder.decodeSingularDoubleField(value: &self._avgHeartRateBpm) }()
+      case 8: try { try decoder.decodeSingularDoubleField(value: &self._maxHeartRateBpm) }()
+      case 9: try { try decoder.decodeSingularDoubleField(value: &self._minHeartRateBpm) }()
+      case 10: try { try decoder.decodeRepeatedMessageField(value: &self.events) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.activityType.isEmpty {
       try visitor.visitSingularStringField(value: self.activityType, fieldNumber: 1)
     }
@@ -659,6 +745,24 @@ nonisolated extension Conduit_V1_WorkoutValue: SwiftProtobuf.Message, SwiftProto
     if self.totalDistanceM.bitPattern != 0 {
       try visitor.visitSingularDoubleField(value: self.totalDistanceM, fieldNumber: 4)
     }
+    if !self.brandName.isEmpty {
+      try visitor.visitSingularStringField(value: self.brandName, fieldNumber: 5)
+    }
+    try { if let v = self._isIndoor {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 6)
+    } }()
+    try { if let v = self._avgHeartRateBpm {
+      try visitor.visitSingularDoubleField(value: v, fieldNumber: 7)
+    } }()
+    try { if let v = self._maxHeartRateBpm {
+      try visitor.visitSingularDoubleField(value: v, fieldNumber: 8)
+    } }()
+    try { if let v = self._minHeartRateBpm {
+      try visitor.visitSingularDoubleField(value: v, fieldNumber: 9)
+    } }()
+    if !self.events.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.events, fieldNumber: 10)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -667,6 +771,52 @@ nonisolated extension Conduit_V1_WorkoutValue: SwiftProtobuf.Message, SwiftProto
     if lhs.durationSeconds != rhs.durationSeconds {return false}
     if lhs.totalEnergyKcal != rhs.totalEnergyKcal {return false}
     if lhs.totalDistanceM != rhs.totalDistanceM {return false}
+    if lhs.brandName != rhs.brandName {return false}
+    if lhs._isIndoor != rhs._isIndoor {return false}
+    if lhs._avgHeartRateBpm != rhs._avgHeartRateBpm {return false}
+    if lhs._maxHeartRateBpm != rhs._maxHeartRateBpm {return false}
+    if lhs._minHeartRateBpm != rhs._minHeartRateBpm {return false}
+    if lhs.events != rhs.events {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Conduit_V1_WorkoutEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".WorkoutEvent"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}type\0\u{3}start_unix_ms\0\u{3}end_unix_ms\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.type) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.startUnixMs) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.endUnixMs) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.type.isEmpty {
+      try visitor.visitSingularStringField(value: self.type, fieldNumber: 1)
+    }
+    if self.startUnixMs != 0 {
+      try visitor.visitSingularInt64Field(value: self.startUnixMs, fieldNumber: 2)
+    }
+    if self.endUnixMs != 0 {
+      try visitor.visitSingularInt64Field(value: self.endUnixMs, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Conduit_V1_WorkoutEvent, rhs: Conduit_V1_WorkoutEvent) -> Bool {
+    if lhs.type != rhs.type {return false}
+    if lhs.startUnixMs != rhs.startUnixMs {return false}
+    if lhs.endUnixMs != rhs.endUnixMs {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

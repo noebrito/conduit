@@ -184,6 +184,51 @@ extension HealthDataType {
     static let runningVerticalOscillation = HealthDataType(identifier: HKQuantityTypeIdentifier.runningVerticalOscillation.rawValue, displayName: "Running Vertical Oscillation", category: .activityFitness, defaultUnit: "cm", stream: .quantity)
     static let runningGroundContactTime = HealthDataType(identifier: HKQuantityTypeIdentifier.runningGroundContactTime.rawValue, displayName: "Running Ground Contact Time", category: .activityFitness, defaultUnit: "ms", stream: .quantity)
 
+    // Athlete Metrics ("Batch 1") → conduit-quantity. Same registry-only pattern
+    // as running dynamics above — plain quantities riding the existing stream.
+    // Three sub-groups, each with its own real-world recording requirement (see
+    // privacy.html for the user-facing wording):
+    //   - Heart-rate recovery + physical effort: iOS 16 / iOS 17 respectively,
+    //     recorded by Apple Watch after/during a workout. Physical effort
+    //     carries an HK metadata key distinguishing activityLookup vs
+    //     deviceSensed readings, but Conduit's `AnchoredReader.makeSample`
+    //     reads no sample metadata at all, so that distinction never reaches
+    //     the wire — not a defect, out of scope.
+    //   - Cycling power/cadence/speed/FTP: iOS 17, produced only when a
+    //     Bluetooth cycling power/cadence/speed accessory is paired. No
+    //     accessory ⇒ a permanently empty series, same as `dietaryWater`.
+    //   - Workout effort score / estimated workout effort score: iOS 18+ only
+    //     — the app's deployment target is iOS 17.0, so on an iOS 17 device
+    //     `HKObjectType.quantityType(forIdentifier:)` returns nil for these
+    //     two and the existing nil-skip path (`authorizationTypes`,
+    //     `ObserverCoordinator.start`, `AnchoredReader.read`) already handles
+    //     it end to end. Do NOT add `#available(iOS 18, *)` guards here — the
+    //     registry is deliberately string-keyed so availability is a runtime
+    //     property, and a compile-time guard would duplicate that working
+    //     mechanism. The unit is the literal string "appleEffortScore" — NOT
+    //     "count" — a wrong guess here compiles fine and traps at read time
+    //     (`doubleValue(for:)`), it does not produce a wrong number.
+    //     ⚠️ Their identifiers below MUST be spelled as string literals, NOT
+    //     `HKQuantityTypeIdentifier.workoutEffortScore.rawValue` — the SDK
+    //     marks those two static cases `@available(iOS 18.0, *)`, and merely
+    //     *referencing* the case (even just for `.rawValue`) fails to compile
+    //     at this file's iOS 17.0 deployment target, forcing an `@available`
+    //     annotation on this whole extension. Constructing the identifier
+    //     from a bare string sidesteps that entirely — `sampleType` already
+    //     rebuilds an `HKQuantityTypeIdentifier` via `init(rawValue:)`, which
+    //     is not itself version-gated, so this compiles at 17.0 and still
+    //     resolves correctly on iOS 18+ at runtime. Same idiom `.workout`/
+    //     `.workoutRoute` already use below for their synthetic identifiers.
+    static let heartRateRecoveryOneMinute = HealthDataType(identifier: HKQuantityTypeIdentifier.heartRateRecoveryOneMinute.rawValue, displayName: "Heart Rate Recovery (1 min)", category: .activityFitness, defaultUnit: "count/min", stream: .quantity)
+    static let physicalEffort = HealthDataType(identifier: HKQuantityTypeIdentifier.physicalEffort.rawValue, displayName: "Physical Effort", category: .activityFitness, defaultUnit: "kcal/kg*hr", stream: .quantity)
+    static let cyclingPower = HealthDataType(identifier: HKQuantityTypeIdentifier.cyclingPower.rawValue, displayName: "Cycling Power", category: .activityFitness, defaultUnit: "W", stream: .quantity)
+    static let cyclingCadence = HealthDataType(identifier: HKQuantityTypeIdentifier.cyclingCadence.rawValue, displayName: "Cycling Cadence", category: .activityFitness, defaultUnit: "count/min", stream: .quantity)
+    static let cyclingSpeed = HealthDataType(identifier: HKQuantityTypeIdentifier.cyclingSpeed.rawValue, displayName: "Cycling Speed", category: .activityFitness, defaultUnit: "m/s", stream: .quantity)
+    static let cyclingFunctionalThresholdPower = HealthDataType(identifier: HKQuantityTypeIdentifier.cyclingFunctionalThresholdPower.rawValue, displayName: "Cycling Functional Threshold Power (FTP)", category: .activityFitness, defaultUnit: "W", stream: .quantity)
+    static let swimmingStrokeCount = HealthDataType(identifier: HKQuantityTypeIdentifier.swimmingStrokeCount.rawValue, displayName: "Swimming Stroke Count", category: .activityFitness, defaultUnit: "count", stream: .quantity)
+    static let workoutEffortScore = HealthDataType(identifier: "HKQuantityTypeIdentifierWorkoutEffortScore", displayName: "Workout Effort Score", category: .activityFitness, defaultUnit: "appleEffortScore", stream: .quantity)
+    static let estimatedWorkoutEffortScore = HealthDataType(identifier: "HKQuantityTypeIdentifierEstimatedWorkoutEffortScore", displayName: "Estimated Workout Effort Score", category: .activityFitness, defaultUnit: "appleEffortScore", stream: .quantity)
+
     static let activityFitness: [HealthDataType] = [
         .heartRate, .restingHeartRate, .heartRateVariabilitySDNN, .walkingHeartRateAverage,
         .stepCount, .distanceWalkingRunning, .distanceCycling, .distanceSwimming,
@@ -191,6 +236,9 @@ extension HealthDataType {
         .appleExerciseTime, .appleStandTime, .appleStandHour, .vo2Max,
         .runningPower, .runningSpeed, .runningStrideLength,
         .runningVerticalOscillation, .runningGroundContactTime,
+        .heartRateRecoveryOneMinute, .physicalEffort,
+        .cyclingPower, .cyclingCadence, .cyclingSpeed, .cyclingFunctionalThresholdPower,
+        .swimmingStrokeCount, .workoutEffortScore, .estimatedWorkoutEffortScore,
     ]
 
     // Body Measurements → conduit-quantity

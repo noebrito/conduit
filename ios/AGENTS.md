@@ -4,6 +4,45 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - Add durable project-specific notes here as they are discovered through real work.
 
+## Workout enrichment capture (brand/indoor/HR stats/events) — `HKStatistics` cannot be constructed in a unit test
+
+`AnchoredReader`'s `.workout` case maps `HKWorkout` into the enriched `WorkoutValue` (server-side
+mapping + mapping fix already shipped — see the repo-root `conduit/AGENTS.md`'s "Adding a field to
+an EXISTING stream's mapping..."). It follows the same split `WorkoutRouteReader.makeRouteSample`
+uses: a thin, HealthKit-touching wrapper (in `case .workout:`) extracts values, and a pure static
+core (`AnchoredReader.makeWorkoutValue`) does the presence/absence mapping.
+
+**The split is drawn differently here than in the original design sketch, for a concrete reason:**
+`HKStatistics` (`workout.statistics(for:)`, avg/max/min heart rate) has `init` marked
+`NS_UNAVAILABLE` and no public factory method — it can genuinely never be constructed outside a live
+`HKWorkoutBuilder`/`HKLiveWorkoutBuilder`. So `makeWorkoutValue` takes **plain `Double?`**
+(`avgHeartRateBpm`/`maxHeartRateBpm`/`minHeartRateBpm`), already extracted by the thin wrapper, not
+an `HKStatistics?`. That is what makes the presence/absence branching (the part with actual
+behavior) fully unit-testable with real numbers; an `HKStatistics?`-typed parameter would leave the
+"present" branch permanently untestable no matter where the split falls. `HKWorkoutEvent`s, by
+contrast, genuinely can be constructed in a test (the deprecated
+`HKWorkout(activityType:start:end:workoutEvents:totalEnergyBurned:totalDistance:metadata:)`
+initializer and `HKWorkoutEvent(type:dateInterval:metadata:)` both work on an iOS 17 target,
+deprecation warning only), so `makeWorkoutValue` takes real `[HKWorkoutEvent]`.
+
+**Privacy gate:** `SyncEngine.includeHeartRateStatisticsForWorkouts()` resolves whether
+avg/max/min HR may be sent, from the user's own Heart Rate data-type toggle (`DataTypeConfigDAO`) —
+turning Heart Rate off suppresses these fields in the workout payload even though Workouts stays on.
+The public privacy policy (`conduit/api/internal/handler/privacy.html`, served at
+`https://health.noebrito.dev/privacy`) now promises exactly that, so the gate is a published,
+App-Review-facing contract — deleting it makes that copy false, not just less cautious.
+Threaded through `AnchoredReader.read`/`readImportPage`/`makeSample` as `includeHeartRateStatistics`
+(default `true`, so every pre-existing call site — routes, running dynamics, correlation tests — is
+unaffected). Any future workout-payload field with the same "derived from a toggleable type" shape
+should reuse this exact gate-resolution pattern rather than inventing a new one.
+
+**Still unverified on a real device:** whether `HKWorkoutBuilder`-recorded Apple Watch workouts
+actually populate `statistics(for:)` (no Apple Watch was available while implementing this).
+`WorkoutEnrichmentEvidenceTests` proves the mapping end-to-end, but its workout is built via the
+deprecated initializer, which never carries statistics — so it can only assert their honest
+*absence*, not prove presence on a real workout. Do this device check before shipping a
+TestFlight/App Store build that emits these fields.
+
 ## GPS routes are the one type NOT read by `AnchoredReader` — and they need no location permission
 
 `HKWorkoutRouteTypeIdentifier` (`HealthStream.route`) is registered like any other type, but it is
@@ -65,6 +104,12 @@ the code is fine; only the upload is refused. `ci_scripts/ci_post_clone.sh` only
 `CURRENT_PROJECT_VERSION` from `$CI_BUILD_NUMBER`, so the build number is never the problem;
 `MARKETING_VERSION` is hand-managed in `Conduit.xcodeproj/project.pbxproj` (4 occurrences — app +
 test target, Debug + Release; keep them equal).
+
+**A manual archive is not an escape hatch** — the refusal comes from App Store Connect, not Xcode
+Cloud, so an Organizer/Transporter upload of the same version is rejected too, just with the reason
+spelled out: `ITMS-90062` (`CFBundleShortVersionString` must exceed the approved version) and
+`ITMS-90186` (that version's pre-release train is **closed**, so no further build — TestFlight
+included — is accepted at that number). Treat either signature as the same problem.
 
 **So: bump `MARKETING_VERSION` as soon as the previous one is released, not at submission time.**
 Confirm what is actually live with
@@ -262,3 +307,10 @@ regression signal.
   `onAppear` load the static host doesn't pump), Activity is its empty state (no dated rows),
   Settings is seeded (`SnapshotFixtures.seedSettings`) because it loads in its **outer** `onAppear`.
   `setUp` clears any keychain webhook token so `hasToken` is stable.
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.

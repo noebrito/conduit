@@ -2,6 +2,40 @@ import XCTest
 import HealthKit
 @testable import Conduit
 
+/// The two registry identifiers HealthKit only vends on iOS 18+, while this
+/// project's deployment target is iOS 17.0 — the only entries in the whole
+/// registry whose `sampleType` is legitimately nil on a supported OS.
+///
+/// Spelled here as literals, deliberately duplicating `HealthTypeRegistry`'s own
+/// literals rather than reading `HealthDataType.workoutEffortScore.identifier`.
+/// Those two registry entries are the only ones the compiler cannot check (the
+/// SDK marks `HKQuantityTypeIdentifier.workoutEffortScore` /
+/// `.estimatedWorkoutEffortScore` `@available(iOS 18.0, *)`, so the enum cases
+/// cannot be referenced at a 17.0 deployment target), so an expectation derived
+/// from the registry would compare the registry against itself and pass green on
+/// a misspelling. Keep these as literals.
+///
+/// Declared once here and reused across the ConduitTests target — do not
+/// redeclare it per file.
+enum EffortScoreIdentifiers {
+    static let workout = "HKQuantityTypeIdentifierWorkoutEffortScore"
+    static let estimated = "HKQuantityTypeIdentifierEstimatedWorkoutEffortScore"
+    static let all: Set<String> = [workout, estimated]
+
+    /// Whether the RUNNING OS is new enough to know these identifiers.
+    ///
+    /// Keyed on the OS version, never on `HKObjectType.quantityType(forIdentifier:)
+    /// != nil` — a misspelled identifier also resolves to nil, so a
+    /// resolution-based gate would silently skip the very assertions that exist to
+    /// catch the typo.
+    static var isAvailableOnThisOS: Bool {
+        if #available(iOS 18, *) {
+            return true
+        }
+        return false
+    }
+}
+
 final class HealthTypeRegistryTests: XCTestCase {
     private let registry = HealthTypeRegistry.shared
 
@@ -26,8 +60,19 @@ final class HealthTypeRegistryTests: XCTestCase {
         }
     }
 
+    /// This is the only test that can catch a typo in the two effort-score
+    /// identifiers, which are hand-written string literals in the registry that no
+    /// compiler checks. So the skip below is deliberately narrow: it is keyed on
+    /// the OS version via `EffortScoreIdentifiers.isAvailableOnThisOS`, NOT on
+    /// `sampleType == nil`. A blanket nil-skip would swallow a misspelling on every
+    /// runner; this way an iOS 18+ runner still proves both spellings resolve, and
+    /// an iOS 17.x runner (a supported deployment target) does not fail on a
+    /// genuine, expected unavailability.
     func testEveryIdentifierResolvesToAnHKSampleType() {
         for type in registry.all {
+            if EffortScoreIdentifiers.all.contains(type.identifier), !EffortScoreIdentifiers.isAvailableOnThisOS {
+                continue
+            }
             XCTAssertNotNil(type.sampleType, "Unresolvable HK identifier: \(type.identifier)")
         }
     }
@@ -206,13 +251,20 @@ final class HealthTypeRegistryTests: XCTestCase {
     /// that is incompatible with the quantity type. So an incompatible unit is a
     /// crash at read time, not a bad number — assert every registered unit is
     /// compatible with its HK type.
+    ///
+    /// `sampleType` returns nil for an identifier the running OS doesn't know
+    /// (e.g. the iOS-18-only effort-score types on an iOS 17.x runner) — that is
+    /// a genuine, expected unavailability, not a unit bug, so it must `continue`
+    /// rather than fail the whole loop (which would mask every type after it).
+    /// Only a *registered quantity type with a nil unit* is a real failure.
     func testEveryQuantityUnitIsCompatibleWithItsHealthKitType() {
         for type in registry.all where type.stream == .quantity {
-            guard
-                let quantityType = type.sampleType as? HKQuantityType,
-                let unitString = type.defaultUnit
-            else {
-                return XCTFail("Quantity type without an HKQuantityType/unit: \(type.identifier)")
+            guard let quantityType = type.sampleType as? HKQuantityType else {
+                continue // Unavailable on this OS — not a unit-compatibility bug.
+            }
+            guard let unitString = type.defaultUnit else {
+                XCTFail("Quantity type without a unit: \(type.identifier)")
+                continue
             }
             XCTAssertTrue(
                 quantityType.is(compatibleWith: HKUnit(from: unitString)),
@@ -235,5 +287,81 @@ final class HealthTypeRegistryTests: XCTestCase {
         )
         // The server distinguishes stood from idle by the raw value: stood == 0.
         XCTAssertEqual(HKCategoryValueAppleStandHour.stood.rawValue, 0)
+    }
+
+    // MARK: - Athlete Metrics ("Batch 1")
+
+    /// The nine athlete-focused types added on top of running dynamics: heart-rate
+    /// recovery, physical effort, four cycling metrics, swimming stroke count, and
+    /// the two workout effort scores. Like nutrition and running dynamics, they
+    /// ride the plain quantity stream — registering them here is the whole
+    /// feature on the wire.
+    ///
+    /// Two of the nine (the effort scores) are iOS 18+; the app's deployment
+    /// target is iOS 17.0. On an iOS 17.x test runner `sampleType`/`readTypes`
+    /// membership for those two is legitimately absent, so that half of the
+    /// assertion is gated on the identifier actually being available on the
+    /// running OS rather than asserted unconditionally.
+    ///
+    /// Keyed by raw identifier `String`, not `HKQuantityTypeIdentifier` — the
+    /// SDK marks `.workoutEffortScore`/`.estimatedWorkoutEffortScore`
+    /// `@available(iOS 18.0, *)`, so referencing those cases directly (even as
+    /// a dictionary key) fails to compile at this target's 17.0 deployment
+    /// target. `HKQuantityTypeIdentifier(rawValue:)` is not itself
+    /// version-gated, so building a typed value from the string when one is
+    /// needed (below) compiles fine and still resolves correctly at runtime.
+    ///
+    /// The two effort-score keys come from `EffortScoreIdentifiers`, i.e. from
+    /// independent literals rather than from `HealthDataType.*.identifier` — the
+    /// registry's own spelling of those two is unchecked by the compiler, so
+    /// deriving the expectation from it would compare the registry against itself
+    /// and pass green on a misspelling. Here a misspelled registry literal makes
+    /// `type(forIdentifier:)` return nil and fails loudly on every runner.
+    func testAthleteMetricTypesAreRegisteredAsQuantitiesWithCanonicalUnits() {
+        let expected: [String: String] = [
+            HealthDataType.heartRateRecoveryOneMinute.identifier: "count/min",
+            HealthDataType.physicalEffort.identifier: "kcal/kg*hr",
+            HealthDataType.cyclingPower.identifier: "W",
+            HealthDataType.cyclingCadence.identifier: "count/min",
+            HealthDataType.cyclingSpeed.identifier: "m/s",
+            HealthDataType.cyclingFunctionalThresholdPower.identifier: "W",
+            HealthDataType.swimmingStrokeCount.identifier: "count",
+            EffortScoreIdentifiers.workout: "appleEffortScore",
+            EffortScoreIdentifiers.estimated: "appleEffortScore",
+        ]
+
+        for (identifier, unit) in expected {
+            guard let type = registry.type(forIdentifier: identifier) else {
+                XCTFail("Athlete metric type missing from registry: \(identifier)")
+                continue
+            }
+            XCTAssertEqual(type.stream, .quantity, "\(identifier) must ride the quantity stream")
+            XCTAssertEqual(type.category, .activityFitness, "\(identifier) belongs in the Activity & Fitness picker group")
+            XCTAssertEqual(type.defaultUnit, unit, "\(identifier) unit")
+
+            if HKObjectType.quantityType(forIdentifier: HKQuantityTypeIdentifier(rawValue: identifier)) != nil {
+                XCTAssertTrue(
+                    registry.readTypes.contains { $0.identifier == identifier },
+                    "\(identifier) is available on this OS and must be in the HealthKit read-authorization set"
+                )
+            }
+        }
+    }
+
+    /// The single most guessable-wrong value in the batch: the effort-score unit
+    /// is the literal string `appleEffortScore`, not `count` or any number-shaped
+    /// unit. A wrong guess compiles fine and traps at read time
+    /// (`doubleValue(for:)`), not a bad value — pin it explicitly.
+    ///
+    /// Uses the independent `EffortScoreIdentifiers` literals for the same
+    /// not-self-referential reason as the table above.
+    func testEffortScoreUsesTheAppleEffortScoreUnit() {
+        for identifier in [EffortScoreIdentifiers.workout, EffortScoreIdentifiers.estimated] {
+            guard let type = registry.type(forIdentifier: identifier) else {
+                XCTFail("\(identifier) missing from registry")
+                continue
+            }
+            XCTAssertEqual(type.defaultUnit, "appleEffortScore", "\(identifier) unit")
+        }
     }
 }

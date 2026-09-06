@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "v1",
+  "batchId": "2c7e4a91-6f38-4d1b-9a52-8c3e7f1d5b40",
+  "deviceId": "6d2f9b0c-7a41-4e58-b0d3-9c1e4f7a2b66",
+  "sentAtUnixMs": "1756661104512",
+  "batches": [
+    {
+      "hkTypeId": "HKWorkoutTypeIdentifier",
+      "samples": [
+        {
+          "uuid": "f4a8d1e6-2b73-4c9f-8e05-1a6c3d8f4b92",
+          "startUnixMs": "1756656000000",
+          "endUnixMs": "1756657800000",
+          "source": {
+            "name": "Noe's Apple Watch",
+            "bundleId": "com.apple.health.9E1F2C3D-4A5B-6C7D-8E9F-0A1B2C3D4E5F",
+            "productType": "Watch7,1"
+          },
+          "workout": {
+            "activityType": "running",
+            "durationSeconds": 1800,
+            "totalEnergyKcal": 310.5,
+            "totalDistanceM": 5023.4
+          }
+        }
+      ]
+    }
+  ]
+}

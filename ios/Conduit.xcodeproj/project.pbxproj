@@ -14,6 +14,9 @@
 		CD000000000000000000010B /* sync.pb.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000010A /* sync.pb.swift */; };
 		CD000000000000000000010D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000010C /* Assets.xcassets */; };
 		CD0000000000000000000A31 /* RunningDynamicsEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000A30 /* RunningDynamicsEvidenceTests.swift */; };
+		CD0000000000000000000A33 /* AthleteMetricsEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000A32 /* AthleteMetricsEvidenceTests.swift */; };
+		CD0000000000000000000A41 /* WorkoutEnrichmentEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000A40 /* WorkoutEnrichmentEvidenceTests.swift */; };
+		CD0000000000000000000A51 /* EvidenceArtifacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000A50 /* EvidenceArtifacts.swift */; };
 		CD000000000000000000010F /* ConduitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000010E /* ConduitTests.swift */; };
 		CD0000000000000000000110 /* SwiftProtobuf in Frameworks */ = {isa = PBXBuildFile; productRef = CD0000000000000000000072 /* SwiftProtobuf */; };
 		CD0000000000000000000111 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CD0000000000000000000073 /* GRDB */; };
@@ -109,6 +112,9 @@
 		CD000000000000000000010A /* sync.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = sync.pb.swift; sourceTree = "<group>"; };
 		CD000000000000000000010C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		CD0000000000000000000A30 /* RunningDynamicsEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunningDynamicsEvidenceTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000A32 /* AthleteMetricsEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteMetricsEvidenceTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000A40 /* WorkoutEnrichmentEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutEnrichmentEvidenceTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000A50 /* EvidenceArtifacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvidenceArtifacts.swift; sourceTree = "<group>"; };
 		CD000000000000000000010E /* ConduitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConduitTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000120 /* WebhookConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookConfig.swift; sourceTree = "<group>"; };
 		CD0000000000000000000122 /* DataTypeConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataTypeConfig.swift; sourceTree = "<group>"; };
@@ -431,6 +437,9 @@
 				CD0000000000000000000A10 /* OnboardingSkipTests.swift */,
 				CD0000000000000000000A20 /* AnchoredReaderTests.swift */,
 				CD0000000000000000000A30 /* RunningDynamicsEvidenceTests.swift */,
+				CD0000000000000000000A32 /* AthleteMetricsEvidenceTests.swift */,
+				CD0000000000000000000A40 /* WorkoutEnrichmentEvidenceTests.swift */,
+				CD0000000000000000000A50 /* EvidenceArtifacts.swift */,
 			);
 			path = ConduitTests;
 			sourceTree = "<group>";
@@ -619,6 +628,9 @@
 				CD0000000000000000000A11 /* OnboardingSkipTests.swift in Sources */,
 				CD0000000000000000000A21 /* AnchoredReaderTests.swift in Sources */,
 				CD0000000000000000000A31 /* RunningDynamicsEvidenceTests.swift in Sources */,
+				CD0000000000000000000A33 /* AthleteMetricsEvidenceTests.swift in Sources */,
+				CD0000000000000000000A41 /* WorkoutEnrichmentEvidenceTests.swift in Sources */,
+				CD0000000000000000000A51 /* EvidenceArtifacts.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -773,7 +785,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.Conduit;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -799,7 +811,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.Conduit;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -817,7 +829,7 @@
 				DEVELOPMENT_TEAM = 3K72BT899D;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.ConduitTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -836,7 +848,7 @@
 				DEVELOPMENT_TEAM = 3K72BT899D;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.ConduitTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;

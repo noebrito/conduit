@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "v1",
+  "batchId": "9f2a6c31-1e7d-4a5b-9c3f-6b8d2a4e7f10",
+  "deviceId": "6d2f9b0c-7a41-4e58-b0d3-9c1e4f7a2b66",
+  "sentAtUnixMs": "1756661104512",
+  "batches": [
+    {
+      "hkTypeId": "HKQuantityTypeIdentifierHeartRate",
+      "samples": [
+        {
+          "uuid": "b3c6a1d2-4e77-4a9f-8c10-5d2e9f0a7b41",
+          "startUnixMs": "1756660800000",
+          "endUnixMs": "1756660800000",
+          "source": {
+            "name": "Noe's Apple Watch",
+            "bundleId": "com.apple.health.9E1F2C3D-4A5B-6C7D-8E9F-0A1B2C3D4E5F",
+            "productType": "Watch7,1"
+          },
+          "quantity": { "value": 68, "unit": "count/min" }
+        },
+        {
+          "uuid": "a1c4e7f9-3d52-4b68-9a01-7c5e8f2b4d63",
+          "startUnixMs": "1756660860000",
+          "endUnixMs": "1756660860000",
+          "source": {
+            "name": "Noe's Apple Watch",
+            "bundleId": "com.apple.health.9E1F2C3D-4A5B-6C7D-8E9F-0A1B2C3D4E5F",
+            "productType": "Watch7,1"
+          },
+          "quantity": { "value": 71, "unit": "count/min" }
+        }
+      ]
+    }
+  ]
+}

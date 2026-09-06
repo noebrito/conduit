@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "v1",
+  "batchId": "5e317296-8c70-41b3-a06f-7e0c2b5f6d88",
+  "deviceId": "6d2f9b0c-7a41-4e58-b0d3-9c1e4f7a2b66",
+  "sentAtUnixMs": "1756661104512",
+  "batches": [
+    {
+      "hkTypeId": "HKQuantityTypeIdentifierDietaryEnergyConsumed",
+      "samples": [
+        {
+          "uuid": "4c5f3a01-3b66-4d92-f5a9-4a1b8c9d6e30",
+          "startUnixMs": "1756650000000",
+          "endUnixMs": "1756650000000",
+          "source": {
+            "name": "Lose It!",
+            "bundleId": "com.fitnow.loseit",
+            "productType": "iPhone17,1"
+          },
+          "quantity": { "value": 642, "unit": "kcal" }
+        }
+      ],
+      "deletedUuids": ["2f8b47c9-6a13-4e05-9d72-c84f1a0b3e57"]
+    }
+  ]
+}

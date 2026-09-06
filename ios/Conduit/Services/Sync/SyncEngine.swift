@@ -152,7 +152,12 @@ actor SyncEngine {
                 captureFloor = nil
             }
 
-            let result = try await reader.read(type: dataType, anchor: anchor, since: captureFloor)
+            let result = try await reader.read(
+                type: dataType,
+                anchor: anchor,
+                since: captureFloor,
+                includeHeartRateStatistics: try includeHeartRateStatisticsForWorkouts()
+            )
 
             // §4.4 critical invariant: anchor advance + sample enqueue in one transaction.
             // `cap` enforces the configured outbox back-pressure limit: if the
@@ -189,6 +194,24 @@ actor SyncEngine {
         } catch {
             logger.error("handleObserverWake(\(typeIdentifier, privacy: .public)) error: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    // MARK: - Workout heart-rate privacy gate
+
+    /// Whether a workout read may carry `avg/max/min_heart_rate_bpm`, resolved
+    /// from the user's own Heart Rate data-type toggle — the same per-type
+    /// lookup `captureRecentRoutes` uses for its own route toggle. Turning Heart
+    /// Rate off suppresses these fields even when Workouts stays on, so the
+    /// enrichment never contradicts a promise the app's own toggle already made.
+    /// No row for Heart Rate yet (e.g. before `enableNewlyRegisteredTypes` has
+    /// run) defaults to included, matching Heart Rate's own default-on registry
+    /// convention — this only ever narrows on an explicit opt-out.
+    ///
+    /// Internal (not `private`) so `AnchoredReaderTests` can verify this gate
+    /// directly — the DB-driven decision, not just its shape, is what actually
+    /// makes the privacy promise true.
+    func includeHeartRateStatisticsForWorkouts() throws -> Bool {
+        try dataTypeConfigDAO.find(hkTypeId: HealthDataType.heartRate.identifier)?.enabled ?? true
     }
 
     // MARK: - GPS route capture (workout-driven)
@@ -385,7 +408,8 @@ actor SyncEngine {
                     type: dataType,
                     since: since,
                     before: before,
-                    limit: pageSize
+                    limit: pageSize,
+                    includeHeartRateStatistics: try self.includeHeartRateStatisticsForWorkouts()
                 )
             },
             stagePage: { samples in

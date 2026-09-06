@@ -82,12 +82,17 @@ struct AnchoredReader {
     ///   - since: forward-only capture floor (start-of-today), applied only on
     ///     the first (anchor-less) read. `nil` reads all history (import path).
     ///   - limit: max samples to return in this pass (default: no limit).
+    ///   - includeHeartRateStatistics: whether a workout's `avg/max/min_heart_rate_bpm`
+    ///     may be populated. Irrelevant for non-workout types. The caller resolves
+    ///     this from the user's own Heart Rate data-type toggle, so turning Heart
+    ///     Rate off suppresses these fields even when Workouts stays on.
     /// - Returns: the new samples and the anchor to persist atomically with them.
     func read(
         type: HealthDataType,
         anchor: HKQueryAnchor?,
         since: Date? = nil,
-        limit: Int = HKObjectQueryNoLimit
+        limit: Int = HKObjectQueryNoLimit,
+        includeHeartRateStatistics: Bool = true
     ) async throws -> Result {
         guard let sampleType = type.sampleType else {
             return Result(samples: [], deletedUuids: [], newAnchor: anchor)
@@ -104,7 +109,8 @@ struct AnchoredReader {
             type: type,
             predicate: predicate,
             anchor: anchor,
-            limit: limit
+            limit: limit,
+            includeHeartRateStatistics: includeHeartRateStatistics
         )
     }
 
@@ -140,11 +146,13 @@ struct AnchoredReader {
     ///   - before: the upper-bound page cursor — `nil` for the first page (up to
     ///     now), then the previous page's `oldestEndDate`.
     ///   - limit: page size, so a large import drains in bounded chunks.
+    ///   - includeHeartRateStatistics: see `read(type:anchor:since:limit:includeHeartRateStatistics:)`.
     func readImportPage(
         type: HealthDataType,
         since: Date?,
         before: Date?,
-        limit: Int
+        limit: Int,
+        includeHeartRateStatistics: Bool = true
     ) async throws -> Result {
         guard let sampleType = type.sampleType else {
             return Result(samples: [], deletedUuids: [], newAnchor: nil)
@@ -162,7 +170,9 @@ struct AnchoredReader {
                     continuation.resume(throwing: error)
                     return
                 }
-                let mapped = (samples ?? []).compactMap { Self.makeSample(from: $0, type: type) }
+                let mapped = (samples ?? []).compactMap {
+                    Self.makeSample(from: $0, type: type, includeHeartRateStatistics: includeHeartRateStatistics)
+                }
                 // Import is a point-in-time snapshot of current Health — nothing
                 // to delete.
                 continuation.resume(returning: Result(samples: mapped, deletedUuids: [], newAnchor: nil))
@@ -196,7 +206,8 @@ struct AnchoredReader {
         type: HealthDataType,
         predicate: NSPredicate?,
         anchor: HKQueryAnchor?,
-        limit: Int
+        limit: Int,
+        includeHeartRateStatistics: Bool
     ) async throws -> Result {
         try await withCheckedThrowingContinuation { continuation in
             // One-shot anchored read: a results handler with no update handler
@@ -215,7 +226,9 @@ struct AnchoredReader {
                     continuation.resume(throwing: error)
                     return
                 }
-                let mapped = (samples ?? []).compactMap { Self.makeSample(from: $0, type: type) }
+                let mapped = (samples ?? []).compactMap {
+                    Self.makeSample(from: $0, type: type, includeHeartRateStatistics: includeHeartRateStatistics)
+                }
                 let deletedUuids = (deletedObjects ?? []).map { $0.uuid.uuidString }
                 continuation.resume(returning: Result(samples: mapped, deletedUuids: deletedUuids, newAnchor: newAnchor))
             }
@@ -240,7 +253,17 @@ struct AnchoredReader {
 
     /// Convert any supported `HKSample` into wire format, dispatching on the
     /// type's stream (the four value shapes from ARCHITECTURE.md §3.2).
-    static func makeSample(from hkSample: HKSample, type: HealthDataType) -> Conduit_V1_Sample? {
+    ///
+    /// - Parameter includeHeartRateStatistics: whether a `.workout` sample may
+    ///   carry `avg/max/min_heart_rate_bpm`. The caller resolves this from the
+    ///   user's own Heart Rate data-type toggle (see `SyncEngine`), so turning
+    ///   Heart Rate off suppresses these fields even when Workouts stays on.
+    ///   Ignored for every other stream.
+    static func makeSample(
+        from hkSample: HKSample,
+        type: HealthDataType,
+        includeHeartRateStatistics: Bool = true
+    ) -> Conduit_V1_Sample? {
         var sample = Conduit_V1_Sample()
         sample.uuid = hkSample.uuid.uuidString
         sample.startUnixMs = unixMillis(hkSample.startDate)
@@ -267,12 +290,31 @@ struct AnchoredReader {
 
         case .workout:
             guard let workout = hkSample as? HKWorkout else { return nil }
-            var value = Conduit_V1_WorkoutValue()
-            value.activityType = workoutActivityName(workout.workoutActivityType)
-            value.durationSeconds = workout.duration
-            value.totalEnergyKcal = workout.totalEnergyBurned?.doubleValue(for: .kilocalorie()) ?? 0
-            value.totalDistanceM = workout.totalDistance?.doubleValue(for: .meter()) ?? 0
-            sample.workout = value
+            // HKStatistics has NO public initializer (`init` is unavailable, no
+            // factory method either), so it can never be fabricated in a unit
+            // test. Extracting its quantities HERE — rather than inside the pure
+            // makeWorkoutValue core below — keeps this property read as the ONLY
+            // untestable surface, and lets the presence/absence branching that
+            // actually has behavior worth testing run on plain optional Doubles.
+            let heartRateStatistics = includeHeartRateStatistics
+                ? workout.statistics(for: HKQuantityType(.heartRate))
+                : nil
+            // Same unit string as the heartRate registry entry's `defaultUnit`
+            // ("count/min"), parsed the same way every other quantity on this
+            // file is (`HKUnit(from:)`).
+            let bpmUnit = HKUnit(from: "count/min")
+            sample.workout = Self.makeWorkoutValue(
+                activityType: workoutActivityName(workout.workoutActivityType),
+                durationSeconds: workout.duration,
+                totalEnergyKcal: workout.totalEnergyBurned?.doubleValue(for: .kilocalorie()) ?? 0,
+                totalDistanceM: workout.totalDistance?.doubleValue(for: .meter()) ?? 0,
+                brandName: workout.metadata?[HKMetadataKeyWorkoutBrandName] as? String,
+                isIndoor: (workout.metadata?[HKMetadataKeyIndoorWorkout] as? NSNumber)?.boolValue,
+                avgHeartRateBpm: heartRateStatistics?.averageQuantity()?.doubleValue(for: bpmUnit),
+                maxHeartRateBpm: heartRateStatistics?.maximumQuantity()?.doubleValue(for: bpmUnit),
+                minHeartRateBpm: heartRateStatistics?.minimumQuantity()?.doubleValue(for: bpmUnit),
+                events: workout.workoutEvents ?? []
+            )
 
         case .correlation:
             guard let correlation = hkSample as? HKCorrelation else { return nil }
@@ -311,6 +353,86 @@ struct AnchoredReader {
         value.unit = unitString
         sample.quantity = value
         return sample
+    }
+
+    // MARK: - Workout enrichment (pure)
+
+    /// The `HKHealthStore`-free core of `.workout` mapping, so presence/absence
+    /// branching is unit-testable with plain values (mirrors the split
+    /// `WorkoutRouteReader.makeRouteSample` uses for the same reason).
+    ///
+    /// - Parameters:
+    ///   - brandName: `HKMetadataKeyWorkoutBrandName`. Stays a plain (never
+    ///     `optional`) wire string — an empty brand name is already
+    ///     indistinguishable from absent in protojson, matching every other
+    ///     string on this message.
+    ///   - isIndoor: `HKMetadataKeyIndoorWorkout`. Set only when non-nil — `false`
+    ///     ("outdoor") and absent ("the writer didn't say") are different answers.
+    ///   - avgHeartRateBpm/maxHeartRateBpm/minHeartRateBpm: already-extracted
+    ///     `HKStatistics` quantities (see the `.workout` case above for why the
+    ///     extraction happens there, not here). Set only when non-nil — never a
+    ///     fabricated 0.
+    ///   - events: `HKWorkout.workoutEvents`, mapped oldest → newest as given.
+    static func makeWorkoutValue(
+        activityType: String,
+        durationSeconds: Double,
+        totalEnergyKcal: Double,
+        totalDistanceM: Double,
+        brandName: String?,
+        isIndoor: Bool?,
+        avgHeartRateBpm: Double?,
+        maxHeartRateBpm: Double?,
+        minHeartRateBpm: Double?,
+        events: [HKWorkoutEvent]
+    ) -> Conduit_V1_WorkoutValue {
+        var value = Conduit_V1_WorkoutValue()
+        value.activityType = activityType
+        value.durationSeconds = durationSeconds
+        value.totalEnergyKcal = totalEnergyKcal
+        value.totalDistanceM = totalDistanceM
+        value.brandName = brandName ?? ""
+        if let isIndoor {
+            value.isIndoor = isIndoor
+        }
+        if let avgHeartRateBpm {
+            value.avgHeartRateBpm = avgHeartRateBpm
+        }
+        if let maxHeartRateBpm {
+            value.maxHeartRateBpm = maxHeartRateBpm
+        }
+        if let minHeartRateBpm {
+            value.minHeartRateBpm = minHeartRateBpm
+        }
+        value.events = events.map(makeWorkoutEvent)
+        return value
+    }
+
+    /// One `HKWorkoutEvent` → wire format. Only `lap`/`segment` carry a nonzero
+    /// duration; every other type is an instant (`end == start`).
+    static func makeWorkoutEvent(_ event: HKWorkoutEvent) -> Conduit_V1_WorkoutEvent {
+        var wireEvent = Conduit_V1_WorkoutEvent()
+        wireEvent.type = workoutEventTypeName(event.type)
+        wireEvent.startUnixMs = unixMillis(event.dateInterval.start)
+        wireEvent.endUnixMs = unixMillis(event.dateInterval.end)
+        return wireEvent
+    }
+
+    /// Compact name for the 8 `HKWorkoutEventType` cases; numeric fallback keeps
+    /// the value stable and unambiguous for the ingester (a keyword field) if a
+    /// future watchOS ships a new case — exactly the pattern `workoutActivityName`
+    /// and `categoryValueName` already use below.
+    static func workoutEventTypeName(_ type: HKWorkoutEventType) -> String {
+        switch type {
+        case .pause: return "pause"
+        case .resume: return "resume"
+        case .lap: return "lap"
+        case .marker: return "marker"
+        case .motionPaused: return "motionPaused"
+        case .motionResumed: return "motionResumed"
+        case .segment: return "segment"
+        case .pauseOrResumeRequest: return "pauseOrResumeRequest"
+        @unknown default: return "eventType\(type.rawValue)"
+        }
     }
 
     /// Wire `Source` for any HK sample. Shared with `WorkoutRouteReader`, whose

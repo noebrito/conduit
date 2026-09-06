@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "v1",
+  "batchId": "1a9d3b52-4e3c-4d7f-8c2b-3a6e8d1b2f44",
+  "deviceId": "6d2f9b0c-7a41-4e58-b0d3-9c1e4f7a2b66",
+  "sentAtUnixMs": "1756661104512",
+  "batches": [
+    {
+      "hkTypeId": "HKCategoryTypeIdentifierSleepAnalysis",
+      "samples": [
+        {
+          "uuid": "d5e8c3f4-6a99-4c2b-8e32-7f4a1b2c9d63",
+          "startUnixMs": "1756620000000",
+          "endUnixMs": "1756622700000",
+          "source": {
+            "name": "Noe's Apple Watch",
+            "bundleId": "com.apple.health.9E1F2C3D-4A5B-6C7D-8E9F-0A1B2C3D4E5F",
+            "productType": "Watch7,1"
+          },
+          "category": { "value": 5, "valueName": "asleepREM" }
+        }
+      ]
+    },
+    {
+      "hkTypeId": "HKCategoryTypeIdentifierAppleStandHour",
+      "samples": [
+        {
+          "uuid": "e6f9d4a5-7b00-4d3c-9f43-8a5b2c3d0e74",
+          "startUnixMs": "1756659600000",
+          "endUnixMs": "1756663200000",
+          "source": {
+            "name": "Noe's Apple Watch",
+            "bundleId": "com.apple.health.9E1F2C3D-4A5B-6C7D-8E9F-0A1B2C3D4E5F",
+            "productType": "Watch7,1"
+          },
+          "category": { "valueName": "stood" }
+        }
+      ]
+    }
+  ]
+}

@@ -61,6 +61,37 @@ message WorkoutValue {
   double duration_seconds = 2;
   double total_energy_kcal = 3;
   double total_distance_m = 4;
+
+  // --- v1.5 workout enrichment (additive; an older ingester DiscardUnknown-drops these) ---
+
+  // HKMetadataKeyWorkoutBrandName. HealthKit has NO user-entered workout name;
+  // this is the closest thing HealthKit exposes and is set only by some
+  // third-party / gym-class / Fitness+ writers. Empty for most Apple Watch
+  // workouts — that is the expected steady state, not a bug.
+  string brand_name = 5;
+
+  // HKMetadataKeyIndoorWorkout. `optional` because false ("outdoor") and absent
+  // ("the writer didn't say") are genuinely different answers.
+  optional bool is_indoor = 6;
+
+  // HKWorkout.statistics(for: .heartRate) — statistics HealthKit itself computed
+  // over the samples ASSOCIATED WITH this workout, NOT a time-window guess.
+  // Absent entirely (not 0) when the workout carries no heart-rate samples.
+  optional double avg_heart_rate_bpm = 7;
+  optional double max_heart_rate_bpm = 8;
+  optional double min_heart_rate_bpm = 9;
+
+  // HKWorkout.workoutEvents, ordered oldest -> newest. Empty for most workouts.
+  repeated WorkoutEvent events = 10;
+}
+
+// One HKWorkoutEvent. Only `lap` and `segment` carry a nonzero duration; every
+// other type is an instant, where end == start.
+message WorkoutEvent {
+  string type = 1;            // "pause"|"resume"|"lap"|"marker"|"motionPaused"|
+                              // "motionResumed"|"segment"|"pauseOrResumeRequest"|"eventType<N>"
+  int64  start_unix_ms = 2;   // dateInterval.start
+  int64  end_unix_ms = 3;     // dateInterval.end
 }
 
 message CorrelationValue {

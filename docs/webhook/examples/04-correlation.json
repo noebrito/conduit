@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "v1",
+  "batchId": "7d1a5c92-4b30-4e7f-8a2d-6c9f3e5a1b78",
+  "deviceId": "6d2f9b0c-7a41-4e58-b0d3-9c1e4f7a2b66",
+  "sentAtUnixMs": "1756661104512",
+  "batches": [
+    {
+      "hkTypeId": "HKCorrelationTypeIdentifierBloodPressure",
+      "samples": [
+        {
+          "uuid": "3b7e9c41-5a68-4d2f-8c10-9e4a2f6d8b57",
+          "startUnixMs": "1756658400000",
+          "endUnixMs": "1756658400000",
+          "source": {
+            "name": "Withings BPM",
+            "bundleId": "com.withings.wiScaleNG",
+            "productType": "iPhone17,1"
+          },
+          "correlation": {
+            "components": [
+              {
+                "uuid": "1e6a4c82-3f57-4b90-8d21-6a3c5f8e2b49",
+                "startUnixMs": "1756658400000",
+                "endUnixMs": "1756658400000",
+                "quantity": { "value": 118, "unit": "mmHg" }
+              },
+              {
+                "uuid": "5f8b2d64-7a93-4c15-9e42-8b6d1f4a3c70",
+                "startUnixMs": "1756658400000",
+                "endUnixMs": "1756658400000",
+                "quantity": { "value": 76, "unit": "mmHg" }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

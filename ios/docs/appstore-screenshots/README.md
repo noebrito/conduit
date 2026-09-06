@@ -93,7 +93,9 @@ Screens are fed deterministic fixtures so they look compelling:
 - **Activity** — a mixed delivery history: several successful batches, one HTTP
   500 failure, and an all-deduped ("156 sent · 0 new", highlighted) row.
 - **Settings** — a saved webhook URL, 15-minute sync interval, and every data-type
-  category enabled (15/15, 6/6, …).
+  category enabled (each row reads N/N, where N is that category's current size in
+  `HealthTypeRegistry` — the fixture enables every registered type, so the numbers
+  move whenever a type is registered).
 - **Welcome / HealthKit Permission** — the onboarding hero + auth-grant steps.
 
 Fixtures live in `AppStoreScreenshotTests.swift` (`AppStoreFixtures`) alongside
