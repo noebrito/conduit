@@ -12,7 +12,8 @@
 
 set -eu
 
-PBXPROJ="$CI_PRIMARY_REPOSITORY_PATH/conduit/ios/Conduit.xcodeproj/project.pbxproj"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PBXPROJ="$SCRIPT_DIR/../Conduit.xcodeproj/project.pbxproj"
 
 if [ ! -f "$PBXPROJ" ]; then
     echo "ci_post_clone: pbxproj not found at $PBXPROJ" >&2
