@@ -11,11 +11,11 @@ the cloud and collects nothing about you.
 Your health data stays on your device. The only time any of it leaves is when
 Conduit sends it to the webhook endpoint you configured yourself — nowhere else.
 
-That's a strong claim, so we made it checkable. This repository is the source of
-the app that ships on the App Store, published **so you can verify that claim for
-yourself** rather than taking our word for it. It mirrors the App Store
-**"Data Not Collected"** privacy label: there is no analytics SDK, no telemetry,
-no backend that we operate collecting your data.
+That's a strong claim, so we made it checkable. This repository **is** the source
+of the app that ships on the App Store — published **so you can verify that
+claim for yourself** rather than taking our word for it. It mirrors the App
+Store **"Data Not Collected"** privacy label: there is no analytics SDK, no
+telemetry, no backend that we operate collecting your data.
 
 ## The wire schema is the receipt: [`proto/`](proto/)
 
@@ -47,16 +47,24 @@ The full Xcode project, Swift sources, tests, and release tooling live under
 
 See [`ios/README.md`](ios/README.md) for the full build, test, and layout notes.
 
+## Releasing
+
+See [`RELEASING.md`](RELEASING.md) for how a version goes from a merged PR to
+a TestFlight/App Store release.
+
 ## License
 
 Apache-2.0. See [`LICENSE`](LICENSE).
 
 ## Contributing
 
-**This repository is a read-only public mirror** of the Conduit app that ships
-on the App Store. Active development happens in a private monorepo, and this
-mirror is regenerated from it — so **external pull requests are not accepted
-here** (a PR against this repo can't be merged upstream and will be closed).
+**This is where Conduit iOS is actually built and released** — Xcode Cloud
+archives and ships to TestFlight straight from this repo's `main` branch. The
+wire-format proto and the webhook docs stay canonical in a private monorepo
+and are mirrored here as-is (that server-side code isn't part of this repo).
+
+**External pull requests are not accepted** — this repo's history and release
+process are maintainer-only, so a PR opened here will be closed.
 
 **Contributions are welcome via GitHub Issues only.** Found a bug, or have a
 feature request? Please [open an issue](https://github.com/noebrito/conduit/issues).
