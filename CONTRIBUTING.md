@@ -2,21 +2,22 @@
 
 Thanks for your interest in Conduit!
 
-## This is a read-only mirror
+## This is where Conduit iOS is built
 
-This repository is a **public, read-only mirror** of the Conduit iOS app that
-ships on the App Store. It exists so that anyone can **verify** the app's
-privacy claims by reading the source and the wire schema
-([`proto/`](proto/)) — not as the place where development happens.
+This repository **is** the Conduit iOS app that ships on the App Store —
+Xcode Cloud builds and ships TestFlight/App Store releases straight from
+`main` here. It's public so that anyone can **verify** the app's privacy
+claims by reading the source and the wire schema ([`proto/`](proto/)).
 
-Active development lives in a private monorepo, and this mirror is regenerated
-from it. That means:
+The wire-format proto and the webhook docs stay canonical in a private
+monorepo (the server side isn't part of this repo) and are mirrored here
+as-is; everything under [`ios/`](ios/) is developed directly in this repo.
 
 ## Pull requests are not accepted here
 
-**External pull requests will not be merged** — a change made against this mirror
-cannot flow back into the upstream monorepo, so any PR opened here will be
-closed with a pointer to this policy. Please don't spend your effort on a PR.
+**External pull requests will not be merged** — this repo's release process
+is maintainer-only, so any PR opened here will be closed with a pointer to
+this policy. Please don't spend your effort on a PR.
 
 ## Please open an issue instead
 

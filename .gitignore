@@ -1,0 +1,23 @@
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+
+# App Store Connect API keys — never commit these
+*.p8
+AuthKey_*.p8
+
+# Local environment files
+.env
+
+# fastlane (derived output; screenshots/metadata source-of-truth lives in
+# ios/docs/appstore-screenshots and is committed separately)
+ios/fastlane/screenshots/
+ios/fastlane/metadata/
+ios/fastlane/report.xml
+ios/fastlane/Preview.html
+ios/fastlane/test_output/
+**/.fastlane/
+
+# macOS
+.DS_Store

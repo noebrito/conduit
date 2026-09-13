@@ -1,8 +1,8 @@
 <!--
-  ⛔ Please stop — this repository does not accept pull requests.
+  ⛔ Please stop — this repository does not accept external pull requests.
 
-  Conduit's public repo is a READ-ONLY MIRROR of the app that ships on the
-  App Store. Development happens in a private monorepo, so a pull request here
+  This is the real Conduit iOS dev repo (Xcode Cloud ships to TestFlight/App
+  Store straight from `main` here), but it's maintainer-only: an external PR
   cannot be merged and will be closed.
 
   👉 Please open an issue instead: https://github.com/noebrito/conduit/issues
@@ -11,10 +11,10 @@
   channel that reaches the maintainers. Thank you!
 -->
 
-## ⛔ Pull requests are not accepted in this repository
+## ⛔ External pull requests are not accepted in this repository
 
-This repo is a **read-only public mirror**. PRs cannot be merged here and will
-be closed.
+This repo is maintainer-only. External PRs cannot be merged here and will be
+closed.
 
 **Please [open an issue](https://github.com/noebrito/conduit/issues) instead** —
 that's the channel that reaches the maintainers. Thanks for understanding!

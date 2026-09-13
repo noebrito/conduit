@@ -6,9 +6,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 ## Workout enrichment capture (brand/indoor/HR stats/events) — `HKStatistics` cannot be constructed in a unit test
 
-`AnchoredReader`'s `.workout` case maps `HKWorkout` into the enriched `WorkoutValue` (server-side
-mapping + mapping fix already shipped — see the repo-root `conduit/AGENTS.md`'s "Adding a field to
-an EXISTING stream's mapping..."). It follows the same split `WorkoutRouteReader.makeRouteSample`
+`AnchoredReader`'s `.workout` case maps `HKWorkout` into the enriched `WorkoutValue` (the matching
+server-side mapping already shipped in the private monorepo that owns the ingester). It follows the
+same split `WorkoutRouteReader.makeRouteSample`
 uses: a thin, HealthKit-touching wrapper (in `case .workout:`) extracts values, and a pure static
 core (`AnchoredReader.makeWorkoutValue`) does the presence/absence mapping.
 
@@ -154,7 +154,7 @@ commitSent stamp + `deriveStatus` branches, incl. empty-but-successful), `Databa
 
 ## Stuck `.inflight` outbox rows — two reconciliation mechanisms, not one
 
-`Uploader.reconcileInflight` (ARCHITECTURE.md §4.6) resets `.inflight` rows back to `.pending`
+`Uploader.reconcileInflight` resets `.inflight` rows back to `.pending`
 **only when the background `URLSession` no longer reports their batch as active**, and it runs
 **only once, at app cold launch** — it was designed as crash recovery ("a single crash can
 permanently strand samples"). A 2026-08-11 home-internet/power outage exposed the gap that leaves:
@@ -203,7 +203,7 @@ section below for why and how to run it.
 
 App Store Connect screenshots are **generated, not hand-taken**, by a single gated
 XCTest: `ConduitTests/AppStoreScreenshotTests.swift`. Output (committed): 20 PNGs under
-`conduit/ios/docs/appstore-screenshots/<device>/<light|dark>/<n>-<screen>.png` — the 5
+`ios/docs/appstore-screenshots/<device>/<light|dark>/<n>-<screen>.png` — the 5
 marketing screens (home, activity, settings, healthkit-permission, welcome) × two Apple-required
 iPhone sizes (**6.9″ 1320×2868 required**, **6.5″ 1284×2778 accepted fallback**) × light/dark.
 See `docs/appstore-screenshots/README.md`.
@@ -211,7 +211,7 @@ See `docs/appstore-screenshots/README.md`.
 Regenerate (any booted iPhone sim works — the generator forces each screen's exact
 point-size × scale-3 off-screen, so the destination device doesn't change output pixels):
 ```
-cd conduit/ios
+cd ios
 TEST_RUNNER_GENERATE_APPSTORE_SCREENSHOTS=1 xcodebuild test \
   -project Conduit.xcodeproj -scheme Conduit \
   -destination 'platform=iOS Simulator,name=iPhone 16 Pro Max' \
@@ -229,10 +229,10 @@ Images aren't pixel-diffed against a baseline, so rendering on a newer local iOS
 ## App Store upload — `fastlane deliver` (screenshots-only, never submits)
 
 The committed marketing screenshots are uploaded to App Store Connect via `deliver`
-(`conduit/ios/fastlane/`, `Gemfile`). One command (the captain exports an **App Store Connect API
+(`ios/fastlane/`, `Gemfile`). One command (the captain exports an **App Store Connect API
 key** at runtime — nothing is committed):
 ```
-cd conduit/ios && bundle install   # first time
+cd ios && bundle install   # first time
 ASC_API_KEY_ID=… ASC_API_ISSUER_ID=… ASC_API_KEY_PATH=/abs/AuthKey_….p8 \
   bundle exec fastlane ios upload_screenshots
 ```
@@ -254,7 +254,7 @@ text; `overwrite_screenshots true` makes re-runs idempotent. There is deliberate
 1284×2778 → 6.5″), so both sizes upload from one run and folder naming is irrelevant. That dir (and
 `fastlane/metadata/`) is **derived + gitignored**; the committed PNGs stay the single source of
 truth. **Never commit a `.p8`** — `.gitignore` excludes `*.p8`/`AuthKey_*.p8`. Missing env vars fail
-the lane fast before any network call. Full docs: `conduit/ios/fastlane/README.md`. fastlane isn't
+the lane fast before any network call. Full docs: `ios/fastlane/README.md`. fastlane isn't
 in CI — validate config with `ruby -c fastlane/Fastfile` (+ Appfile/Deliverfile) or `bundle exec
 fastlane lanes`.
 
@@ -265,14 +265,14 @@ fastlane lanes`.
 `AppStoreScreenshotTests`' `GENERATE_APPSTORE_SCREENSHOTS` gate. Under `xcodebuild` the var needs the
 `TEST_RUNNER_` prefix to reach the test process:
 ```
-TEST_RUNNER_SNAPSHOT_TESTS=1 xcodebuild test -project conduit/ios/Conduit.xcodeproj -scheme Conduit \
+TEST_RUNNER_SNAPSHOT_TESTS=1 xcodebuild test -project ios/Conduit.xcodeproj -scheme Conduit \
   -destination 'platform=iOS Simulator,id=<fresh sim>' \
   -only-testing:ConduitTests/ScreenSnapshotTests CODE_SIGNING_ALLOWED=NO
 ```
 
 **Why the gate exists.** The 20 references were recorded on the `conduit-ios` GitHub Actions
 simulator, and that job **no longer exists** — all GitHub Actions macOS CI was deleted for 10x
-billing (root AGENTS.md, "GitHub Actions is Linux-only"). A renderer other than the one that
+billing in the private monorepo this app used to live in. A renderer other than the one that
 recorded a reference mismatches it wholesale (a different iOS version's rendering differs far more
 than the `precision`/`perceptualPrecision` tolerance absorbs), so on **Xcode Cloud** — now the only
 CI that runs `ConduitTests` — all five screens failed on *every* commit, including untouched ones

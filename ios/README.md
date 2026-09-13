@@ -4,30 +4,29 @@ Conduit streams Apple HealthKit data from an iOS device to a user-configured
 webhook over HTTPS. The user controls where their data goes; the app stores
 nothing in the cloud.
 
-See [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) for the full design and
-[`../docs/IMPLEMENTATION_PLAN.md`](../docs/IMPLEMENTATION_PLAN.md) for the phased
-delivery plan. This directory now contains the **Phase I4 UI**: onboarding,
-Home, Settings, Activity Log, and the HealthKit permissions detail screen, on
-top of the HealthKit sync engine and SQLite outbox delivered in I2/I3.
+This directory contains the full app: onboarding, Home, Settings, Activity Log,
+and the HealthKit permissions detail screen, built on top of the HealthKit
+sync engine and SQLite outbox.
 
 ## Requirements
 
 - Xcode 15 or later
 - iOS 17.0+ deployment target
 - An Apple Developer team for signing (project is configured for team
-  `3K72BT899D`, matching the other apps in this repo)
+  `3K72BT899D`)
 
 ## Project layout
 
 ```
-conduit/ios/
+ios/
 ├── Conduit.xcodeproj
 ├── Conduit/
 │   ├── App/             ConduitApp, AppDelegate, AppState (shared observable
 │   │                    singleton: database, sync engine, onboarding flag),
 │   │                    entitlements
 │   ├── Models/
-│   │   ├── Generated/   protoc output (sync.pb.swift, owned by Phase 0)
+│   │   ├── Generated/   protoc output (sync.pb.swift — regenerate with
+│   │   │                scripts/generate-swift-proto.sh)
 │   │   ├── WebhookConfig.swift, DataTypeConfig.swift, OutboxRow.swift
 │   │   └── DeliveryLogEntry.swift
 │   ├── Services/
@@ -61,22 +60,35 @@ Declared in the project; Xcode resolves them on first open / build:
 - [`groue/GRDB.swift`](https://github.com/groue/GRDB.swift) — SQLite outbox
   and delivery log storage, single shared connection owned by `AppState`.
 
+## Regenerating the proto models
+
+`Conduit/Models/Generated/sync.pb.swift` is committed, generated output — it's
+not hand-edited. If [`../proto/conduit/v1/sync.proto`](../proto/conduit/v1/sync.proto)
+changes, regenerate it with:
+
+```bash
+ios/scripts/generate-swift-proto.sh
+```
+
+See that script's header comment for the required `protoc`/`protoc-gen-swift`
+versions.
+
 ## Open, build, run
 
 ```bash
 # Open in Xcode
-open conduit/ios/Conduit.xcodeproj
+open ios/Conduit.xcodeproj
 
 # Build for the simulator from the command line
 xcodebuild \
-  -project conduit/ios/Conduit.xcodeproj \
+  -project ios/Conduit.xcodeproj \
   -scheme Conduit \
   -destination 'platform=iOS Simulator,name=iPhone 15' \
   build
 
 # Run the unit tests
 xcodebuild \
-  -project conduit/ios/Conduit.xcodeproj \
+  -project ios/Conduit.xcodeproj \
   -scheme Conduit \
   -destination 'platform=iOS Simulator,name=iPhone 15' \
   test
@@ -107,4 +119,4 @@ command line. The bundle identifier is `dev.noebrito.Conduit`.
 
 `ci_scripts/ci_post_clone.sh` stamps `CURRENT_PROJECT_VERSION` with the Xcode
 Cloud build number so each TestFlight upload has a unique, increasing build
-number, matching the convention used by the other iOS apps in this repo.
+number.
