@@ -32,7 +32,8 @@ ios/
 │   ├── Services/
 │   │   ├── HealthKit/   HealthTypeRegistry, HealthKitAuthorizer,
 │   │   │                ObserverCoordinator, AnchoredReader,
-│   │   │                WorkoutRouteReader (GPS routes)
+│   │   │                WorkoutRouteReader (GPS routes),
+│   │   │                HistoryAccessProbe (iOS 27 limited-history floors)
 │   │   ├── Sync/        SyncEngine, Throttle, Batcher
 │   │   ├── Networking/  Uploader, BackgroundSession, BackoffPolicy,
 │   │   │                WebhookTester (foreground Test Connection probe)

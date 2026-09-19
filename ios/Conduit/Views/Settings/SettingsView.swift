@@ -274,6 +274,7 @@ private struct DataTypesCategoryView: View {
 private struct ImportHistoryView: View {
     @Bindable var viewModel: SettingsViewModel
     @State private var showConfirm = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         List {
@@ -291,7 +292,11 @@ private struct ImportHistoryView: View {
                     DatePicker(
                         "Start date",
                         selection: $viewModel.customImportStart,
-                        in: ...Date(),
+                        // Clamped to iOS's floor ONLY when every enabled type
+                        // shares the same one — a grant can be limited per
+                        // type, so clamping against a mixed grant would
+                        // misrepresent whichever type it doesn't describe.
+                        in: (viewModel.commonHistoryAccessFloor ?? .distantPast)...Date(),
                         displayedComponents: .date
                     )
                     .accessibilityLabel("Custom import start date")
@@ -299,7 +304,16 @@ private struct ImportHistoryView: View {
             } header: {
                 Text("How far back")
             } footer: {
-                Text("Only the data types you've enabled will be imported. Duplicate samples already captured are skipped automatically.")
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Only the data types you've enabled will be imported. Duplicate samples already captured are skipped automatically.")
+                    // Deliberately annotates rather than hiding/disabling any
+                    // preset (including "All time") — the limitation can be
+                    // per data type, so a global hide would be wrong whenever
+                    // the grant is mixed across types.
+                    if viewModel.hasLimitedHistoryAccess {
+                        Text(viewModel.historyAccessFooterText)
+                    }
+                }
             }
 
             Section {
@@ -370,6 +384,16 @@ private struct ImportHistoryView: View {
         .onAppear {
             viewModel.loadImportState()
             viewModel.observeImportState()
+            Task { await viewModel.loadHistoryAccessFloors() }
+        }
+        // Widening access happens in the iOS Settings app — the exact round trip
+        // the history-limited status copy asks for — and returning from it does
+        // not re-fire `.onAppear` on a screen that stayed mounted. Without this,
+        // the footer keeps asserting a floor that no longer applies and the
+        // custom-date picker keeps refusing dates the user can now read.
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await viewModel.loadHistoryAccessFloors() }
         }
         .alert(alertTitle, isPresented: $showConfirm) {
             Button(alertConfirmLabel, role: viewModel.importNeedsVolumeWarning ? .destructive : nil) {
@@ -401,8 +425,8 @@ private struct ImportHistoryView: View {
                     )
                 } else if let run = viewModel.importRun {
                     statusRow(
-                        icon: icon(for: run.status),
-                        tint: tint(for: run.status),
+                        icon: icon(for: run),
+                        tint: tint(for: run),
                         title: title(for: run),
                         detail: viewModel.importProgressText
                     )
@@ -455,17 +479,27 @@ private struct ImportHistoryView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func icon(for status: ImportRunStatus) -> String {
-        switch status {
+    /// Keys off the run row, not just its status: a known floor and an
+    /// unconfirmable one each get an icon distinct from a plain
+    /// pause/interruption, so a truncated or unconfirmed import never LOOKS
+    /// like the same thing as an ordinary resumable pause, let alone a green
+    /// checkmark.
+    private func icon(for run: ImportRunState) -> String {
+        switch run.status {
         case .completed: return "checkmark.circle.fill"
         case .failed: return "xmark.octagon.fill"
-        case .interrupted: return "pause.circle.fill"
+        case .interrupted:
+            switch run.stopCause {
+            case .historyLimited: return "exclamationmark.triangle.fill"
+            case .historyAccessUnknown: return "questionmark.circle.fill"
+            default: return "pause.circle.fill"
+            }
         case .running: return "arrow.triangle.2.circlepath"
         }
     }
 
-    private func tint(for status: ImportRunStatus) -> Color {
-        switch status {
+    private func tint(for run: ImportRunState) -> Color {
+        switch run.status {
         case .completed: return .green
         case .failed: return .red
         case .interrupted: return .orange

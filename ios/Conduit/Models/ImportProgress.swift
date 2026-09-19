@@ -52,6 +52,20 @@ enum ImportStopCause: String, Codable {
     /// Staging stopped because the outbox never drained inside
     /// `importDrainTimeout` — uploads are genuinely not getting through.
     case queueNotDraining
+    /// iOS granted Conduit only a limited history window for at least one
+    /// enabled type (the iOS 27 "Past 30 Days" history-access choice), and the
+    /// run's intended range reached below it. The stop is real: the samples
+    /// older than the floor are not readable under the current grant, not
+    /// merely unread yet. Never auto-resumed — see `ImportRunner`.
+    case historyLimited
+    /// iOS would not say how far back Conduit may read at least one enabled
+    /// type, so whether the range was truncated is genuinely **unknown**. The
+    /// read did reach the end of what it could see — only the confirmation
+    /// failed — which is a different statement from "it didn't finish", and
+    /// unlike every other cause here it may not change on a retry. Never
+    /// auto-resumed, and never a success: an unconfirmed range must not earn
+    /// the checkmark a truncated one can't have.
+    case historyAccessUnknown
     /// A type stopped short for a reason that is neither of the above.
     case endedShort
 }
@@ -82,6 +96,14 @@ struct ImportRunState: Codable, Equatable, FetchableRecord, PersistableRecord {
     /// conservative floor computed by `ImportProgressDAO.floorReached`, not the
     /// deepest any single type reached. `nil` until every type has started.
     var oldestReachedAt: Date?
+    /// The earliest date iOS authorized reading history for, among the run's
+    /// enabled types, when at least one of them hit that floor (`stopCause ==
+    /// .historyLimited`). `nil` on every other run, including one written
+    /// before this column existed. Samples older than this date are not proof
+    /// of absence — Apple's own guidance is to treat them as unknown, not
+    /// missing — so this is surfaced as a reason to widen access, not a fact
+    /// about the user's history.
+    var historyFloor: Date?
     /// Whether this paused run may be picked back up **without the user asking** —
     /// on the next foreground, or in a background window iOS grants.
     ///
@@ -111,6 +133,7 @@ struct ImportRunState: Codable, Equatable, FetchableRecord, PersistableRecord {
         case typesTotal = "types_total"
         case typesCompleted = "types_completed"
         case oldestReachedAt = "oldest_reached_at"
+        case historyFloor = "history_floor"
         case autoResume = "auto_resume"
         case stopCause = "stop_cause"
         case startedAt = "started_at"

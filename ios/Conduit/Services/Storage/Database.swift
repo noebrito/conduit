@@ -281,6 +281,26 @@ final class AppDatabase {
             }
         }
 
+        // v11 — the iOS 27 "limited history" floor a run hit, if any. Additive
+        // in the same shape as v8/v9 (one nullable column, no existing column
+        // altered), so a pre-v11 row keeps working unchanged.
+        //
+        // iOS 27 lets a user grant Conduit only "Past 30 Days" of a type's
+        // history instead of full access. Under that grant, a HealthKit read
+        // entirely outside the window returns an EMPTY page with no error —
+        // indistinguishable, to the paging loop, from "the user has no older
+        // data" — so an "All time" import silently stages only the in-range
+        // samples while still recording `status = completed`. `history_floor`
+        // is the earliest date the run's types were authorized to read (from
+        // `HistoryAccessProbing`), persisted so `.historyLimited` (see
+        // `ImportStopCause`) can render the real reason after a relaunch
+        // instead of collapsing into the generic "interrupted" line.
+        migrator.registerMigration("v11-import-history-floor") { db in
+            try db.alter(table: "import_run") { t in
+                t.add(column: "history_floor", .datetime)
+            }
+        }
+
         return migrator
     }
 }

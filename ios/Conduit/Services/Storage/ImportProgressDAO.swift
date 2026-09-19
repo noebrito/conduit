@@ -57,6 +57,7 @@ struct ImportProgressDAO {
             typesTotal: typesTotal,
             typesCompleted: 0,
             oldestReachedAt: nil,
+            historyFloor: nil,
             // A run that is actively being driven has nothing to auto-resume yet;
             // the flag is set (or cleared) when it stops, by whatever stopped it.
             autoResume: false,
@@ -83,6 +84,7 @@ struct ImportProgressDAO {
             // stops this pass records the answer afresh.
             run.autoResume = false
             run.stopCause = nil
+            run.historyFloor = nil
             run.updatedAt = now
             try run.update(db)
         }
@@ -111,11 +113,14 @@ struct ImportProgressDAO {
     ///   that never drained).
     /// - Parameter stopCause: why it stopped, so the reason survives a relaunch
     ///   instead of every short run collapsing into "interrupted".
+    /// - Parameter historyFloor: the earliest date the run's types were
+    ///   authorized to read, set iff `stopCause == .historyLimited`.
     func finishRun(
         status: ImportRunStatus,
         failureReason: String? = nil,
         autoResume: Bool = false,
         stopCause: ImportStopCause? = nil,
+        historyFloor: Date? = nil,
         now: Date = Date()
     ) throws {
         try database.dbWriter.write { db in
@@ -124,6 +129,7 @@ struct ImportProgressDAO {
             run.failureReason = failureReason
             run.autoResume = autoResume
             run.stopCause = stopCause
+            run.historyFloor = historyFloor
             run.updatedAt = now
             try run.update(db)
         }

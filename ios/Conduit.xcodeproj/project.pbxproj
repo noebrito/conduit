@@ -53,6 +53,9 @@
 		CD0000000000000000000129 /* HealthKitAuthorizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000128 /* HealthKitAuthorizer.swift */; };
 		CD00000000000000000009A1 /* WorkoutRouteReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000009A0 /* WorkoutRouteReader.swift */; };
 		CD000000000000000000012B /* AnchoredReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000012A /* AnchoredReader.swift */; };
+		CD00000000000000000AC02 /* HistoryAccessProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000AC01 /* HistoryAccessProbe.swift */; };
+		CD00000000000000000AC04 /* HistoryAccessProbeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000AC03 /* HistoryAccessProbeTests.swift */; };
+		CD00000000000000000AC06 /* HistoryLimitedImportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000AC05 /* HistoryLimitedImportTests.swift */; };
 		CD000000000000000000012D /* Database.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000012C /* Database.swift */; };
 		CD000000000000000000012F /* WebhookConfigDAO.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000012E /* WebhookConfigDAO.swift */; };
 		CD0000000000000000000131 /* DataTypeConfigDAO.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000130 /* DataTypeConfigDAO.swift */; };
@@ -123,6 +126,9 @@
 		CD0000000000000000000128 /* HealthKitAuthorizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitAuthorizer.swift; sourceTree = "<group>"; };
 		CD00000000000000000009A0 /* WorkoutRouteReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutRouteReader.swift; sourceTree = "<group>"; };
 		CD000000000000000000012A /* AnchoredReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnchoredReader.swift; sourceTree = "<group>"; };
+		CD00000000000000000AC01 /* HistoryAccessProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryAccessProbe.swift; sourceTree = "<group>"; };
+		CD00000000000000000AC03 /* HistoryAccessProbeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryAccessProbeTests.swift; sourceTree = "<group>"; };
+		CD00000000000000000AC05 /* HistoryLimitedImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryLimitedImportTests.swift; sourceTree = "<group>"; };
 		CD000000000000000000012C /* Database.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Database.swift; sourceTree = "<group>"; };
 		CD000000000000000000012E /* WebhookConfigDAO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookConfigDAO.swift; sourceTree = "<group>"; };
 		CD0000000000000000000130 /* DataTypeConfigDAO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataTypeConfigDAO.swift; sourceTree = "<group>"; };
@@ -309,6 +315,7 @@
 				CD00000000000000000009A0 /* WorkoutRouteReader.swift */,
 				CD000000000000000000012A /* AnchoredReader.swift */,
 				CD0000000000000000000160 /* ObserverCoordinator.swift */,
+				CD00000000000000000AC01 /* HistoryAccessProbe.swift */,
 			);
 			path = HealthKit;
 			sourceTree = "<group>";
@@ -425,6 +432,8 @@
 				CD00000000000000000001F4 /* ForwardCaptureFloorTests.swift */,
 				CD00000000000000000002A0 /* RegistryReconcileTests.swift */,
 				CD0000000000000000000156 /* StorageDAOTests.swift */,
+				CD00000000000000000AC03 /* HistoryAccessProbeTests.swift */,
+				CD00000000000000000AC05 /* HistoryLimitedImportTests.swift */,
 				CD000000000000000000F0F3 /* SyncStateTests.swift */,
 				CD0000000000000000000170 /* ThrottleTests.swift */,
 				CD0000000000000000000172 /* BatcherTests.swift */,
@@ -561,6 +570,7 @@
 				CD0000000000000000000129 /* HealthKitAuthorizer.swift in Sources */,
 				CD00000000000000000009A1 /* WorkoutRouteReader.swift in Sources */,
 				CD000000000000000000012B /* AnchoredReader.swift in Sources */,
+				CD00000000000000000AC02 /* HistoryAccessProbe.swift in Sources */,
 				CD000000000000000000012D /* Database.swift in Sources */,
 				CD000000000000000000012F /* WebhookConfigDAO.swift in Sources */,
 				CD0000000000000000000131 /* DataTypeConfigDAO.swift in Sources */,
@@ -608,6 +618,8 @@
 				CD0000000000000000000151 /* HealthTypeRegistryTests.swift in Sources */,
 				CD00000000000000000001E1 /* HealthKitAuthorizerTests.swift in Sources */,
 				CD0000000000000000000153 /* DatabaseMigrationTests.swift in Sources */,
+				CD00000000000000000AC04 /* HistoryAccessProbeTests.swift in Sources */,
+				CD00000000000000000AC06 /* HistoryLimitedImportTests.swift in Sources */,
 				CD0000000000000000000155 /* OutboxDAOTests.swift in Sources */,
 				CD00000000000000000009B1 /* WorkoutRouteReaderTests.swift in Sources */,
 				CD00000000000000000001F3 /* HistoryImportTests.swift in Sources */,

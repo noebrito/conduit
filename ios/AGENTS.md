@@ -4,6 +4,61 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - Add durable project-specific notes here as they are discovered through real work.
 
+## iOS 27 "limited history" — per-type HealthKit access floors (`HistoryAccessProbing`)
+
+iOS 27's read-authorization sheet lets a user grant "Past 30 Days and Future Data" instead of "All
+Recorded Data and Future Data". Under that grant a read entirely outside the window returns an
+**empty page with `error == nil`** — indistinguishable, to `HistoryImporter`'s paging loop, from
+"the user has no older data" — so before this feature an "All time" import under a 30-day grant
+staged only the in-range samples while still recording `status = completed, isSuccess = true`,
+identical in every persisted field to a genuinely complete import.
+`Services/HealthKit/HistoryAccessProbe.swift` (wrapping
+`HKHealthStore.earliestAuthorizedSampleDate(for:)`) is the only way to learn the floor; the API
+contract it leans on is spelled out in that file's comments, and its pure mapping is unit-tested with
+no live store (`HistoryAccessProbeTests`).
+
+The invariants to know before touching this — everything else is in those files' comments:
+
+- **Detection is per data type, never one app-wide flag.** A grant can be limited for one type while
+  another keeps full access (originating scout report:
+  `data/conduit-ios27-limited-history-scout/report.md`, outside this repo).
+- **Every enabled type goes into the one batched probe call, workouts and routes included.** They
+  are ordinary `HKSampleType`s, and the API omits unlimited types from its result — omission IS the
+  "not limited" answer, so excluding a type hides a real floor and hands it a green checkmark over a
+  truncated history (regressions: `testWorkoutAndRouteFloorsAreHonouredLikeAnyOtherType`,
+  `testWorkoutsOnlyRunThatHitItsFloorIsNotReportedComplete`). Failure is whole-call, so a per-type
+  loop has no partial-failure shape to recover and would cost ~57 sequential XPC round trips per
+  run.
+- **"Unknown" is not "no floor".** A failed probe resolves nothing about any type it asked about, so
+  a run with any unresolved type never reaches `.completed`/`isSuccess`; it parks on
+  `stopCause == .historyAccessUnknown`, deliberately not `.endedShort` — the read DID reach its end
+  and only the confirmation failed, which is what its copy says.
+- **`ImportRunner.execute` probes after the per-type loop, never inline.** The loop `break`s the
+  whole run on the first `.interrupted` type — right for a cancel or a stuck outbox, wrong for a
+  floor scoped to one type while another type's grant is still full. That probe re-reads the grant
+  fresh (it can change mid-run) and `downgradeTypesThatReachedTheirFloor` flips wrongly-`.completed`
+  types back, which is also what makes a later Resume revisit them.
+- **Resume has no pre-flight "still limited?" short-circuit** — it just runs `execute`, whose
+  post-loop probe re-parks the run. The short-circuit looks free but skips types the user enabled
+  after the run parked (`testResumeAttemptsATypeEnabledAfterTheRunWasParked`). `autoResume` stays
+  `false` for this cause, same reasoning as `queueNotDraining`: nothing changes until the user
+  widens access by hand.
+- ⚠️ **There is no verified deep link to Settings → Privacy & Security → Health → Conduit.**
+  `UIApplication.openSettingsURLString` lands on Conduit's OWN app pane, which carries no
+  history-access control — don't wire a "widen access" button for this flow to it (one was tried and
+  removed); the status copy spells out the manual path, the only part actually verified.
+- **The range picker annotates presets, never hides or disables one** (including "All time") — a
+  mixed per-type grant makes a global hide/disable wrong. Only the *custom* date picker's lower bound
+  clamps, and only when `SettingsViewModel.commonHistoryAccessFloor` finds every enabled type sharing
+  the exact same floor. Settings is the only screen that annotates: onboarding's data-type-picker
+  step runs BEFORE the HealthKit permission step, so there is no grant to probe there. Floors are
+  re-probed on scene activation as well as `.onAppear`, because widening access is a round trip
+  through the Settings app that leaves this screen mounted.
+
+The stop is persisted as `stopCause == .historyLimited` plus `import_run.history_floor` (migration
+`v11-import-history-floor`) — the existing `stopCause` machinery rather than a new top-level
+`ImportRunStatus`, since `.interrupted` is already resumable and already not styled as success.
+
 ## Workout enrichment capture (brand/indoor/HR stats/events) — `HKStatistics` cannot be constructed in a unit test
 
 `AnchoredReader`'s `.workout` case maps `HKWorkout` into the enriched `WorkoutValue` (the matching
