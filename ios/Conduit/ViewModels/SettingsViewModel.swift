@@ -585,8 +585,11 @@ final class SettingsViewModel {
             if outcome.hitCap {
                 return Self.queueNotDrainingText(count: count)
             }
-            if outcome.historyLimited {
-                return Self.historyLimitedText(count: count, floor: outcome.historyFloor)
+            if outcome.historyLimited, let floor = outcome.historyFloor {
+                return Self.historyLimitedText(count: count, floor: floor)
+            }
+            if outcome.historyAccessUnknown {
+                return Self.historyAccessUnknownText(count: count)
             }
             return "Import interrupted after \(count) samples — it didn't finish the range. Resume to continue where it stopped."
         }
@@ -623,9 +626,21 @@ final class SettingsViewModel {
     /// guidance is to treat anything before the floor as unknown, not absent —
     /// and names the exact fix (widen access in Settings, then Resume) instead
     /// of a vague "try again later".
-    static func historyLimitedText(count: String, floor: Date?) -> String {
-        let floorText = floor.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "the last 30 days"
+    static func historyLimitedText(count: String, floor: Date) -> String {
+        let floorText = floor.formatted(date: .abbreviated, time: .omitted)
         return "Imported \(count) samples, back to \(floorText). iOS is only letting Conduit read that far back for at least one data type, so anything older wasn't imported — it may still exist. To import it, open Settings → Privacy & Security → Health → Conduit, choose \"All Recorded Data and Future Data,\" then Resume."
+    }
+
+    /// Copy for a run whose history access could not be determined at all.
+    ///
+    /// Deliberately NOT the generic interrupted line: the range WAS read to its
+    /// end, so "it didn't finish the range — Resume to continue where it
+    /// stopped" would misstate the cause and promise a retry that may change
+    /// nothing. What actually happened is that iOS wouldn't say how far back
+    /// Conduit is allowed to read, so the range can't be confirmed untruncated —
+    /// and an unconfirmed range must not be styled as a success.
+    static func historyAccessUnknownText(count: String) -> String {
+        "Imported \(count) samples and read to the end of everything Conduit could see. iOS wouldn't say how far back it allows reading at least one data type, so Conduit can't confirm nothing older was cut off — and it won't claim an import is complete when it isn't sure. Resume to check again."
     }
 
     /// The same honesty, reconstructed from persisted state after a relaunch.
@@ -658,8 +673,13 @@ final class SettingsViewModel {
             }
             // A history-access floor is a genuinely different reason than "it
             // didn't finish the range" — it names what to actually go do.
-            if run.stopCause == .historyLimited {
-                return historyLimitedText(count: count, floor: run.historyFloor)
+            if run.stopCause == .historyLimited, let floor = run.historyFloor {
+                return historyLimitedText(count: count, floor: floor)
+            }
+            // The range was read to its end and only the CONFIRMATION failed, so
+            // this must not decay into "it didn't finish the range" either.
+            if run.stopCause == .historyAccessUnknown {
+                return historyAccessUnknownText(count: count)
             }
             return "Import interrupted after \(count) samples — it didn't finish the range. Resume to continue where it stopped."
         }
@@ -691,6 +711,11 @@ final class SettingsViewModel {
             // standing in for (never a green checkmark on a truncated import).
             if run.stopCause == .historyLimited {
                 return "History limited"
+            }
+            // Distinct from both "History limited" (which knows the floor) and
+            // "Import interrupted" (which claims the read stopped short).
+            if run.stopCause == .historyAccessUnknown {
+                return "History access unknown"
             }
             return "Import interrupted"
         }

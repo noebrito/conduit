@@ -15,16 +15,24 @@ samples while still recording `status = completed, isSuccess = true` (identical 
 field to a genuinely complete import).
 
 `HistoryAccessProbing`/`HealthKitHistoryAccessProbe` (`Services/HealthKit/HistoryAccessProbe.swift`)
-wraps `HKHealthStore.earliestAuthorizedSampleDate(for:)` and returns `HistoryAccessFloors`:
-`.resolved(floors)` or `.unresolved`. **`.resolved([:])` and `.unresolved` are different facts** —
-the first says iOS confirmed full access (also the pre-iOS-27 answer, and the answer for an empty
-type list), the second says the probe failed and nothing is confirmed. Collapsing the failure into
-an empty floors dictionary is what re-creates the original bug, so a run whose probe is
-`.unresolved` is never allowed to reach `.completed`/`isSuccess` (see `ImportRunner.execute`); it
-stays `.interrupted` and a Resume re-probes. The pure static `floors(for:from:)` mapping takes the
-**latest** (most restrictive) floor among a Conduit type's constituent HealthKit types — a composite
-type like blood pressure is only fully readable where EVERY constituent is — and is unit-tested with
-no live store (`HistoryAccessProbeTests`).
+wraps `HKHealthStore.earliestAuthorizedSampleDate(for:)` and returns `HistoryAccessFloors` — per type,
+**three** states, not two: a floor, a confirmed absence of one, or `unresolvedTypeIDs` (iOS wouldn't
+say). "No floor" and "unknown" are different facts, and collapsing the second into the first is what
+re-creates the original bug, so a run with ANY unresolved type is never allowed to reach
+`.completed`/`isSuccess` (`ImportRunner.execute`) — it stays `.interrupted` under
+`stopCause == .historyAccessUnknown`, which is deliberately NOT `.endedShort`: the read did reach its
+end, only the confirmation failed, and the copy says exactly that rather than "it didn't finish the
+range" (`SettingsViewModel.historyAccessUnknownText`).
+
+The live probe asks in ONE batched call for speed, but that call answers all-or-nothing: iOS
+rejecting a single member of the set (`HKWorkoutType`, `HKSeriesType.workoutRoute()` — neither is a
+sample-date-bearing quantity type) throws the whole thing. **So on a throw it retries type by type**,
+and only the types iOS actually refuses land in `unresolvedTypeIDs`. Per-type detection has to hold
+on the failure path too; without the retry one unsupported type silently disabled detection for
+every type on every run. The pure static `floors(for:from:)` mapping takes the **latest** (most
+restrictive) floor among a Conduit type's constituent HealthKit types — a composite type like blood
+pressure is only fully readable where EVERY constituent is — and is unit-tested with no live store
+(`HistoryAccessProbeTests`).
 
 **Detection is per data type, never a single app-wide flag** — a grant can be limited for one type
 while another keeps full access (§6.6 of the originating scout report,
@@ -48,6 +56,11 @@ whose readable in-window history then never staged at all.
 
 The floor is persisted as `import_run.history_floor` (migration `v11-import-history-floor`, additive
 in the same shape as v8/v9/v10 — see the migration comments in `Database.swift`).
+
+⚠️ `UIApplication.openSettingsURLString` lands on Conduit's OWN app settings pane, which contains no
+Health history-access control — there is no verified deep link to Settings → Privacy & Security →
+Health → Conduit. Don't add a "widen access" button pointing at it (one was tried and removed); the
+status copy spells out the manual path instead, which is the only part actually verified.
 
 UI: `SettingsView`'s range picker **annotates** presets (a footer line) rather than
 hiding/disabling any of them, including "All time" — a mixed per-type grant makes a global

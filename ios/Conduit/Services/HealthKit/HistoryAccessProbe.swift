@@ -6,35 +6,27 @@ private let logger = Logger(subsystem: "dev.noebrito.Conduit", category: "Histor
 
 /// What iOS said about how far back Conduit may read each requested type.
 ///
-/// "No floors" and "we don't know" must never be the same value. An empty
-/// `resolved` dictionary is a POSITIVE statement — iOS confirmed full access for
-/// every type asked about — and collapsing a failed probe into it is exactly how
-/// a 30-day-truncated "All time" import earned a green checkmark in the first
-/// place. `unresolved` keeps that ambiguity visible to the caller so it can
-/// refuse to call the run complete.
-enum HistoryAccessFloors: Sendable, Equatable {
-    /// iOS answered for every requested type. A type absent from the dictionary
-    /// has confirmed full access.
-    case resolved([String: Date])
-    /// iOS could not answer, so NO type's history access is confirmed.
-    case unresolved
+/// Three states per type, and the third is the whole point: a floor, a
+/// confirmed absence of one, or **unknown**. Absent from `floors` while also
+/// absent from `unresolvedTypeIDs` is a POSITIVE statement — iOS confirmed full
+/// access — and collapsing an unanswerable probe into that is exactly how a
+/// 30-day-truncated "All time" import earned a green checkmark in the first
+/// place. Unknown stays visible to the caller so it can refuse to call the run
+/// complete without claiming a floor it never learned.
+///
+/// Resolution is per data type, on the failure path as much as the success one:
+/// one type iOS won't answer for must not erase what it did say about the rest.
+struct HistoryAccessFloors: Sendable, Equatable {
+    /// The earliest readable date per limited type, keyed by
+    /// `HealthDataType.identifier`.
+    var floors: [String: Date] = [:]
+    /// Types iOS would not answer for. Neither limited nor confirmed-full.
+    var unresolvedTypeIDs: Set<String> = []
 
-    /// The floors iOS reported, keyed by `HealthDataType.identifier` — empty
-    /// when nothing is known. Never read this alone to decide that access is
-    /// unrestricted; pair it with `isResolved`.
-    var floors: [String: Date] {
-        switch self {
-        case .resolved(let floors): return floors
-        case .unresolved: return [:]
-        }
-    }
-
-    /// Whether the floors above are a real answer rather than an absence of one.
-    var isResolved: Bool {
-        switch self {
-        case .resolved: return true
-        case .unresolved: return false
-        }
+    /// Whether iOS answered for this type at all. `false` is "unknown", never
+    /// "unrestricted".
+    func isResolved(_ type: HealthDataType) -> Bool {
+        !unresolvedTypeIDs.contains(type.identifier)
     }
 }
 
@@ -50,10 +42,8 @@ enum HistoryAccessFloors: Sendable, Equatable {
 /// the floor before (or instead of) reading straight into it.
 protocol HistoryAccessProbing: Sendable {
     /// The earliest date each of the given types is currently authorized to
-    /// read, keyed by `HealthDataType.identifier`. A type absent from a
-    /// `.resolved` result has no floor: either the OS predates this API
-    /// (iOS < 27) or iOS reports full access. A probe that could not be
-    /// completed returns `.unresolved` instead.
+    /// read. A type in neither `floors` nor `unresolvedTypeIDs` has no floor:
+    /// either the OS predates this API (iOS < 27) or iOS reports full access.
     func limitedHistoryFloors(for types: [HealthDataType]) async -> HistoryAccessFloors
 }
 
@@ -66,19 +56,43 @@ struct HealthKitHistoryAccessProbe: HistoryAccessProbing {
     }
 
     func limitedHistoryFloors(for types: [HealthDataType]) async -> HistoryAccessFloors {
-        // Below iOS 27 there is no limited-history grant to discover, and with
-        // nothing to ask about there is nothing to restrict — both are real
+        // Below iOS 27 there is no limited-history grant to discover, and a type
+        // with nothing to authorize has nothing to restrict — both are real
         // answers, not failures.
-        guard #available(iOS 27.0, *) else { return .resolved([:]) }
-        let objectTypes = Set(types.flatMap(\.authorizationTypes))
-        guard !objectTypes.isEmpty else { return .resolved([:]) }
+        guard #available(iOS 27.0, *) else { return HistoryAccessFloors() }
+        let probeable = types.filter { !$0.authorizationTypes.isEmpty }
+        guard !probeable.isEmpty else { return HistoryAccessFloors() }
+
+        // One batched call is the fast path, but it answers all-or-nothing: if
+        // iOS rejects a single member of the set (a workout or route series
+        // type is not a sample-date-bearing quantity type), the whole call
+        // throws and every OTHER type's answer is lost with it. Detection is
+        // per data type, so the failure path has to be too — fall back to
+        // asking type by type and let only the types iOS actually refuses end
+        // up unresolved.
+        let objectTypes = Set(probeable.flatMap(\.authorizationTypes))
         do {
             let raw = try await store.earliestAuthorizedSampleDate(for: objectTypes)
-            return .resolved(Self.floors(for: types, from: raw))
+            return HistoryAccessFloors(floors: Self.floors(for: probeable, from: raw))
         } catch {
-            logger.error("earliestAuthorizedSampleDate failed: \(error.localizedDescription, privacy: .public)")
-            return .unresolved
+            logger.error("earliestAuthorizedSampleDate failed for the batched set, retrying per type: \(error.localizedDescription, privacy: .public)")
+            return await floorsByProbingEachType(probeable)
         }
+    }
+
+    @available(iOS 27.0, *)
+    private func floorsByProbingEachType(_ types: [HealthDataType]) async -> HistoryAccessFloors {
+        var result = HistoryAccessFloors()
+        for type in types {
+            do {
+                let raw = try await store.earliestAuthorizedSampleDate(for: Set(type.authorizationTypes))
+                result.floors.merge(Self.floors(for: [type], from: raw)) { _, latest in latest }
+            } catch {
+                logger.error("earliestAuthorizedSampleDate failed for \(type.identifier, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                result.unresolvedTypeIDs.insert(type.identifier)
+            }
+        }
+        return result
     }
 
     /// Pure mapping from HealthKit's per-object-type floors to Conduit's

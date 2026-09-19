@@ -84,15 +84,21 @@ final class HistoryAccessProbeTests: XCTestCase {
 
     // MARK: - Resolved vs unresolved
 
-    /// The distinction the import's completion decision rests on: "no floors"
-    /// is an answer, "we couldn't ask" is not, and the two must never compare
-    /// equal however similar their `floors` look.
-    func testUnresolvedIsNotEquivalentToConfirmedFullAccess() {
-        XCTAssertTrue(HistoryAccessFloors.resolved([:]).floors.isEmpty)
-        XCTAssertTrue(HistoryAccessFloors.unresolved.floors.isEmpty)
-        XCTAssertTrue(HistoryAccessFloors.resolved([:]).isResolved)
-        XCTAssertFalse(HistoryAccessFloors.unresolved.isResolved)
-        XCTAssertNotEqual(HistoryAccessFloors.unresolved, .resolved([:]))
+    /// The distinction the import's completion decision rests on: "no floor" is
+    /// an answer, "we couldn't ask" is not, and it is scoped to the individual
+    /// type — an unanswerable type must not make its neighbours unknown too.
+    func testUnresolvedIsScopedPerTypeAndIsNotConfirmedFullAccess() {
+        let unanswerable = HealthDataType.bloodPressure
+        let confirmed = HealthDataType.stepCount
+        let result = HistoryAccessFloors(unresolvedTypeIDs: [unanswerable.identifier])
+
+        XCTAssertFalse(result.isResolved(unanswerable))
+        XCTAssertTrue(result.isResolved(confirmed),
+                      "One unanswerable type must not turn every other type unknown")
+        XCTAssertTrue(result.floors.isEmpty, "Unknown is not a floor")
+        XCTAssertNotEqual(result, HistoryAccessFloors(),
+                          "An unanswered type must never compare equal to confirmed full access")
+        XCTAssertTrue(HistoryAccessFloors().isResolved(confirmed))
     }
 
     // MARK: - Live probe: below iOS 27 it must RESOLVE to no floors (the
@@ -106,12 +112,12 @@ final class HistoryAccessProbeTests: XCTestCase {
         }
         let probe = HealthKitHistoryAccessProbe()
         let result = await probe.limitedHistoryFloors(for: [.stepCount, .heartRate])
-        XCTAssertEqual(result, .resolved([:]))
+        XCTAssertEqual(result, HistoryAccessFloors())
     }
 
     func testLiveProbeResolvesToNoFloorsForNoTypes() async {
         let probe = HealthKitHistoryAccessProbe()
         let result = await probe.limitedHistoryFloors(for: [])
-        XCTAssertEqual(result, .resolved([:]))
+        XCTAssertEqual(result, HistoryAccessFloors())
     }
 }

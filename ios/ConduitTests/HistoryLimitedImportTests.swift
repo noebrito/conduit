@@ -17,22 +17,26 @@ final class HistoryLimitedImportTests: XCTestCase {
 
     private struct StubHistoryAccessProbe: HistoryAccessProbing {
         let floors: [String: Date]
-        /// Stands in for a thrown `earliestAuthorizedSampleDate`: iOS could not
-        /// answer, which must never read as "full access confirmed".
-        let unresolved: Bool
+        /// Types iOS refuses to answer for — a thrown
+        /// `earliestAuthorizedSampleDate`, which must never read as "full
+        /// access confirmed" for the type it happened to, nor for any other.
+        let unresolvedTypeIDs: Set<String>
 
-        init(floors: [String: Date] = [:], unresolved: Bool = false) {
+        init(floors: [String: Date] = [:], unresolvedTypeIDs: Set<String> = []) {
             self.floors = floors
-            self.unresolved = unresolved
+            self.unresolvedTypeIDs = unresolvedTypeIDs
         }
 
         func limitedHistoryFloors(for types: [HealthDataType]) async -> HistoryAccessFloors {
-            if unresolved { return .unresolved }
-            var result: [String: Date] = [:]
+            var result = HistoryAccessFloors()
             for type in types {
-                if let floor = floors[type.identifier] { result[type.identifier] = floor }
+                if unresolvedTypeIDs.contains(type.identifier) {
+                    result.unresolvedTypeIDs.insert(type.identifier)
+                } else if let floor = floors[type.identifier] {
+                    result.floors[type.identifier] = floor
+                }
             }
-            return .resolved(result)
+            return result
         }
     }
 
@@ -162,10 +166,10 @@ final class HistoryLimitedImportTests: XCTestCase {
 
     // MARK: - Probe that can't answer
 
-    /// A probe that FAILED reports `.unresolved`, which is not the same fact as
-    /// "iOS confirms full access" (`.resolved([:])`). An exhausted run whose
-    /// floors could not be determined must therefore stay non-success: the
-    /// empty page it stopped on may well have been a history-access wall.
+    /// A type iOS refuses to answer for is not a type with no floor: the empty
+    /// page it stopped on may well have been a history-access wall. Such a run
+    /// must stay non-success, and must say WHY — `.historyAccessUnknown`, not
+    /// the generic `.endedShort` that claims the read stopped short.
     func testUnresolvedProbeNeverReportsAnExhaustedRunAsComplete() async throws {
         let database = try AppDatabase.makeInMemory()
         let dao = ImportProgressDAO(database)
@@ -174,19 +178,63 @@ final class HistoryLimitedImportTests: XCTestCase {
         try dao.beginRun(runId: "r1", rangeId: ImportRange.allTime.rawValue, rangeStart: nil, typesTotal: 1)
         try dao.checkpoint(hkTypeId: type.identifier, runId: "r1", cursor: nil, stagedCount: 10, status: .completed)
 
-        let runner = makeRunner(database: database, probe: StubHistoryAccessProbe(unresolved: true))
+        let runner = makeRunner(
+            database: database,
+            probe: StubHistoryAccessProbe(unresolvedTypeIDs: [type.identifier])
+        )
         let outcome = await runner.resume(types: [type])
 
         XCTAssertEqual(outcome.status, .interrupted)
         XCTAssertFalse(outcome.status.isSuccess,
                        "An undetermined floor must never earn the green checkmark a truncated import can't have")
-        XCTAssertTrue(outcome.status.isResumable, "Resume re-probes, so the user has a real way forward")
+        XCTAssertTrue(outcome.historyAccessUnknown)
+        XCTAssertFalse(outcome.historyLimited, "No floor was learned, so none may be claimed")
 
         let run = try XCTUnwrap(dao.currentRun())
         XCTAssertEqual(run.status, .interrupted)
         XCTAssertFalse(run.status.isSuccess)
         XCTAssertNil(run.historyFloor, "No floor is known, so none may be claimed")
-        XCTAssertEqual(run.stopCause, .endedShort)
+        XCTAssertEqual(run.stopCause, .historyAccessUnknown)
+        XCTAssertNotEqual(run.stopCause, .endedShort,
+                          "The range WAS read to its end — only its confirmation failed")
+    }
+
+    /// One type iOS won't answer for must not erase what it DID say about the
+    /// others. The live probe asks for every type's object types in one batched
+    /// call, so a single unsupported member used to throw the whole call and
+    /// blank out detection for every type at once; per-type resolution has to
+    /// hold on the failure path, not just the success path.
+    func testOneUnresolvedTypeDoesNotEraseWhatIOSConfirmedAboutTheOthers() async throws {
+        let database = try AppDatabase.makeInMemory()
+        let dao = ImportProgressDAO(database)
+        let limited = HealthDataType.stepCount
+        let fullAccess = HealthDataType.heartRate
+        let unanswerable = HealthDataType.bloodPressure
+        let floor = date(30)
+
+        try dao.beginRun(runId: "r1", rangeId: ImportRange.allTime.rawValue, rangeStart: nil, typesTotal: 3)
+        for type in [limited, fullAccess, unanswerable] {
+            try dao.checkpoint(hkTypeId: type.identifier, runId: "r1", cursor: nil, stagedCount: 5, status: .completed)
+        }
+
+        let runner = makeRunner(
+            database: database,
+            probe: StubHistoryAccessProbe(
+                floors: [limited.identifier: floor],
+                unresolvedTypeIDs: [unanswerable.identifier]
+            )
+        )
+        let outcome = await runner.resume(types: [limited, fullAccess, unanswerable])
+
+        XCTAssertFalse(outcome.status.isSuccess)
+        XCTAssertEqual(try dao.typeProgress(hkTypeId: limited.identifier)?.status, .interrupted,
+                       "The limited type's known floor must still be detected and acted on")
+        XCTAssertEqual(outcome.historyFloor, floor,
+                       "The floor iOS DID report must still be surfaced")
+        XCTAssertEqual(try dao.typeProgress(hkTypeId: fullAccess.identifier)?.status, .completed,
+                       "A type iOS confirmed full access for must keep that confirmed status")
+        XCTAssertTrue(outcome.historyLimited,
+                      "A known floor is the more certain and more actionable statement")
     }
 
     // MARK: - Resume under a still-narrow grant
@@ -367,6 +415,42 @@ final class HistoryLimitedImportTests: XCTestCase {
         XCTAssertTrue(text.contains("Settings"))
         XCTAssertFalse(text.contains("didn't finish the range"),
                        "Must use the specific history-limited copy, not the generic interrupted line")
+    }
+
+    func testHistoryAccessUnknownCopyNamesTheRealCauseNotAShortRead() throws {
+        let dao = ImportProgressDAO(try AppDatabase.makeInMemory())
+        try dao.beginRun(runId: "r1", rangeId: ImportRange.allTime.rawValue, rangeStart: nil, typesTotal: 1)
+        try dao.checkpoint(hkTypeId: "A", runId: "r1", cursor: nil, stagedCount: 10, status: .completed)
+        try dao.finishRun(status: .interrupted, autoResume: false, stopCause: .historyAccessUnknown)
+
+        let run = try XCTUnwrap(dao.currentRun())
+        XCTAssertEqual(SettingsViewModel.statusTitle(for: run), "History access unknown")
+        XCTAssertNotEqual(SettingsViewModel.statusTitle(for: run), "Import interrupted")
+        XCTAssertNotEqual(SettingsViewModel.statusTitle(for: run), "History limited")
+
+        let text = SettingsViewModel.statusText(for: run)
+        XCTAssertFalse(text.contains("didn't finish the range"),
+                       "The read DID reach its end — only the confirmation failed, so this must not claim a short read")
+        XCTAssertFalse(text.contains("Resume to continue where it stopped"),
+                       "Nothing was left mid-range to continue from")
+        XCTAssertTrue(text.contains("can't confirm"), "Must name the real cause: the floor is unknown")
+    }
+
+    func testHistoryAccessUnknownOutcomeCopyMatchesThePersistedCopy() {
+        let outcome = ImportRunner.Outcome(
+            status: .interrupted,
+            staged: 10,
+            failureReason: nil,
+            hitCap: false,
+            cancelled: false,
+            historyAccessUnknown: true
+        )
+        XCTAssertEqual(
+            SettingsViewModel.outcomeText(outcome),
+            SettingsViewModel.historyAccessUnknownText(count: "10"),
+            "The live outcome and the relaunch-reconstructed status must tell the same story"
+        )
+        XCTAssertFalse(outcome.status.isSuccess)
     }
 
     func testHistoryLimitedIsNeverStyledAsSuccess() {

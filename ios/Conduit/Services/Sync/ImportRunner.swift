@@ -152,6 +152,10 @@ final class ImportRunner {
         /// The earliest date iOS authorized reading history for, set iff
         /// `historyLimited` is true.
         var historyFloor: Date? = nil
+        /// True when iOS wouldn't say how far back at least one enabled type may
+        /// be read, so the range was read to its end but could not be confirmed
+        /// untruncated. Distinct from `historyLimited`, which knows the floor.
+        var historyAccessUnknown: Bool = false
     }
 
     private let progressDAO: ImportProgressDAO
@@ -410,15 +414,16 @@ final class ImportRunner {
         )
 
         let finalStaged = (try? progressDAO.currentRun())?.stagedCount ?? stagedTotal
-        // An unresolved probe is NOT "no floor": every type that read to an
-        // empty page may have been stopped by a history-access wall we simply
-        // couldn't ask about, so the range is unconfirmed and must not earn
-        // `.completed`/`isSuccess`. It stays `.interrupted` — resumable, and a
-        // Resume re-probes, so a transient failure costs one extra tap rather
-        // than a green checkmark over a truncated history.
+        // An unresolved type is NOT a type with no floor: the empty page it
+        // stopped on may have been a history-access wall nobody could ask
+        // about, so its range is unconfirmed and must not earn
+        // `.completed`/`isSuccess`. Only the types iOS actually refused to
+        // answer for count here — one unanswerable type must not erase what iOS
+        // did confirm about the others.
+        let unconfirmedTypes = types.filter { !postLoopFloors.isResolved($0) }
         let completedAll = !cancelled
             && !hitCap
-            && postLoopFloors.isResolved
+            && unconfirmedTypes.isEmpty
             && completedEveryType(runId: runId, types: types)
         let status: ImportRunStatus = completedAll ? .completed : .interrupted
 
@@ -435,7 +440,11 @@ final class ImportRunner {
         } else if hitCap {
             stopCause = .queueNotDraining
         } else if historyFloor != nil {
+            // A known floor outranks an unknown one: it is both the more certain
+            // statement and the one that names a fix the user can act on.
             stopCause = .historyLimited
+        } else if !unconfirmedTypes.isEmpty {
+            stopCause = .historyAccessUnknown
         } else {
             stopCause = .endedShort
         }
@@ -465,7 +474,8 @@ final class ImportRunner {
             cancelled: stoppedByUser,
             pausedForBackground: pausedForBackground,
             historyLimited: stopCause == .historyLimited,
-            historyFloor: historyFloor
+            historyFloor: historyFloor,
+            historyAccessUnknown: stopCause == .historyAccessUnknown
         )
     }
 

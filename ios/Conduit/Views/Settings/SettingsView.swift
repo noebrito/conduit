@@ -274,7 +274,6 @@ private struct DataTypesCategoryView: View {
 private struct ImportHistoryView: View {
     @Bindable var viewModel: SettingsViewModel
     @State private var showConfirm = false
-    @Environment(\.openURL) private var openURL
 
     var body: some View {
         List {
@@ -341,47 +340,15 @@ private struct ImportHistoryView: View {
                     )
                 } else {
                     if viewModel.canResumeImport {
-                        // The run stopped because iOS itself won't serve the
-                        // older window — the fix lives in Settings, not in
-                        // this screen, so the CTA sends the user there before
-                        // they tap Resume. Verified path:
-                        // Settings → Privacy & Security → Health → Conduit →
-                        // "All Recorded Data and Future Data".
-                        if viewModel.importRun?.stopCause == .historyLimited {
-                            Button {
-                                if let url = URL(string: UIApplication.openSettingsURLString) {
-                                    openURL(url)
-                                }
-                            } label: {
-                                Label("Widen History Access in Settings", systemImage: "heart.text.square")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .accessibilityLabel("Open Settings to widen Health history access")
-                            .accessibilityHint("iOS is limiting how far back Conduit can read at least one data type's history")
+                        Button {
+                            viewModel.resumeImport()
+                        } label: {
+                            Label("Resume Import", systemImage: "play.circle")
+                                .frame(maxWidth: .infinity)
                         }
-
-                        if viewModel.importRun?.stopCause == .historyLimited {
-                            Button {
-                                viewModel.resumeImport()
-                            } label: {
-                                Label("Resume Import", systemImage: "play.circle")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
-                            .accessibilityLabel("Resume import")
-                            .accessibilityHint("Continues from where the import stopped instead of starting over")
-                        } else {
-                            Button {
-                                viewModel.resumeImport()
-                            } label: {
-                                Label("Resume Import", systemImage: "play.circle")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .accessibilityLabel("Resume import")
-                            .accessibilityHint("Continues from where the import stopped instead of starting over")
-                        }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityLabel("Resume import")
+                        .accessibilityHint("Continues from where the import stopped instead of starting over")
 
                         Button {
                             showConfirm = true
@@ -502,16 +469,21 @@ private struct ImportHistoryView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Keys off the run row, not just its status: `.historyLimited` gets its
-    /// own icon distinct from a plain pause/interruption, so a truncated
-    /// import never LOOKS like the same thing as an ordinary resumable pause,
-    /// let alone a green checkmark.
+    /// Keys off the run row, not just its status: a known floor and an
+    /// unconfirmable one each get an icon distinct from a plain
+    /// pause/interruption, so a truncated or unconfirmed import never LOOKS
+    /// like the same thing as an ordinary resumable pause, let alone a green
+    /// checkmark.
     private func icon(for run: ImportRunState) -> String {
         switch run.status {
         case .completed: return "checkmark.circle.fill"
         case .failed: return "xmark.octagon.fill"
         case .interrupted:
-            return run.stopCause == .historyLimited ? "exclamationmark.triangle.fill" : "pause.circle.fill"
+            switch run.stopCause {
+            case .historyLimited: return "exclamationmark.triangle.fill"
+            case .historyAccessUnknown: return "questionmark.circle.fill"
+            default: return "pause.circle.fill"
+            }
         case .running: return "arrow.triangle.2.circlepath"
         }
     }

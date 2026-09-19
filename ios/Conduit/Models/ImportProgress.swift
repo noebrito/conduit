@@ -58,6 +58,14 @@ enum ImportStopCause: String, Codable {
     /// older than the floor are not readable under the current grant, not
     /// merely unread yet. Never auto-resumed — see `ImportRunner`.
     case historyLimited
+    /// iOS would not say how far back Conduit may read at least one enabled
+    /// type, so whether the range was truncated is genuinely **unknown**. The
+    /// read did reach the end of what it could see — only the confirmation
+    /// failed — which is a different statement from "it didn't finish", and
+    /// unlike every other cause here it may not change on a retry. Never
+    /// auto-resumed, and never a success: an unconfirmed range must not earn
+    /// the checkmark a truncated one can't have.
+    case historyAccessUnknown
     /// A type stopped short for a reason that is neither of the above.
     case endedShort
 }
