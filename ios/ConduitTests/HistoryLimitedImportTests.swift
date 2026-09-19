@@ -356,6 +356,106 @@ final class HistoryLimitedImportTests: XCTestCase {
         XCTAssertNil(try dao.currentRun()?.historyFloor)
     }
 
+    // MARK: - Range-picker annotation and custom-date clamp
+
+    @MainActor
+    private func makeSettingsViewModel(
+        floors: [String: Date],
+        enabled: [HealthDataType]
+    ) throws -> SettingsViewModel {
+        let viewModel = SettingsViewModel(
+            appState: AppState(database: try AppDatabase.makeInMemory()),
+            importCoordinator: ImportRunCoordinator(),
+            historyAccessProbe: StubHistoryAccessProbe(floors: floors)
+        )
+        viewModel.enabledTypeIDs = Set(enabled.map(\.identifier))
+        return viewModel
+    }
+
+    /// One shared floor across every enabled type is the only case the custom
+    /// date picker may be clamped in: a single lower bound is then a true
+    /// statement about all of them.
+    @MainActor
+    func testUniformGrantClampsTheCustomPickerToTheSharedFloor() async throws {
+        let floor = date(30)
+        let viewModel = try makeSettingsViewModel(
+            floors: [
+                HealthDataType.stepCount.identifier: floor,
+                HealthDataType.heartRate.identifier: floor,
+            ],
+            enabled: [.stepCount, .heartRate]
+        )
+        await viewModel.loadHistoryAccessFloors()
+
+        XCTAssertTrue(viewModel.hasLimitedHistoryAccess)
+        XCTAssertEqual(viewModel.commonHistoryAccessFloor, floor)
+        XCTAssertTrue(
+            viewModel.historyAccessFooterText.contains(floor.formatted(date: .abbreviated, time: .omitted)),
+            "One describable floor means the footer can name the actual date"
+        )
+    }
+
+    /// The mixed grant this design centers on: limited for one enabled type,
+    /// full for another. The picker must still ANNOTATE (the limitation is real)
+    /// but must NOT clamp, because no single date describes both types.
+    @MainActor
+    func testMixedGrantWithAnUnlimitedTypeDoesNotClamp() async throws {
+        let floor = date(30)
+        let limitedTypeFirst = try makeSettingsViewModel(
+            floors: [HealthDataType.stepCount.identifier: floor],
+            enabled: [.stepCount, .heartRate]
+        )
+        await limitedTypeFirst.loadHistoryAccessFloors()
+
+        XCTAssertTrue(limitedTypeFirst.hasLimitedHistoryAccess,
+                      "A real limitation must still be annotated — annotate, never hide or disable")
+        XCTAssertNil(limitedTypeFirst.commonHistoryAccessFloor)
+        XCTAssertFalse(
+            limitedTypeFirst.historyAccessFooterText.contains(floor.formatted(date: .abbreviated, time: .omitted)),
+            "A mixed grant must not assert one date as the limit for every type"
+        )
+
+        // Again with the UNLIMITED type first in registry order, so the rule
+        // can't depend on which enabled type happens to be examined first.
+        let unlimitedTypeFirst = try makeSettingsViewModel(
+            floors: [HealthDataType.heartRate.identifier: floor],
+            enabled: [.stepCount, .heartRate]
+        )
+        await unlimitedTypeFirst.loadHistoryAccessFloors()
+
+        XCTAssertTrue(unlimitedTypeFirst.hasLimitedHistoryAccess)
+        XCTAssertNil(unlimitedTypeFirst.commonHistoryAccessFloor)
+    }
+
+    /// "Shares one floor" is exact. Two floors a second apart are two different
+    /// windows, so neither may be presented as the bound for both types.
+    @MainActor
+    func testGrantsWithFloorsThatDifferAtAllDoNotClamp() async throws {
+        let floor = date(30)
+        let viewModel = try makeSettingsViewModel(
+            floors: [
+                HealthDataType.stepCount.identifier: floor,
+                HealthDataType.heartRate.identifier: floor.addingTimeInterval(1),
+            ],
+            enabled: [.stepCount, .heartRate]
+        )
+        await viewModel.loadHistoryAccessFloors()
+
+        XCTAssertTrue(viewModel.hasLimitedHistoryAccess)
+        XCTAssertNil(viewModel.commonHistoryAccessFloor)
+    }
+
+    /// A full-access grant must look exactly like it did before this feature
+    /// existed: no annotation, no clamp.
+    @MainActor
+    func testFullAccessGrantAnnotatesNothingAndClampsNothing() async throws {
+        let viewModel = try makeSettingsViewModel(floors: [:], enabled: [.stepCount, .heartRate])
+        await viewModel.loadHistoryAccessFloors()
+
+        XCTAssertFalse(viewModel.hasLimitedHistoryAccess)
+        XCTAssertNil(viewModel.commonHistoryAccessFloor)
+    }
+
     // MARK: - DAO round-trip
 
     func testHistoryFloorRoundTripsThroughFinishRun() throws {
