@@ -101,6 +101,37 @@ final class HistoryAccessProbeTests: XCTestCase {
         XCTAssertTrue(HistoryAccessFloors().isResolved(confirmed))
     }
 
+    // MARK: - Not applicable is not unknown
+
+    /// Workouts and routes are not sample-date-bearing types, so
+    /// `earliestAuthorizedSampleDate` has nothing to say about them. They must
+    /// come back **resolved with no floor** — a definitive "not applicable" —
+    /// never unresolved: an undetectable type that lands in `unresolvedTypeIDs`
+    /// blocks `.completed` forever, for every iOS 27 user, including ones with
+    /// full access and nothing truncated.
+    ///
+    /// This exercises the LIVE probe and is deliberately not version-gated: the
+    /// exclusion happens before any `HKHealthStore` call, so there is nothing
+    /// here that needs a device, an authorization, or iOS 27 to be true.
+    func testLiveProbeTreatsTypesWithNoSampleDateFloorAsNotApplicable() async {
+        let probe = HealthKitHistoryAccessProbe()
+        let result = await probe.limitedHistoryFloors(for: [.workout, .workoutRoute])
+
+        XCTAssertEqual(result, HistoryAccessFloors())
+        XCTAssertTrue(result.isResolved(.workout),
+                      "A type iOS can never answer for must not be treated as unknown")
+        XCTAssertTrue(result.isResolved(.workoutRoute))
+    }
+
+    func testFloorBearingObjectTypesExcludesWorkoutAndRouteAndNothingElse() {
+        XCTAssertTrue(HealthKitHistoryAccessProbe.floorBearingObjectTypes(of: .workout).isEmpty)
+        XCTAssertTrue(HealthKitHistoryAccessProbe.floorBearingObjectTypes(of: .workoutRoute).isEmpty)
+        XCTAssertFalse(HealthKitHistoryAccessProbe.floorBearingObjectTypes(of: .stepCount).isEmpty,
+                       "An ordinary quantity type must still be asked about")
+        XCTAssertEqual(HealthKitHistoryAccessProbe.floorBearingObjectTypes(of: .bloodPressure).count, 2,
+                       "A composite's constituents are all sample-date-bearing and must still be asked about")
+    }
+
     // MARK: - Live probe: below iOS 27 it must RESOLVE to no floors (the
     // regression that must never happen — a full-access or pre-27 user must see
     // IDENTICAL behavior to before this feature existed, which means a real

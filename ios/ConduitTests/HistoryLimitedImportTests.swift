@@ -200,10 +200,10 @@ final class HistoryLimitedImportTests: XCTestCase {
     }
 
     /// One type iOS won't answer for must not erase what it DID say about the
-    /// others. The live probe asks for every type's object types in one batched
-    /// call, so a single unsupported member used to throw the whole call and
-    /// blank out detection for every type at once; per-type resolution has to
-    /// hold on the failure path, not just the success path.
+    /// others. `earliestAuthorizedSampleDate` answers a whole set all-or-nothing,
+    /// so asking about every enabled type at once let a single unsupported member
+    /// blank out detection for all of them; per-type resolution has to hold on
+    /// the failure path, not just the success path.
     func testOneUnresolvedTypeDoesNotEraseWhatIOSConfirmedAboutTheOthers() async throws {
         let database = try AppDatabase.makeInMemory()
         let dao = ImportProgressDAO(database)
@@ -235,6 +235,32 @@ final class HistoryLimitedImportTests: XCTestCase {
                        "A type iOS confirmed full access for must keep that confirmed status")
         XCTAssertTrue(outcome.historyLimited,
                       "A known floor is the more certain and more actionable statement")
+    }
+
+    /// The end-to-end consequence, driven by the LIVE probe: a run over types
+    /// iOS can never report a floor for still reaches `.completed`. Before
+    /// workouts and routes were treated as not-applicable, this run parked on
+    /// `.historyAccessUnknown` on every iOS 27 device and no user action could
+    /// ever clear it. No HealthKit call happens for these types, so this holds
+    /// on any OS version.
+    func testRunOverTypesWithNoSampleDateFloorStillCompletes() async throws {
+        let database = try AppDatabase.makeInMemory()
+        let dao = ImportProgressDAO(database)
+        let types: [HealthDataType] = [.workout, .workoutRoute]
+
+        try dao.beginRun(runId: "r1", rangeId: ImportRange.allTime.rawValue, rangeStart: nil, typesTotal: types.count)
+        for type in types {
+            try dao.checkpoint(hkTypeId: type.identifier, runId: "r1", cursor: nil, stagedCount: 7, status: .completed)
+        }
+
+        let runner = makeRunner(database: database, probe: HealthKitHistoryAccessProbe())
+        let outcome = await runner.resume(types: types)
+
+        XCTAssertEqual(outcome.status, .completed)
+        XCTAssertTrue(outcome.status.isSuccess,
+                      "A genuinely finished import must not be held back by a type iOS can't report a floor for")
+        XCTAssertFalse(outcome.historyAccessUnknown)
+        XCTAssertNil(try dao.currentRun()?.stopCause)
     }
 
     // MARK: - Resume under a still-narrow grant

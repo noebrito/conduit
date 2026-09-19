@@ -24,14 +24,27 @@ re-creates the original bug, so a run with ANY unresolved type is never allowed 
 end, only the confirmation failed, and the copy says exactly that rather than "it didn't finish the
 range" (`SettingsViewModel.historyAccessUnknownText`).
 
-The live probe asks in ONE batched call for speed, but that call answers all-or-nothing: iOS
-rejecting a single member of the set (`HKWorkoutType`, `HKSeriesType.workoutRoute()` — neither is a
-sample-date-bearing quantity type) throws the whole thing. **So on a throw it retries type by type**,
-and only the types iOS actually refuses land in `unresolvedTypeIDs`. Per-type detection has to hold
-on the failure path too; without the retry one unsupported type silently disabled detection for
-every type on every run. The pure static `floors(for:from:)` mapping takes the **latest** (most
-restrictive) floor among a Conduit type's constituent HealthKit types — a composite type like blood
-pressure is only fully readable where EVERY constituent is — and is unit-tested with no live store
+The live probe asks **type by type**, deliberately not in one batched call: the API answers a whole
+set all-or-nothing, so one member it won't answer for takes every other type's answer down with it.
+Per-type detection has to hold on the failure path, not just the success path.
+
+**`HKWorkoutType` and `HKSeriesType.workoutRoute()` are excluded by design, as "not applicable"
+rather than "unknown"** (`HealthKitHistoryAccessProbe.carriesSampleDateFloor`). Neither is a
+sample-date-bearing type, so `earliestAuthorizedSampleDate` has no answer to give about them — and
+both are in the default enabled set of every install. Left in `unresolvedTypeIDs` they made
+`.completed` permanently unreachable for EVERY iOS 27 user, full-access ones included: the run parked
+on `.historyAccessUnknown` and re-parked identically on every Resume, with no user action that could
+clear it. This exclusion is the accepted tradeoff (captain's explicit call): if those two types turn
+out to be limitable by the same grant with no API to detect it, a narrow, type-scoped version of the
+original bug applies to them — judged better than permanently blocking every iOS 27 user's import.
+Pinned by `testLiveProbeTreatsTypesWithNoSampleDateFloorAsNotApplicable` and
+`testRunOverTypesWithNoSampleDateFloorStillCompletes`, both of which drive the live probe and are
+deliberately NOT version-gated (the exclusion happens before any `HKHealthStore` call, so they need
+no device and no iOS 27).
+
+The pure static `floors(for:from:)` mapping takes the **latest** (most restrictive) floor among a
+Conduit type's constituent HealthKit types — a composite type like blood pressure is only fully
+readable where EVERY constituent is — and is unit-tested with no live store
 (`HistoryAccessProbeTests`).
 
 **Detection is per data type, never a single app-wide flag** — a grant can be limited for one type
