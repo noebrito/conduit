@@ -72,14 +72,29 @@ final class SettingsViewModel {
 
     var exportConfigJSON: String? = nil
 
+    /// The earliest date iOS currently authorizes reading each enabled type's
+    /// history back to, keyed by `HealthDataType.identifier`. A type absent
+    /// here has no known limit (full access, or below iOS 27). Populated by
+    /// `loadHistoryAccessFloors()` — never hides/disables a range preset (a
+    /// grant can be limited per type, so a global hide would be wrong for a
+    /// mixed grant), only annotates the picker and clamps the custom date's
+    /// lower bound when every enabled type shares one floor.
+    var historyAccessFloors: [String: Date] = [:]
+
     private let appState: AppState
     private var currentWebhookID: Int64? = nil
 
     private let importCoordinator: ImportRunCoordinator
+    private let historyAccessProbe: HistoryAccessProbing
 
-    init(appState: AppState, importCoordinator: ImportRunCoordinator = .shared) {
+    init(
+        appState: AppState,
+        importCoordinator: ImportRunCoordinator = .shared,
+        historyAccessProbe: HistoryAccessProbing = HealthKitHistoryAccessProbe()
+    ) {
         self.appState = appState
         self.importCoordinator = importCoordinator
+        self.historyAccessProbe = historyAccessProbe
     }
 
     func load() {
@@ -374,6 +389,46 @@ final class SettingsViewModel {
     /// conservative floor, `nil` until every type has started.
     var importOldestReached: Date? { importRun?.oldestReachedAt }
 
+    /// Re-check iOS's current per-type history-access floors for the enabled
+    /// types. Cheap and side-effect-free — safe to call from `.onAppear` and
+    /// after every toggle, since the grant can only be discovered by asking.
+    func loadHistoryAccessFloors() async {
+        let types = HealthTypeRegistry.shared.all.filter { enabledTypeIDs.contains($0.identifier) }
+        guard !types.isEmpty else {
+            historyAccessFloors = [:]
+            return
+        }
+        historyAccessFloors = await historyAccessProbe.limitedHistoryFloors(for: types)
+    }
+
+    /// Whether at least one enabled type is under a limited-history grant.
+    /// Drives the range picker's annotation only — never hides or disables a
+    /// preset, since the limitation can be per type.
+    var hasLimitedHistoryAccess: Bool { !historyAccessFloors.isEmpty }
+
+    /// The one floor to clamp the custom date picker's lower bound to. `nil`
+    /// whenever the grant is mixed — some enabled types limited and others
+    /// not, or limited to different dates — because a single clamp would
+    /// misrepresent whichever type it doesn't actually describe.
+    var commonHistoryAccessFloor: Date? {
+        let types = HealthTypeRegistry.shared.all.filter { enabledTypeIDs.contains($0.identifier) }
+        guard !types.isEmpty else { return nil }
+        let floors = types.map { historyAccessFloors[$0.identifier] }
+        guard let sharedFloor = floors[0] else { return nil }
+        guard floors.allSatisfy({ $0 == sharedFloor }) else { return nil }
+        return sharedFloor
+    }
+
+    /// Footer copy for the range picker when at least one enabled type is
+    /// limited. Deliberately never suggests hiding/disabling a preset like
+    /// "All time" — it still stages everything iOS currently allows.
+    var historyAccessFooterText: String {
+        if let floor = commonHistoryAccessFloor {
+            return "iOS is currently only letting Conduit read history back to \(floor.formatted(date: .abbreviated, time: .omitted)) for your enabled data types. A range further back — like \"All time\" — will still stage everything iOS allows. To go further, open Settings → Privacy & Security → Health → Conduit and choose \"All Recorded Data and Future Data.\""
+        }
+        return "iOS is currently limiting how far back Conduit can read history for at least one enabled data type (this can vary by type). A range further back — like \"All time\" — will still stage everything iOS allows for each type. To go further, open Settings → Privacy & Security → Health → Conduit and choose \"All Recorded Data and Future Data.\""
+    }
+
     /// Start a paged, newest-first, cap-bounded historical import for every
     /// enabled type over the chosen range. Runs in a cancellable `Task` so the UI
     /// can offer a Cancel button; drives `ImportRunner` (which checkpoints a
@@ -530,6 +585,9 @@ final class SettingsViewModel {
             if outcome.hitCap {
                 return Self.queueNotDrainingText(count: count)
             }
+            if outcome.historyLimited {
+                return Self.historyLimitedText(count: count, floor: outcome.historyFloor)
+            }
             return "Import interrupted after \(count) samples — it didn't finish the range. Resume to continue where it stopped."
         }
     }
@@ -557,6 +615,17 @@ final class SettingsViewModel {
     /// re-stalling for the whole drain timeout on every launch.
     static func queueNotDrainingText(count: String) -> String {
         "The upload queue is still draining after \(count) samples — paused for now. It keeps uploading in the background; resume to finish the range."
+    }
+
+    /// Copy for a run that hit an iOS 27 "limited history" access floor.
+    ///
+    /// Deliberately never says the older data doesn't exist — Apple's own
+    /// guidance is to treat anything before the floor as unknown, not absent —
+    /// and names the exact fix (widen access in Settings, then Resume) instead
+    /// of a vague "try again later".
+    static func historyLimitedText(count: String, floor: Date?) -> String {
+        let floorText = floor.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "the last 30 days"
+        return "Imported \(count) samples, back to \(floorText). iOS is only letting Conduit read that far back for at least one data type, so anything older wasn't imported — it may still exist. To import it, open Settings → Privacy & Security → Health → Conduit, choose \"All Recorded Data and Future Data,\" then Resume."
     }
 
     /// The same honesty, reconstructed from persisted state after a relaunch.
@@ -587,6 +656,11 @@ final class SettingsViewModel {
             if run.stopCause == .userCancelled {
                 return cancelledText(count: count)
             }
+            // A history-access floor is a genuinely different reason than "it
+            // didn't finish the range" — it names what to actually go do.
+            if run.stopCause == .historyLimited {
+                return historyLimitedText(count: count, floor: run.historyFloor)
+            }
             return "Import interrupted after \(count) samples — it didn't finish the range. Resume to continue where it stopped."
         }
     }
@@ -610,6 +684,13 @@ final class SettingsViewModel {
             }
             if run.stopCause == .userCancelled {
                 return "Import cancelled"
+            }
+            // Deliberately not "Import interrupted" or "Import paused" — this is
+            // a distinct, non-success condition with its own fix, not a generic
+            // pause, and it must never look like the completed state it is
+            // standing in for (never a green checkmark on a truncated import).
+            if run.stopCause == .historyLimited {
+                return "History limited"
             }
             return "Import interrupted"
         }

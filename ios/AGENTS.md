@@ -4,6 +4,54 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - Add durable project-specific notes here as they are discovered through real work.
 
+## iOS 27 "limited history" — per-type HealthKit access floors, detected via `HistoryAccessProbing`
+
+iOS 27 added a two-stage choice to the HealthKit read-authorization sheet: alongside Allow/Don't
+Allow, the user can grant "Past 30 Days and Future Data" instead of "All Recorded Data and Future
+Data". A read entirely outside that window returns an **empty page with `error == nil`** —
+indistinguishable, to `HistoryImporter`'s paging loop, from "the user has no older data" — so
+without this feature an "All time" import under a 30-day grant silently staged only the in-range
+samples while still recording `status = completed, isSuccess = true` (identical in every persisted
+field to a genuinely complete import).
+
+`HistoryAccessProbing`/`HealthKitHistoryAccessProbe` (`Services/HealthKit/HistoryAccessProbe.swift`)
+wraps `HKHealthStore.earliestAuthorizedSampleDate(for:)` (iOS 27+, `[:]` below it — a probe failure
+also degrades to `[:]` rather than throwing, logged, so a transient error can't brick the whole
+import pipeline behind an error the runner has no route to recover from). Its pure static
+`floors(for:from:)` mapping takes the **latest** (most restrictive) floor among a Conduit type's
+constituent HealthKit types — a composite type like blood pressure is only fully readable where
+EVERY constituent is — and is unit-tested with no live store (`HistoryAccessProbeTests`).
+
+**Detection is per data type, never a single app-wide flag** — a grant can be limited for one type
+while another keeps full access (§6.6 of the originating scout report,
+`data/conduit-ios27-limited-history-scout/report.md` in the firstmate home, if still retained).
+
+`ImportRunner.execute` probes **after** the per-type loop finishes, not inline during it — inline
+would work only by accident: the loop `break`s the run entirely the first time ANY type ends up
+`.interrupted` (correct for a cancellation or a stuck outbox, both of which really do stop the whole
+run), and a history-access floor must NOT do that, since another type's grant may still be full. The
+post-loop pass (`downgradeTypesThatReachedTheirFloor`) re-probes fresh (the grant can change mid-run)
+and flips any wrongly-`.completed` type back to `.interrupted`, which also makes a later Resume
+actually revisit it. The result reuses the existing `stopCause` machinery (a new `.historyLimited`
+case) rather than a new top-level `ImportRunStatus` — `.interrupted` is already resumable and already
+not styled as success, so no exhaustive switch needed a new case. `autoResume` stays `false` for this
+cause (same reasoning as `queueNotDraining`): auto-resuming would re-read the same unreadable window
+on every foreground until the user manually widens access in Settings. An explicit Resume while still
+under the same narrow grant re-probes and short-circuits straight back to `.historyLimited` instead of
+re-invoking the pager (`ImportRunner.resume`, gated on `run.stopCause == .historyLimited`).
+
+The floor is persisted as `import_run.history_floor` (migration `v11-import-history-floor`, additive
+in the same shape as v8/v9/v10 — see the migration comments in `Database.swift`).
+
+UI: `SettingsView`'s range picker **annotates** presets (a footer line) rather than
+hiding/disabling any of them, including "All time" — a mixed per-type grant makes a global
+hide/disable wrong. Only the *custom* date picker's lower bound clamps, and only when
+`SettingsViewModel.commonHistoryAccessFloor` finds every enabled type sharing the exact same floor.
+`DataTypePickerStepView` (onboarding) gets the identical treatment for symmetry, but it is almost
+always inert in practice: onboarding's data-type-picker step runs BEFORE the HealthKit permission
+step, so a fresh install has no grant yet to probe. It only ever shows anything on a **re-run** of
+onboarding ("Reset & Re-run Onboarding" in Settings) where a prior grant already exists.
+
 ## Workout enrichment capture (brand/indoor/HR stats/events) — `HKStatistics` cannot be constructed in a unit test
 
 `AnchoredReader`'s `.workout` case maps `HKWorkout` into the enriched `WorkoutValue` (the matching

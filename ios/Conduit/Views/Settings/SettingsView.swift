@@ -274,6 +274,7 @@ private struct DataTypesCategoryView: View {
 private struct ImportHistoryView: View {
     @Bindable var viewModel: SettingsViewModel
     @State private var showConfirm = false
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         List {
@@ -291,7 +292,11 @@ private struct ImportHistoryView: View {
                     DatePicker(
                         "Start date",
                         selection: $viewModel.customImportStart,
-                        in: ...Date(),
+                        // Clamped to iOS's floor ONLY when every enabled type
+                        // shares the same one — a grant can be limited per
+                        // type, so clamping against a mixed grant would
+                        // misrepresent whichever type it doesn't describe.
+                        in: (viewModel.commonHistoryAccessFloor ?? .distantPast)...Date(),
                         displayedComponents: .date
                     )
                     .accessibilityLabel("Custom import start date")
@@ -299,7 +304,16 @@ private struct ImportHistoryView: View {
             } header: {
                 Text("How far back")
             } footer: {
-                Text("Only the data types you've enabled will be imported. Duplicate samples already captured are skipped automatically.")
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Only the data types you've enabled will be imported. Duplicate samples already captured are skipped automatically.")
+                    // Deliberately annotates rather than hiding/disabling any
+                    // preset (including "All time") — the limitation can be
+                    // per data type, so a global hide would be wrong whenever
+                    // the grant is mixed across types.
+                    if viewModel.hasLimitedHistoryAccess {
+                        Text(viewModel.historyAccessFooterText)
+                    }
+                }
             }
 
             Section {
@@ -327,15 +341,47 @@ private struct ImportHistoryView: View {
                     )
                 } else {
                     if viewModel.canResumeImport {
-                        Button {
-                            viewModel.resumeImport()
-                        } label: {
-                            Label("Resume Import", systemImage: "play.circle")
-                                .frame(maxWidth: .infinity)
+                        // The run stopped because iOS itself won't serve the
+                        // older window — the fix lives in Settings, not in
+                        // this screen, so the CTA sends the user there before
+                        // they tap Resume. Verified path:
+                        // Settings → Privacy & Security → Health → Conduit →
+                        // "All Recorded Data and Future Data".
+                        if viewModel.importRun?.stopCause == .historyLimited {
+                            Button {
+                                if let url = URL(string: UIApplication.openSettingsURLString) {
+                                    openURL(url)
+                                }
+                            } label: {
+                                Label("Widen History Access in Settings", systemImage: "heart.text.square")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .accessibilityLabel("Open Settings to widen Health history access")
+                            .accessibilityHint("iOS is limiting how far back Conduit can read at least one data type's history")
                         }
-                        .buttonStyle(.borderedProminent)
-                        .accessibilityLabel("Resume import")
-                        .accessibilityHint("Continues from where the import stopped instead of starting over")
+
+                        if viewModel.importRun?.stopCause == .historyLimited {
+                            Button {
+                                viewModel.resumeImport()
+                            } label: {
+                                Label("Resume Import", systemImage: "play.circle")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel("Resume import")
+                            .accessibilityHint("Continues from where the import stopped instead of starting over")
+                        } else {
+                            Button {
+                                viewModel.resumeImport()
+                            } label: {
+                                Label("Resume Import", systemImage: "play.circle")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .accessibilityLabel("Resume import")
+                            .accessibilityHint("Continues from where the import stopped instead of starting over")
+                        }
 
                         Button {
                             showConfirm = true
@@ -370,6 +416,7 @@ private struct ImportHistoryView: View {
         .onAppear {
             viewModel.loadImportState()
             viewModel.observeImportState()
+            Task { await viewModel.loadHistoryAccessFloors() }
         }
         .alert(alertTitle, isPresented: $showConfirm) {
             Button(alertConfirmLabel, role: viewModel.importNeedsVolumeWarning ? .destructive : nil) {
@@ -401,8 +448,8 @@ private struct ImportHistoryView: View {
                     )
                 } else if let run = viewModel.importRun {
                     statusRow(
-                        icon: icon(for: run.status),
-                        tint: tint(for: run.status),
+                        icon: icon(for: run),
+                        tint: tint(for: run),
                         title: title(for: run),
                         detail: viewModel.importProgressText
                     )
@@ -455,17 +502,22 @@ private struct ImportHistoryView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func icon(for status: ImportRunStatus) -> String {
-        switch status {
+    /// Keys off the run row, not just its status: `.historyLimited` gets its
+    /// own icon distinct from a plain pause/interruption, so a truncated
+    /// import never LOOKS like the same thing as an ordinary resumable pause,
+    /// let alone a green checkmark.
+    private func icon(for run: ImportRunState) -> String {
+        switch run.status {
         case .completed: return "checkmark.circle.fill"
         case .failed: return "xmark.octagon.fill"
-        case .interrupted: return "pause.circle.fill"
+        case .interrupted:
+            return run.stopCause == .historyLimited ? "exclamationmark.triangle.fill" : "pause.circle.fill"
         case .running: return "arrow.triangle.2.circlepath"
         }
     }
 
-    private func tint(for status: ImportRunStatus) -> Color {
-        switch status {
+    private func tint(for run: ImportRunState) -> Color {
+        switch run.status {
         case .completed: return .green
         case .failed: return .red
         case .interrupted: return .orange

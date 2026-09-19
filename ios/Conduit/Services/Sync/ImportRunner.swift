@@ -144,16 +144,31 @@ final class ImportRunner {
         /// True when the call was refused because another task in this process is
         /// already driving an import. Nothing was started and nothing was reset.
         var alreadyRunning: Bool = false
+        /// True when the run stopped because iOS granted only limited history
+        /// access (the iOS 27 "Past 30 Days" choice) for at least one enabled
+        /// type, and the run's intended range reached below it. Never
+        /// auto-resumed — see `execute`'s post-loop check.
+        var historyLimited: Bool = false
+        /// The earliest date iOS authorized reading history for, set iff
+        /// `historyLimited` is true.
+        var historyFloor: Date? = nil
     }
 
     private let progressDAO: ImportProgressDAO
     private let engine: SyncEngine
     private let coordinator: ImportRunCoordinator
+    private let probe: HistoryAccessProbing
 
-    init(database: AppDatabase, engine: SyncEngine, coordinator: ImportRunCoordinator = .shared) {
+    init(
+        database: AppDatabase,
+        engine: SyncEngine,
+        coordinator: ImportRunCoordinator = .shared,
+        probe: HistoryAccessProbing = HealthKitHistoryAccessProbe()
+    ) {
         self.progressDAO = ImportProgressDAO(database)
         self.engine = engine
         self.coordinator = coordinator
+        self.probe = probe
     }
 
     /// Whether a task in this process is driving an import right now — regardless
@@ -208,6 +223,40 @@ final class ImportRunner {
         // executions would checkpoint the same rows and race on finishRun.
         guard coordinator.claim(run.runId) else { return busyOutcome() }
         defer { coordinator.release(run.runId) }
+
+        // A run parked on `.historyLimited` stopped because iOS itself won't
+        // serve the older window — not because anything here needs re-reading.
+        // Re-probing first, rather than diving straight into `execute`, is what
+        // keeps a Resume tap from churning the pager against the same
+        // unreadable window on every attempt until the user actually widens
+        // access in Settings.
+        if run.stopCause == .historyLimited {
+            let floors = await probe.limitedHistoryFloors(for: types)
+            let stillLimited = types.contains { type in
+                guard let floor = floors[type.identifier] else { return false }
+                return run.rangeStart.map { $0 < floor } ?? true
+            }
+            if stillLimited {
+                let floor = types.compactMap { floors[$0.identifier] }.max() ?? run.historyFloor
+                try? progressDAO.finishRun(
+                    status: .interrupted,
+                    autoResume: false,
+                    stopCause: .historyLimited,
+                    historyFloor: floor
+                )
+                let refreshed = (try? progressDAO.currentRun()) ?? run
+                return Outcome(
+                    status: .interrupted,
+                    staged: refreshed.stagedCount,
+                    failureReason: nil,
+                    hitCap: false,
+                    cancelled: false,
+                    historyLimited: true,
+                    historyFloor: floor
+                )
+            }
+        }
+
         do {
             // The enabled set can have grown since the run began; without this the
             // status renders "5/3 types finished" and floorReached's
@@ -376,6 +425,23 @@ final class ImportRunner {
             && !Task.isCancelled
         let stoppedByUser = cancelled && !pausedForBackground
 
+        // The post-loop probe is what decides truth here — not an inline check
+        // during the loop above — because the grant can change (widen or
+        // narrow, from Settings) while this run is in flight, and because the
+        // loop above `break`s the run entirely the first time ANY type ends up
+        // `.interrupted` (correct for a cancellation or a stuck outbox, both of
+        // which stop the WHOLE run). A history-access floor is scoped to ONE
+        // type — detection must be per data type — so type B must still get to
+        // finish its own range even though type A's grant is narrow, which an
+        // inline break would have prevented.
+        let postLoopFloors = await probe.limitedHistoryFloors(for: types)
+        let historyFloor = downgradeTypesThatReachedTheirFloor(
+            runId: runId,
+            since: since,
+            types: types,
+            floors: postLoopFloors
+        )
+
         let finalStaged = (try? progressDAO.currentRun())?.stagedCount ?? stagedTotal
         let completedAll = !cancelled && !hitCap && completedEveryType(runId: runId, types: types)
         let status: ImportRunStatus = completedAll ? .completed : .interrupted
@@ -392,6 +458,8 @@ final class ImportRunner {
             stopCause = .backgrounded
         } else if hitCap {
             stopCause = .queueNotDraining
+        } else if historyFloor != nil {
+            stopCause = .historyLimited
         } else {
             stopCause = .endedShort
         }
@@ -406,7 +474,12 @@ final class ImportRunner {
         // every foreground and launch — a ten-minute apparent hang on every app
         // open, far worse than one deliberate Resume tap. A healthy large import
         // drains and continues WITHIN the run and never reaches this path.
-        try? progressDAO.finishRun(status: status, autoResume: pausedForBackground, stopCause: stopCause)
+        try? progressDAO.finishRun(
+            status: status,
+            autoResume: pausedForBackground,
+            stopCause: stopCause,
+            historyFloor: historyFloor
+        )
         logger.info("import run \(runId, privacy: .public) ended \(status.rawValue, privacy: .public) with \(finalStaged) staged")
         return Outcome(
             status: status,
@@ -414,8 +487,50 @@ final class ImportRunner {
             failureReason: nil,
             hitCap: hitCap,
             cancelled: stoppedByUser,
-            pausedForBackground: pausedForBackground
+            pausedForBackground: pausedForBackground,
+            historyLimited: stopCause == .historyLimited,
+            historyFloor: historyFloor
         )
+    }
+
+    /// After every type has run its natural course, check each `.completed`
+    /// type against the freshest known floors: a range whose exhausted signal
+    /// was actually the iOS 27 history-access wall, not "no older data", must
+    /// be corrected back to `.interrupted` before the run's outcome is decided.
+    /// Leaving it `.interrupted` also means a later Resume's
+    /// `existing?.status == .completed { continue }` skip does not fire, so
+    /// widening access and resuming genuinely re-reads the type's older pages.
+    ///
+    /// - Returns: the latest (most restrictive) floor among the types this
+    ///   downgraded, or `nil` if none were.
+    private func downgradeTypesThatReachedTheirFloor(
+        runId: String,
+        since: Date?,
+        types: [HealthDataType],
+        floors: [String: Date]
+    ) -> Date? {
+        guard !floors.isEmpty else { return nil }
+        let stored = (try? progressDAO.allTypeProgress()) ?? []
+        let byID = Dictionary(uniqueKeysWithValues: stored.filter { $0.runId == runId }.map { ($0.hkTypeId, $0) })
+
+        var reachedFloors: [Date] = []
+        for type in types {
+            guard let floor = floors[type.identifier] else { continue }
+            guard let progress = byID[type.identifier], progress.status == .completed else { continue }
+            // .allTime (since == nil) always reaches below any floor; a bounded
+            // range only reached it if its intended start is older than the floor.
+            let reachedFloor = since.map { $0 < floor } ?? true
+            guard reachedFloor else { continue }
+            try? progressDAO.checkpoint(
+                hkTypeId: type.identifier,
+                runId: runId,
+                cursor: progress.cursor,
+                stagedCount: progress.stagedCount,
+                status: .interrupted
+            )
+            reachedFloors.append(floor)
+        }
+        return reachedFloors.max()
     }
 
     private func completedEveryType(runId: String, types: [HealthDataType]) -> Bool {
