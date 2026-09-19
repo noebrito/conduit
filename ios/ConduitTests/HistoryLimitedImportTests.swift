@@ -17,12 +17,22 @@ final class HistoryLimitedImportTests: XCTestCase {
 
     private struct StubHistoryAccessProbe: HistoryAccessProbing {
         let floors: [String: Date]
-        func limitedHistoryFloors(for types: [HealthDataType]) async -> [String: Date] {
+        /// Stands in for a thrown `earliestAuthorizedSampleDate`: iOS could not
+        /// answer, which must never read as "full access confirmed".
+        let unresolved: Bool
+
+        init(floors: [String: Date] = [:], unresolved: Bool = false) {
+            self.floors = floors
+            self.unresolved = unresolved
+        }
+
+        func limitedHistoryFloors(for types: [HealthDataType]) async -> HistoryAccessFloors {
+            if unresolved { return .unresolved }
             var result: [String: Date] = [:]
             for type in types {
                 if let floor = floors[type.identifier] { result[type.identifier] = floor }
             }
-            return result
+            return .resolved(result)
         }
     }
 
@@ -150,19 +160,50 @@ final class HistoryLimitedImportTests: XCTestCase {
         XCTAssertFalse(outcome.historyLimited)
     }
 
-    // MARK: - Resume short-circuit under a still-narrow grant
+    // MARK: - Probe that can't answer
 
-    /// An explicit Resume while the grant is STILL narrow must re-probe first
-    /// and short-circuit straight back to `.historyLimited`, never re-invoking
-    /// the pager against the same unreadable window.
-    func testResumeShortCircuitsWhenStillUnderTheSameLimitedGrant() async throws {
+    /// A probe that FAILED reports `.unresolved`, which is not the same fact as
+    /// "iOS confirms full access" (`.resolved([:])`). An exhausted run whose
+    /// floors could not be determined must therefore stay non-success: the
+    /// empty page it stopped on may well have been a history-access wall.
+    func testUnresolvedProbeNeverReportsAnExhaustedRunAsComplete() async throws {
+        let database = try AppDatabase.makeInMemory()
+        let dao = ImportProgressDAO(database)
+        let type = HealthDataType.stepCount
+
+        try dao.beginRun(runId: "r1", rangeId: ImportRange.allTime.rawValue, rangeStart: nil, typesTotal: 1)
+        try dao.checkpoint(hkTypeId: type.identifier, runId: "r1", cursor: nil, stagedCount: 10, status: .completed)
+
+        let runner = makeRunner(database: database, probe: StubHistoryAccessProbe(unresolved: true))
+        let outcome = await runner.resume(types: [type])
+
+        XCTAssertEqual(outcome.status, .interrupted)
+        XCTAssertFalse(outcome.status.isSuccess,
+                       "An undetermined floor must never earn the green checkmark a truncated import can't have")
+        XCTAssertTrue(outcome.status.isResumable, "Resume re-probes, so the user has a real way forward")
+
+        let run = try XCTUnwrap(dao.currentRun())
+        XCTAssertEqual(run.status, .interrupted)
+        XCTAssertFalse(run.status.isSuccess)
+        XCTAssertNil(run.historyFloor, "No floor is known, so none may be claimed")
+        XCTAssertEqual(run.stopCause, .endedShort)
+    }
+
+    // MARK: - Resume under a still-narrow grant
+
+    /// An explicit Resume while the grant is STILL narrow must land back on
+    /// `.historyLimited` — the post-loop probe decides that afresh every pass,
+    /// so no separate pre-flight check is needed to keep the state honest.
+    func testResumeUnderAStillNarrowGrantLandsBackOnHistoryLimited() async throws {
         let database = try AppDatabase.makeInMemory()
         let dao = ImportProgressDAO(database)
         let type = HealthDataType.stepCount
         let floor = date(30)
 
         try dao.beginRun(runId: "r1", rangeId: ImportRange.allTime.rawValue, rangeStart: nil, typesTotal: 1)
-        try dao.checkpoint(hkTypeId: type.identifier, runId: "r1", cursor: floor, stagedCount: 10, status: .interrupted)
+        // Pre-seeded `.completed` so the loop's per-type skip fires and this
+        // test never needs a live HealthKit read.
+        try dao.checkpoint(hkTypeId: type.identifier, runId: "r1", cursor: floor, stagedCount: 10, status: .completed)
         try dao.finishRun(status: .interrupted, autoResume: false, stopCause: .historyLimited, historyFloor: floor)
 
         let runner = makeRunner(database: database, probe: StubHistoryAccessProbe(floors: [type.identifier: floor]))
@@ -171,18 +212,49 @@ final class HistoryLimitedImportTests: XCTestCase {
         XCTAssertEqual(outcome.status, .interrupted)
         XCTAssertTrue(outcome.historyLimited)
         XCTAssertEqual(outcome.historyFloor, floor)
-        // The short-circuit must not touch the per-type cursor — nothing was
-        // re-read.
-        let cursor = try XCTUnwrap(dao.typeProgress(hkTypeId: type.identifier)?.cursor)
-        XCTAssertEqual(cursor.timeIntervalSince1970, floor.timeIntervalSince1970, accuracy: 0.001)
+        XCTAssertEqual(try dao.currentRun()?.stopCause, .historyLimited)
         XCTAssertEqual(try dao.typeProgress(hkTypeId: type.identifier)?.status, .interrupted,
-                       "The short-circuit must not mark the type completed or touch its row")
+                       "The type must stay downgraded so a later Resume revisits it once access widens")
     }
 
-    /// Once the user actually widens access, an explicit Resume must proceed
-    /// normally instead of short-circuiting — the short-circuit is keyed on
-    /// the grant genuinely still being narrow, not merely on the STOPPED
-    /// reason recorded from before.
+    /// A type the user enabled AFTER the run parked on `.historyLimited` must
+    /// actually be attempted by Resume. It used to be skipped wholesale: a
+    /// pre-flight "is any type still limited?" check returned before the type
+    /// loop ever ran, so the new type's readable, in-window history was never
+    /// staged and Resume looked like it did nothing.
+    ///
+    /// The attempt fails here only because this fixture has no webhook row to
+    /// stage to (`ImportError.noWebhookConfigured`) — which is precisely what
+    /// makes "was it attempted at all?" observable without a live HealthKit
+    /// read.
+    func testResumeAttemptsATypeEnabledAfterTheRunWasParked() async throws {
+        let database = try AppDatabase.makeInMemory()
+        let dao = ImportProgressDAO(database)
+        let alreadyImported = HealthDataType.stepCount
+        let newlyEnabled = HealthDataType.heartRate
+        let floor = date(30)
+
+        try dao.beginRun(runId: "r1", rangeId: ImportRange.allTime.rawValue, rangeStart: nil, typesTotal: 1)
+        try dao.checkpoint(hkTypeId: alreadyImported.identifier, runId: "r1", cursor: floor, stagedCount: 10, status: .completed)
+        try dao.finishRun(status: .interrupted, autoResume: false, stopCause: .historyLimited, historyFloor: floor)
+
+        let runner = makeRunner(
+            database: database,
+            probe: StubHistoryAccessProbe(floors: [alreadyImported.identifier: floor])
+        )
+        let outcome = await runner.resume(types: [alreadyImported, newlyEnabled])
+
+        XCTAssertNotNil(try dao.typeProgress(hkTypeId: newlyEnabled.identifier),
+                        "Resume must reach a type enabled after the run parked, not return before the type loop")
+        XCTAssertEqual(try dao.currentRun()?.typesTotal, 2,
+                       "\"N/M types finished\" must count the grown enabled set, not the stale one")
+        XCTAssertFalse(outcome.historyLimited,
+                       "Resume must not re-render the same parked state while readable work was still pending")
+    }
+
+    /// Once the user actually widens access, an explicit Resume must be free to
+    /// complete — the outcome is keyed on the grant as it is NOW, never on the
+    /// stop reason recorded from before.
     func testResumeProceedsNormallyOnceAccessHasBeenWidened() async throws {
         let database = try AppDatabase.makeInMemory()
         let dao = ImportProgressDAO(database)

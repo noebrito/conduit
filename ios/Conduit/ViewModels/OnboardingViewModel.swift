@@ -49,25 +49,15 @@ final class OnboardingViewModel {
     var importRange: ImportRange = .lastYear
     var customImportStart: Date = Calendar.current.date(byAdding: .month, value: -6, to: Date()) ?? Date()
 
-    /// The earliest date iOS currently authorizes reading each enabled type's
-    /// history back to. Only ever non-empty on a RE-run of onboarding
-    /// ("Reset & Re-run Onboarding" in Settings) where a prior grant already
-    /// exists — a fresh install has no HealthKit decision yet at this step
-    /// (permission is requested one step later), so the probe has nothing to
-    /// report. See `hasLimitedHistoryAccess`/`commonHistoryAccessFloor`.
-    var historyAccessFloors: [String: Date] = [:]
-
     // HealthKit authorizer
     private let authorizer = HealthKitAuthorizer()
-    private let historyAccessProbe: HistoryAccessProbing
     var hkAuthError: String? = nil
     var hkAuthCompleted = false
 
     private let appState: AppState
 
-    init(appState: AppState, historyAccessProbe: HistoryAccessProbing = HealthKitHistoryAccessProbe()) {
+    init(appState: AppState) {
         self.appState = appState
-        self.historyAccessProbe = historyAccessProbe
         restorePartialState()
     }
 
@@ -116,43 +106,6 @@ final class OnboardingViewModel {
         } else {
             enabledTypeIDs.insert(typeID)
         }
-    }
-
-    /// Re-check iOS's current per-type history-access floors. Cheap and
-    /// side-effect-free — safe to call from `.onAppear` and after every
-    /// toggle. See `historyAccessFloors`' doc for why this is usually empty.
-    func loadHistoryAccessFloors() async {
-        let types = HealthTypeRegistry.shared.all.filter { enabledTypeIDs.contains($0.identifier) }
-        guard !types.isEmpty else {
-            historyAccessFloors = [:]
-            return
-        }
-        historyAccessFloors = await historyAccessProbe.limitedHistoryFloors(for: types)
-    }
-
-    /// Whether at least one enabled type is under a limited-history grant.
-    /// Drives the range picker's annotation only — never hides or disables a
-    /// preset, since the limitation can be per type.
-    var hasLimitedHistoryAccess: Bool { !historyAccessFloors.isEmpty }
-
-    /// The one floor to clamp the custom date picker's lower bound to. `nil`
-    /// whenever the grant is mixed across enabled types.
-    var commonHistoryAccessFloor: Date? {
-        let types = HealthTypeRegistry.shared.all.filter { enabledTypeIDs.contains($0.identifier) }
-        guard !types.isEmpty else { return nil }
-        let floors = types.map { historyAccessFloors[$0.identifier] }
-        guard let sharedFloor = floors[0] else { return nil }
-        guard floors.allSatisfy({ $0 == sharedFloor }) else { return nil }
-        return sharedFloor
-    }
-
-    /// Footer copy for the range picker when at least one enabled type is
-    /// limited. Deliberately never suggests hiding/disabling a preset.
-    var historyAccessFooterText: String {
-        if let floor = commonHistoryAccessFloor {
-            return "iOS is currently only letting Conduit read history back to \(floor.formatted(date: .abbreviated, time: .omitted)) for your enabled data types. A range further back will still stage everything iOS allows. To go further, widen access later in Settings → Privacy & Security → Health → Conduit."
-        }
-        return "iOS is currently limiting how far back Conduit can read history for at least one enabled data type (this can vary by type). A range further back will still stage everything iOS allows for each type. To go further, widen access later in Settings → Privacy & Security → Health → Conduit."
     }
 
     // MARK: - HK Permission

@@ -398,7 +398,7 @@ final class SettingsViewModel {
             historyAccessFloors = [:]
             return
         }
-        historyAccessFloors = await historyAccessProbe.limitedHistoryFloors(for: types)
+        historyAccessFloors = await historyAccessProbe.limitedHistoryFloors(for: types).floors
     }
 
     /// Whether at least one enabled type is under a limited-history grant.

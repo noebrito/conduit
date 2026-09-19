@@ -4,6 +4,40 @@ import os
 
 private let logger = Logger(subsystem: "dev.noebrito.Conduit", category: "HistoryAccessProbe")
 
+/// What iOS said about how far back Conduit may read each requested type.
+///
+/// "No floors" and "we don't know" must never be the same value. An empty
+/// `resolved` dictionary is a POSITIVE statement — iOS confirmed full access for
+/// every type asked about — and collapsing a failed probe into it is exactly how
+/// a 30-day-truncated "All time" import earned a green checkmark in the first
+/// place. `unresolved` keeps that ambiguity visible to the caller so it can
+/// refuse to call the run complete.
+enum HistoryAccessFloors: Sendable, Equatable {
+    /// iOS answered for every requested type. A type absent from the dictionary
+    /// has confirmed full access.
+    case resolved([String: Date])
+    /// iOS could not answer, so NO type's history access is confirmed.
+    case unresolved
+
+    /// The floors iOS reported, keyed by `HealthDataType.identifier` — empty
+    /// when nothing is known. Never read this alone to decide that access is
+    /// unrestricted; pair it with `isResolved`.
+    var floors: [String: Date] {
+        switch self {
+        case .resolved(let floors): return floors
+        case .unresolved: return [:]
+        }
+    }
+
+    /// Whether the floors above are a real answer rather than an absence of one.
+    var isResolved: Bool {
+        switch self {
+        case .resolved: return true
+        case .unresolved: return false
+        }
+    }
+}
+
 /// Detects whether iOS has limited how far back Conduit may read a given
 /// HealthKit type's history.
 ///
@@ -16,10 +50,11 @@ private let logger = Logger(subsystem: "dev.noebrito.Conduit", category: "Histor
 /// the floor before (or instead of) reading straight into it.
 protocol HistoryAccessProbing: Sendable {
     /// The earliest date each of the given types is currently authorized to
-    /// read, keyed by `HealthDataType.identifier`. A type absent from the
-    /// result has no known floor: either the OS predates this API (iOS < 27),
-    /// the probe couldn't be completed, or iOS reports full access.
-    func limitedHistoryFloors(for types: [HealthDataType]) async -> [String: Date]
+    /// read, keyed by `HealthDataType.identifier`. A type absent from a
+    /// `.resolved` result has no floor: either the OS predates this API
+    /// (iOS < 27) or iOS reports full access. A probe that could not be
+    /// completed returns `.unresolved` instead.
+    func limitedHistoryFloors(for types: [HealthDataType]) async -> HistoryAccessFloors
 }
 
 /// The live implementation, backed by `HKHealthStore.earliestAuthorizedSampleDate(for:)`.
@@ -30,25 +65,19 @@ struct HealthKitHistoryAccessProbe: HistoryAccessProbing {
         self.store = store
     }
 
-    func limitedHistoryFloors(for types: [HealthDataType]) async -> [String: Date] {
-        guard #available(iOS 27.0, *) else { return [:] }
+    func limitedHistoryFloors(for types: [HealthDataType]) async -> HistoryAccessFloors {
+        // Below iOS 27 there is no limited-history grant to discover, and with
+        // nothing to ask about there is nothing to restrict — both are real
+        // answers, not failures.
+        guard #available(iOS 27.0, *) else { return .resolved([:]) }
         let objectTypes = Set(types.flatMap(\.authorizationTypes))
-        guard !objectTypes.isEmpty else { return [:] }
+        guard !objectTypes.isEmpty else { return .resolved([:]) }
         do {
             let raw = try await store.earliestAuthorizedSampleDate(for: objectTypes)
-            return Self.floors(for: types, from: raw)
+            return .resolved(Self.floors(for: types, from: raw))
         } catch {
-            // Surface rather than silently fail open to `[:]`: an empty result
-            // here reads as "iOS confirms full access", which is the exact
-            // ambiguity this probe exists to resolve, so a swallowed error
-            // would recreate the original bug one layer up. There is no
-            // useful way to propagate this failure into an import that has
-            // already started, though — the caller's next probe call (the
-            // post-loop check, or the next run) gets another chance, and a
-            // logged failure at least distinguishes "we don't know" from "iOS
-            // says full access" for anyone debugging a report.
             logger.error("earliestAuthorizedSampleDate failed: \(error.localizedDescription, privacy: .public)")
-            return [:]
+            return .unresolved
         }
     }
 

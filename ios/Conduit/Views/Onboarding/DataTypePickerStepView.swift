@@ -56,29 +56,16 @@ struct DataTypePickerStepView: View {
                         DatePicker(
                             "Start date",
                             selection: $viewModel.customImportStart,
-                            // Clamped only when every enabled type shares one
-                            // floor — see `commonHistoryAccessFloor`. Usually
-                            // `nil` here: a fresh install hasn't requested
-                            // HealthKit permission yet at this step.
-                            in: (viewModel.commonHistoryAccessFloor ?? .distantPast)...Date(),
+                            in: ...Date(),
                             displayedComponents: .date
                         )
                     }
                 }
             } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Off by default: Conduit captures only new data going forward. Turn this on to also upload PAST Health data for a range you choose. You can always do this later in Settings.")
-                    // Only ever shown on a re-run of onboarding with a prior
-                    // grant already in place — annotates rather than
-                    // hiding/disabling a preset, per the same rule as Settings.
-                    if viewModel.importExistingHistory && viewModel.hasLimitedHistoryAccess {
-                        Text(viewModel.historyAccessFooterText)
-                    }
-                }
+                Text("Off by default: Conduit captures only new data going forward. Turn this on to also upload PAST Health data for a range you choose. You can always do this later in Settings.")
             }
         }
         .listStyle(.insetGrouped)
-        .task { await viewModel.loadHistoryAccessFloors() }
         .safeAreaInset(edge: .bottom) {
             Button(action: { viewModel.advance() }) {
                 Text("Continue")

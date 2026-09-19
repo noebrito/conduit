@@ -15,12 +15,16 @@ samples while still recording `status = completed, isSuccess = true` (identical 
 field to a genuinely complete import).
 
 `HistoryAccessProbing`/`HealthKitHistoryAccessProbe` (`Services/HealthKit/HistoryAccessProbe.swift`)
-wraps `HKHealthStore.earliestAuthorizedSampleDate(for:)` (iOS 27+, `[:]` below it — a probe failure
-also degrades to `[:]` rather than throwing, logged, so a transient error can't brick the whole
-import pipeline behind an error the runner has no route to recover from). Its pure static
-`floors(for:from:)` mapping takes the **latest** (most restrictive) floor among a Conduit type's
-constituent HealthKit types — a composite type like blood pressure is only fully readable where
-EVERY constituent is — and is unit-tested with no live store (`HistoryAccessProbeTests`).
+wraps `HKHealthStore.earliestAuthorizedSampleDate(for:)` and returns `HistoryAccessFloors`:
+`.resolved(floors)` or `.unresolved`. **`.resolved([:])` and `.unresolved` are different facts** —
+the first says iOS confirmed full access (also the pre-iOS-27 answer, and the answer for an empty
+type list), the second says the probe failed and nothing is confirmed. Collapsing the failure into
+an empty floors dictionary is what re-creates the original bug, so a run whose probe is
+`.unresolved` is never allowed to reach `.completed`/`isSuccess` (see `ImportRunner.execute`); it
+stays `.interrupted` and a Resume re-probes. The pure static `floors(for:from:)` mapping takes the
+**latest** (most restrictive) floor among a Conduit type's constituent HealthKit types — a composite
+type like blood pressure is only fully readable where EVERY constituent is — and is unit-tested with
+no live store (`HistoryAccessProbeTests`).
 
 **Detection is per data type, never a single app-wide flag** — a grant can be limited for one type
 while another keeps full access (§6.6 of the originating scout report,
@@ -36,9 +40,11 @@ actually revisit it. The result reuses the existing `stopCause` machinery (a new
 case) rather than a new top-level `ImportRunStatus` — `.interrupted` is already resumable and already
 not styled as success, so no exhaustive switch needed a new case. `autoResume` stays `false` for this
 cause (same reasoning as `queueNotDraining`): auto-resuming would re-read the same unreadable window
-on every foreground until the user manually widens access in Settings. An explicit Resume while still
-under the same narrow grant re-probes and short-circuits straight back to `.historyLimited` instead of
-re-invoking the pager (`ImportRunner.resume`, gated on `run.stopCause == .historyLimited`).
+on every foreground until the user manually widens access in Settings. An explicit Resume deliberately
+has **no** pre-flight "still limited?" check — it just runs `execute`, whose post-loop probe re-parks
+the run on `.historyLimited` after one cheap empty read per limited type. A pre-flight short-circuit
+looks like a free optimization but silently skipped types the user enabled after the run parked,
+whose readable in-window history then never staged at all.
 
 The floor is persisted as `import_run.history_floor` (migration `v11-import-history-floor`, additive
 in the same shape as v8/v9/v10 — see the migration comments in `Database.swift`).
@@ -47,10 +53,9 @@ UI: `SettingsView`'s range picker **annotates** presets (a footer line) rather t
 hiding/disabling any of them, including "All time" — a mixed per-type grant makes a global
 hide/disable wrong. Only the *custom* date picker's lower bound clamps, and only when
 `SettingsViewModel.commonHistoryAccessFloor` finds every enabled type sharing the exact same floor.
-`DataTypePickerStepView` (onboarding) gets the identical treatment for symmetry, but it is almost
-always inert in practice: onboarding's data-type-picker step runs BEFORE the HealthKit permission
-step, so a fresh install has no grant yet to probe. It only ever shows anything on a **re-run** of
-onboarding ("Reset & Re-run Onboarding" in Settings) where a prior grant already exists.
+Settings is the only screen that carries this annotation, deliberately: onboarding's
+data-type-picker step runs BEFORE the HealthKit permission step, so there is no grant to probe there
+and a second copy of the rule would be dead code drifting out of sync with this one.
 
 ## Workout enrichment capture (brand/indoor/HR stats/events) — `HKStatistics` cannot be constructed in a unit test
 

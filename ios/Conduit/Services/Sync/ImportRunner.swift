@@ -224,39 +224,6 @@ final class ImportRunner {
         guard coordinator.claim(run.runId) else { return busyOutcome() }
         defer { coordinator.release(run.runId) }
 
-        // A run parked on `.historyLimited` stopped because iOS itself won't
-        // serve the older window — not because anything here needs re-reading.
-        // Re-probing first, rather than diving straight into `execute`, is what
-        // keeps a Resume tap from churning the pager against the same
-        // unreadable window on every attempt until the user actually widens
-        // access in Settings.
-        if run.stopCause == .historyLimited {
-            let floors = await probe.limitedHistoryFloors(for: types)
-            let stillLimited = types.contains { type in
-                guard let floor = floors[type.identifier] else { return false }
-                return run.rangeStart.map { $0 < floor } ?? true
-            }
-            if stillLimited {
-                let floor = types.compactMap { floors[$0.identifier] }.max() ?? run.historyFloor
-                try? progressDAO.finishRun(
-                    status: .interrupted,
-                    autoResume: false,
-                    stopCause: .historyLimited,
-                    historyFloor: floor
-                )
-                let refreshed = (try? progressDAO.currentRun()) ?? run
-                return Outcome(
-                    status: .interrupted,
-                    staged: refreshed.stagedCount,
-                    failureReason: nil,
-                    hitCap: false,
-                    cancelled: false,
-                    historyLimited: true,
-                    historyFloor: floor
-                )
-            }
-        }
-
         do {
             // The enabled set can have grown since the run began; without this the
             // status renders "5/3 types finished" and floorReached's
@@ -439,11 +406,20 @@ final class ImportRunner {
             runId: runId,
             since: since,
             types: types,
-            floors: postLoopFloors
+            floors: postLoopFloors.floors
         )
 
         let finalStaged = (try? progressDAO.currentRun())?.stagedCount ?? stagedTotal
-        let completedAll = !cancelled && !hitCap && completedEveryType(runId: runId, types: types)
+        // An unresolved probe is NOT "no floor": every type that read to an
+        // empty page may have been stopped by a history-access wall we simply
+        // couldn't ask about, so the range is unconfirmed and must not earn
+        // `.completed`/`isSuccess`. It stays `.interrupted` — resumable, and a
+        // Resume re-probes, so a transient failure costs one extra tap rather
+        // than a green checkmark over a truncated history.
+        let completedAll = !cancelled
+            && !hitCap
+            && postLoopFloors.isResolved
+            && completedEveryType(runId: runId, types: types)
         let status: ImportRunStatus = completedAll ? .completed : .interrupted
 
         // Why it stopped, recorded rather than inferred — `interrupted` alone
