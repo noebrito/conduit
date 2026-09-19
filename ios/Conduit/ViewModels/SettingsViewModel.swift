@@ -390,8 +390,14 @@ final class SettingsViewModel {
     var importOldestReached: Date? { importRun?.oldestReachedAt }
 
     /// Re-check iOS's current per-type history-access floors for the enabled
-    /// types. Cheap and side-effect-free — safe to call from `.onAppear` and
-    /// after every toggle, since the grant can only be discovered by asking.
+    /// types. Cheap and side-effect-free — safe to call from `.onAppear`, on
+    /// scene activation, and after every toggle, since the grant can only be
+    /// discovered by asking.
+    ///
+    /// `@MainActor` because the assignment below publishes an `@Observable`
+    /// invalidation SwiftUI may be reading at that instant; the HealthKit round
+    /// trip itself still leaves the main thread at its own `await`.
+    @MainActor
     func loadHistoryAccessFloors() async {
         let types = HealthTypeRegistry.shared.all.filter { enabledTypeIDs.contains($0.identifier) }
         guard !types.isEmpty else {

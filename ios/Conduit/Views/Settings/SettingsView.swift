@@ -274,6 +274,7 @@ private struct DataTypesCategoryView: View {
 private struct ImportHistoryView: View {
     @Bindable var viewModel: SettingsViewModel
     @State private var showConfirm = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         List {
@@ -383,6 +384,15 @@ private struct ImportHistoryView: View {
         .onAppear {
             viewModel.loadImportState()
             viewModel.observeImportState()
+            Task { await viewModel.loadHistoryAccessFloors() }
+        }
+        // Widening access happens in the iOS Settings app — the exact round trip
+        // the history-limited status copy asks for — and returning from it does
+        // not re-fire `.onAppear` on a screen that stayed mounted. Without this,
+        // the footer keeps asserting a floor that no longer applies and the
+        // custom-date picker keeps refusing dates the user can now read.
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
             Task { await viewModel.loadHistoryAccessFloors() }
         }
         .alert(alertTitle, isPresented: $showConfirm) {
