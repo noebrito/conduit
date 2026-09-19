@@ -85,8 +85,8 @@ final class HistoryAccessProbeTests: XCTestCase {
     // MARK: - Resolved vs unresolved
 
     /// The distinction the import's completion decision rests on: "no floor" is
-    /// an answer, "we couldn't ask" is not, and it is scoped to the individual
-    /// type — an unanswerable type must not make its neighbours unknown too.
+    /// an answer and "we couldn't ask" is not, tracked per type so a caller can
+    /// tell which types it actually learned something about.
     func testUnresolvedIsScopedPerTypeAndIsNotConfirmedFullAccess() {
         let unanswerable = HealthDataType.bloodPressure
         let confirmed = HealthDataType.stepCount
@@ -101,35 +101,34 @@ final class HistoryAccessProbeTests: XCTestCase {
         XCTAssertTrue(HistoryAccessFloors().isResolved(confirmed))
     }
 
-    // MARK: - Not applicable is not unknown
+    // MARK: - Workouts and routes are ordinary probed types
 
-    /// Workouts and routes are not sample-date-bearing types, so
-    /// `earliestAuthorizedSampleDate` has nothing to say about them. They must
-    /// come back **resolved with no floor** — a definitive "not applicable" —
-    /// never unresolved: an undetectable type that lands in `unresolvedTypeIDs`
-    /// blocks `.completed` forever, for every iOS 27 user, including ones with
-    /// full access and nothing truncated.
+    /// `HKWorkoutType` and `HKSeriesType` are ordinary `HKSampleType` subclasses,
+    /// and `earliestAuthorizedSampleDate` takes any `HKObjectType` — it omits a
+    /// type from its result only when that type is NOT limited. So a floor
+    /// reported for a workout or a route must be honoured exactly like a
+    /// quantity type's.
     ///
-    /// This exercises the LIVE probe and is deliberately not version-gated: the
-    /// exclusion happens before any `HKHealthStore` call, so there is nothing
-    /// here that needs a device, an authorization, or iOS 27 to be true.
-    func testLiveProbeTreatsTypesWithNoSampleDateFloorAsNotApplicable() async {
-        let probe = HealthKitHistoryAccessProbe()
-        let result = await probe.limitedHistoryFloors(for: [.workout, .workoutRoute])
-
-        XCTAssertEqual(result, HistoryAccessFloors())
-        XCTAssertTrue(result.isResolved(.workout),
-                      "A type iOS can never answer for must not be treated as unknown")
-        XCTAssertTrue(result.isResolved(.workoutRoute))
+    /// Excluding them instead reopened the original bug for a whole category:
+    /// with no floor ever recorded, workouts pinned at the 30-day wall stayed
+    /// `.completed`, a later Resume skipped them, and the run earned a green
+    /// checkmark over a truncated workout history.
+    func testWorkoutAndRouteFloorsAreHonouredLikeAnyOtherType() {
+        let floor = date(30)
+        let floors = HealthKitHistoryAccessProbe.floors(
+            for: [.workout, .workoutRoute],
+            from: [HKObjectType.workoutType(): floor, HKSeriesType.workoutRoute(): floor]
+        )
+        XCTAssertEqual(floors[HealthDataType.workout.identifier], floor)
+        XCTAssertEqual(floors[HealthDataType.workoutRoute.identifier], floor)
     }
 
-    func testFloorBearingObjectTypesExcludesWorkoutAndRouteAndNothingElse() {
-        XCTAssertTrue(HealthKitHistoryAccessProbe.floorBearingObjectTypes(of: .workout).isEmpty)
-        XCTAssertTrue(HealthKitHistoryAccessProbe.floorBearingObjectTypes(of: .workoutRoute).isEmpty)
-        XCTAssertFalse(HealthKitHistoryAccessProbe.floorBearingObjectTypes(of: .stepCount).isEmpty,
-                       "An ordinary quantity type must still be asked about")
-        XCTAssertEqual(HealthKitHistoryAccessProbe.floorBearingObjectTypes(of: .bloodPressure).count, 2,
-                       "A composite's constituents are all sample-date-bearing and must still be asked about")
+    /// The other half of the same contract: omission means "not limited", so an
+    /// unrestricted workout type still reports no floor.
+    func testWorkoutWithNoReportedFloorHasNoFloor() {
+        let floors = HealthKitHistoryAccessProbe.floors(for: [.workout, .workoutRoute], from: [:])
+        XCTAssertNil(floors[HealthDataType.workout.identifier])
+        XCTAssertNil(floors[HealthDataType.workoutRoute.identifier])
     }
 
     // MARK: - Live probe: below iOS 27 it must RESOLVE to no floors (the

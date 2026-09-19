@@ -13,9 +13,6 @@ private let logger = Logger(subsystem: "dev.noebrito.Conduit", category: "Histor
 /// 30-day-truncated "All time" import earned a green checkmark in the first
 /// place. Unknown stays visible to the caller so it can refuse to call the run
 /// complete without claiming a floor it never learned.
-///
-/// Resolution is per data type, on the failure path as much as the success one:
-/// one type iOS won't answer for must not erase what it did say about the rest.
 struct HistoryAccessFloors: Sendable, Equatable {
     /// The earliest readable date per limited type, keyed by
     /// `HealthDataType.identifier`.
@@ -43,9 +40,7 @@ struct HistoryAccessFloors: Sendable, Equatable {
 protocol HistoryAccessProbing: Sendable {
     /// The earliest date each of the given types is currently authorized to
     /// read. A type in neither `floors` nor `unresolvedTypeIDs` has no floor:
-    /// the OS predates this API (iOS < 27), iOS reports full access, or the type
-    /// has no sample-date floor to report (see
-    /// `HealthKitHistoryAccessProbe.carriesSampleDateFloor`).
+    /// either the OS predates this API (iOS < 27) or iOS reports full access.
     func limitedHistoryFloors(for types: [HealthDataType]) async -> HistoryAccessFloors
 }
 
@@ -57,55 +52,32 @@ struct HealthKitHistoryAccessProbe: HistoryAccessProbing {
         self.store = store
     }
 
-    /// Whether `earliestAuthorizedSampleDate(for:)` has an answer to give about
-    /// this object type at all.
-    ///
-    /// `HKWorkoutType` and `HKSeriesType.workoutRoute()` are not
-    /// sample-date-bearing types, so asking about them throws — and because the
-    /// API answers a whole set at once, including either one poisons every other
-    /// type's answer in the same call. They are therefore **not applicable**
-    /// rather than unknown: excluded from what is asked and from what must be
-    /// confirmed, so they can never hold a run back from `.completed`.
-    ///
-    /// Accepted tradeoff, deliberate: if these two types turn out to be
-    /// limitable by the same iOS 27 grant with no API to detect it, a narrow,
-    /// type-scoped version of the original bug applies to them. That is judged
-    /// better than the alternative this replaced, where one undetectable type
-    /// permanently blocked EVERY iOS 27 user's import from ever completing —
-    /// including users with full access and nothing truncated at all.
-    static func carriesSampleDateFloor(_ objectType: HKObjectType) -> Bool {
-        objectType != HKObjectType.workoutType() && objectType != HKSeriesType.workoutRoute()
-    }
-
-    /// The object types of `type` worth asking about. Empty means the whole type
-    /// is not applicable — nothing to ask, nothing to confirm.
-    static func floorBearingObjectTypes(of type: HealthDataType) -> Set<HKObjectType> {
-        Set(type.authorizationTypes.filter(carriesSampleDateFloor))
-    }
-
     func limitedHistoryFloors(for types: [HealthDataType]) async -> HistoryAccessFloors {
         // Below iOS 27 there is no limited-history grant to discover.
         guard #available(iOS 27.0, *) else { return HistoryAccessFloors() }
 
-        // Asked type by type rather than in one batched call: the API answers a
-        // set all-or-nothing, so a single member it won't answer for takes every
-        // other type's answer down with it. Detection is per data type, and that
-        // has to hold on the failure path too.
-        var result = HistoryAccessFloors()
-        for type in types {
-            let objectTypes = Self.floorBearingObjectTypes(of: type)
-            guard !objectTypes.isEmpty else { continue }
-            do {
-                let raw = try await store.earliestAuthorizedSampleDate(for: objectTypes)
-                if let floor = Self.floors(for: [type], from: raw)[type.identifier] {
-                    result.floors[type.identifier] = floor
-                }
-            } catch {
-                logger.error("earliestAuthorizedSampleDate failed for \(type.identifier, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                result.unresolvedTypeIDs.insert(type.identifier)
-            }
+        // EVERY type goes in, workouts and routes included: `HKWorkoutType` and
+        // `HKSeriesType` are ordinary `HKSampleType` subclasses, and the API's
+        // documented contract takes any `NSSet<HKObjectType *>` and simply OMITS
+        // from the result whichever types have no limited-access date. Omission
+        // is the "not limited" answer, not a rejection — so singling any type out
+        // would just hide a real floor and hand it a green checkmark over a
+        // truncated history.
+        let probeable = types.filter { !$0.authorizationTypes.isEmpty }
+        let objectTypes = Set(probeable.flatMap(\.authorizationTypes))
+        guard !objectTypes.isEmpty else { return HistoryAccessFloors() }
+
+        do {
+            let raw = try await store.earliestAuthorizedSampleDate(for: objectTypes)
+            return HistoryAccessFloors(floors: Self.floors(for: probeable, from: raw))
+        } catch {
+            // A failure is documented as whole-call (nil dictionary + error), not
+            // per member, so nothing is known about ANY type asked about. Every
+            // one of them is unknown rather than confirmed-full — the fail-closed
+            // direction, so no unconfirmed range can be called complete.
+            logger.error("earliestAuthorizedSampleDate failed: \(error.localizedDescription, privacy: .public)")
+            return HistoryAccessFloors(unresolvedTypeIDs: Set(probeable.map(\.identifier)))
         }
-        return result
     }
 
     /// Pure mapping from HealthKit's per-object-type floors to Conduit's
@@ -120,7 +92,7 @@ struct HealthKitHistoryAccessProbe: HistoryAccessProbing {
     static func floors(for types: [HealthDataType], from raw: [HKObjectType: Date]) -> [String: Date] {
         var result: [String: Date] = [:]
         for type in types {
-            let constituentFloors = floorBearingObjectTypes(of: type).compactMap { raw[$0] }
+            let constituentFloors = type.authorizationTypes.compactMap { raw[$0] }
             guard let latest = constituentFloors.max() else { continue }
             result[type.identifier] = latest
         }

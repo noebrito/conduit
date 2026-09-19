@@ -417,9 +417,7 @@ final class ImportRunner {
         // An unresolved type is NOT a type with no floor: the empty page it
         // stopped on may have been a history-access wall nobody could ask
         // about, so its range is unconfirmed and must not earn
-        // `.completed`/`isSuccess`. Only the types iOS actually refused to
-        // answer for count here — one unanswerable type must not erase what iOS
-        // did confirm about the others.
+        // `.completed`/`isSuccess`.
         let unconfirmedTypes = types.filter { !postLoopFloors.isResolved($0) }
         let completedAll = !cancelled
             && !hitCap
@@ -459,11 +457,15 @@ final class ImportRunner {
         // every foreground and launch — a ten-minute apparent hang on every app
         // open, far worse than one deliberate Resume tap. A healthy large import
         // drains and continues WITHIN the run and never reaches this path.
+        // The column carries a floor only for the stop that actually claims one;
+        // a cancel or a stuck queue that happened to pass a limited type keeps it
+        // nil, as both the column's and the DAO's contracts state.
+        let reportedFloor = stopCause == .historyLimited ? historyFloor : nil
         try? progressDAO.finishRun(
             status: status,
             autoResume: pausedForBackground,
             stopCause: stopCause,
-            historyFloor: historyFloor
+            historyFloor: reportedFloor
         )
         logger.info("import run \(runId, privacy: .public) ended \(status.rawValue, privacy: .public) with \(finalStaged) staged")
         return Outcome(
@@ -474,7 +476,7 @@ final class ImportRunner {
             cancelled: stoppedByUser,
             pausedForBackground: pausedForBackground,
             historyLimited: stopCause == .historyLimited,
-            historyFloor: historyFloor,
+            historyFloor: reportedFloor,
             historyAccessUnknown: stopCause == .historyAccessUnknown
         )
     }

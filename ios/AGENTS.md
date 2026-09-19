@@ -24,23 +24,24 @@ re-creates the original bug, so a run with ANY unresolved type is never allowed 
 end, only the confirmation failed, and the copy says exactly that rather than "it didn't finish the
 range" (`SettingsViewModel.historyAccessUnknownText`).
 
-The live probe asks **type by type**, deliberately not in one batched call: the API answers a whole
-set all-or-nothing, so one member it won't answer for takes every other type's answer down with it.
-Per-type detection has to hold on the failure path, not just the success path.
+**Every enabled type goes into one batched call — no type is special-cased, and `HKWorkoutType` /
+`HKSeriesType.workoutRoute()` least of all.** Check the SDK before "optimizing" that: both are
+ordinary `HKSampleType` subclasses (`HKObjectType.h`), and
+`getEarliestAuthorizedSampleDateForTypes:completion:` (`HKHealthStore.h`) takes any
+`NSSet<HKObjectType *>`, documenting that "a type appears in the returned dictionary only when the
+caller has been granted limited read access to that type" and that types without a limited-access
+date are **silently omitted**. Omission IS the "not limited" answer; no member type is documented to
+reject the call. A fix round once excluded workouts and routes on the false premise that asking about
+them throws — that silently reopened the original bug for the whole workouts category (no floor ever
+recorded → the type stays `.completed` at the wall → a later Resume skips it → green checkmark over a
+truncated workout history), and it also made `commonHistoryAccessFloor` permanently nil on any default
+install, since workout and route could then never share the floor the others reported.
 
-**`HKWorkoutType` and `HKSeriesType.workoutRoute()` are excluded by design, as "not applicable"
-rather than "unknown"** (`HealthKitHistoryAccessProbe.carriesSampleDateFloor`). Neither is a
-sample-date-bearing type, so `earliestAuthorizedSampleDate` has no answer to give about them — and
-both are in the default enabled set of every install. Left in `unresolvedTypeIDs` they made
-`.completed` permanently unreachable for EVERY iOS 27 user, full-access ones included: the run parked
-on `.historyAccessUnknown` and re-parked identically on every Resume, with no user action that could
-clear it. This exclusion is the accepted tradeoff (captain's explicit call): if those two types turn
-out to be limitable by the same grant with no API to detect it, a narrow, type-scoped version of the
-original bug applies to them — judged better than permanently blocking every iOS 27 user's import.
-Pinned by `testLiveProbeTreatsTypesWithNoSampleDateFloorAsNotApplicable` and
-`testRunOverTypesWithNoSampleDateFloorStillCompletes`, both of which drive the live probe and are
-deliberately NOT version-gated (the exclusion happens before any `HKHealthStore` call, so they need
-no device and no iOS 27).
+Failure is documented as whole-call (nil dictionary + `NSError`), not per member, so a throw puts
+**every requested type** into `unresolvedTypeIDs` — nothing is known about any of them. That is why
+one batched call is both correct and cheaper than a per-type loop: there is no partial-failure shape
+for a loop to recover, and a loop would cost ~57 sequential XPC round trips at the end of every run
+and on every Import History `.onAppear`.
 
 The pure static `floors(for:from:)` mapping takes the **latest** (most restrictive) floor among a
 Conduit type's constituent HealthKit types — a composite type like blood pressure is only fully

@@ -199,11 +199,10 @@ final class HistoryLimitedImportTests: XCTestCase {
                           "The range WAS read to its end — only its confirmation failed")
     }
 
-    /// One type iOS won't answer for must not erase what it DID say about the
-    /// others. `earliestAuthorizedSampleDate` answers a whole set all-or-nothing,
-    /// so asking about every enabled type at once let a single unsupported member
-    /// blank out detection for all of them; per-type resolution has to hold on
-    /// the failure path, not just the success path.
+    /// A floor iOS DID report must still be acted on when another type's access
+    /// is unknown, and a type iOS confirmed must keep that confirmation. The
+    /// runner resolves each type independently rather than collapsing a mixed
+    /// answer into one app-wide verdict.
     func testOneUnresolvedTypeDoesNotEraseWhatIOSConfirmedAboutTheOthers() async throws {
         let database = try AppDatabase.makeInMemory()
         let dao = ImportProgressDAO(database)
@@ -237,30 +236,37 @@ final class HistoryLimitedImportTests: XCTestCase {
                       "A known floor is the more certain and more actionable statement")
     }
 
-    /// The end-to-end consequence, driven by the LIVE probe: a run over types
-    /// iOS can never report a floor for still reaches `.completed`. Before
-    /// workouts and routes were treated as not-applicable, this run parked on
-    /// `.historyAccessUnknown` on every iOS 27 device and no user action could
-    /// ever clear it. No HealthKit call happens for these types, so this holds
-    /// on any OS version.
-    func testRunOverTypesWithNoSampleDateFloorStillCompletes() async throws {
+    /// The end-to-end consequence for workouts and routes, which are limitable
+    /// like any other type: a workouts-only import that hit the wall must be
+    /// downgraded and must NOT report success. A user who enables only Workouts
+    /// and Routes used to see the green checkmark on their very first import.
+    func testWorkoutsOnlyRunThatHitItsFloorIsNotReportedComplete() async throws {
         let database = try AppDatabase.makeInMemory()
         let dao = ImportProgressDAO(database)
         let types: [HealthDataType] = [.workout, .workoutRoute]
+        let floor = date(30)
 
         try dao.beginRun(runId: "r1", rangeId: ImportRange.allTime.rawValue, rangeStart: nil, typesTotal: types.count)
         for type in types {
-            try dao.checkpoint(hkTypeId: type.identifier, runId: "r1", cursor: nil, stagedCount: 7, status: .completed)
+            try dao.checkpoint(hkTypeId: type.identifier, runId: "r1", cursor: floor, stagedCount: 7, status: .completed)
         }
 
-        let runner = makeRunner(database: database, probe: HealthKitHistoryAccessProbe())
+        let runner = makeRunner(
+            database: database,
+            probe: StubHistoryAccessProbe(floors: [
+                HealthDataType.workout.identifier: floor,
+                HealthDataType.workoutRoute.identifier: floor,
+            ])
+        )
         let outcome = await runner.resume(types: types)
 
-        XCTAssertEqual(outcome.status, .completed)
-        XCTAssertTrue(outcome.status.isSuccess,
-                      "A genuinely finished import must not be held back by a type iOS can't report a floor for")
-        XCTAssertFalse(outcome.historyAccessUnknown)
-        XCTAssertNil(try dao.currentRun()?.stopCause)
+        XCTAssertFalse(outcome.status.isSuccess,
+                       "A truncated workout history must never earn a green checkmark")
+        XCTAssertTrue(outcome.historyLimited)
+        XCTAssertEqual(outcome.historyFloor, floor)
+        XCTAssertEqual(try dao.typeProgress(hkTypeId: HealthDataType.workout.identifier)?.status, .interrupted,
+                       "Workouts must be downgraded so a Resume after widening access re-reads them")
+        XCTAssertEqual(try dao.typeProgress(hkTypeId: HealthDataType.workoutRoute.identifier)?.status, .interrupted)
     }
 
     // MARK: - Resume under a still-narrow grant
