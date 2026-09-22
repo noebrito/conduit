@@ -45,6 +45,14 @@ final class AppState {
     /// `BGAppRefreshTask`, foreground sync) is covered even when Home was never
     /// opened this launch.
     private var statusSnapshotCancellable: AnyDatabaseCancellable?
+    /// What the App Group container already holds, so the reload gate compares
+    /// against the snapshot the widget is actually showing rather than against
+    /// "nothing yet". Seeded from the container in
+    /// `startStatusSnapshotObservation`: background launches are the dominant
+    /// case (≥96 `BGAppRefreshTask` wakes/day plus HealthKit observer wakes),
+    /// and each one starts the observation fresh and receives an initial value,
+    /// so a purely in-memory nil would make every wake look like a first-ever
+    /// snapshot and spend a reload the gate exists to withhold.
     private var lastPersistedStatusSnapshot: ConduitStatusSnapshot?
 
     init(database: AppDatabase) {
@@ -69,9 +77,6 @@ final class AppState {
         let observation = ValueObservation.tracking { db -> ConduitStatusSnapshot in
             let home = try HomeViewModel.fetchStatus(db)
             let importRun = try ImportRunState.fetchOne(db, key: ImportProgressDAO.singletonID)
-            let importHeadline: String? = importRun.flatMap { run in
-                run.status == .completed ? nil : SettingsViewModel.statusTitle(for: run)
-            }
 
             let syncStatus: ConduitStatusSnapshot.SyncStatus
             let syncedAt: Date?
@@ -93,10 +98,11 @@ final class AppState {
                 pendingCount: home.pending,
                 failedCount: home.failed,
                 stagedTodayCount: home.today,
-                importStatusHeadline: importHeadline
+                importStatusHeadline: AppState.importHeadline(for: importRun)
             )
         }
 
+        lastPersistedStatusSnapshot = ConduitStatusSnapshot.readFromAppGroup()
         statusSnapshotCancellable = observation.start(
             in: database.dbWriter,
             onError: { error in
@@ -108,11 +114,29 @@ final class AppState {
         )
     }
 
+    /// The import headline the Lock Screen surfaces, or `nil` when the most
+    /// recent run has nothing this surface should say.
+    ///
+    /// `import_run` is a singleton row that survives until a brand-new run
+    /// begins, so any headline returned here pins the widget's second line —
+    /// it outranks the pending count in `ConduitStatusSnapshot.secondLine` —
+    /// until the user imports again. Only a run that is live or still
+    /// actionable earns that: a completed run has nothing to report, and a run
+    /// the user deliberately cancelled is not a condition worth advertising
+    /// over a stuck upload queue, which is the silent failure this surface
+    /// exists to expose. Every other stop cause names a problem the user can
+    /// still act on and keeps its priority.
+    static func importHeadline(for run: ImportRunState?) -> String? {
+        guard let run, run.status != .completed, run.stopCause != .userCancelled else { return nil }
+        return SettingsViewModel.statusTitle(for: run)
+    }
+
     /// Writes the snapshot to the App Group container, then reloads the
     /// widget's timelines only on a state-*class* change (an error
-    /// appearing/clearing, the import headline changing, or the failed count
-    /// crossing zero) — never on every stamp, since Conduit's background
-    /// cadence would exhaust the widget's daily reload budget otherwise.
+    /// appearing/clearing, the import headline changing, the failed count
+    /// crossing zero, or the first sync leaving `.idle`) — never on every
+    /// stamp, since Conduit's background cadence would exhaust the widget's
+    /// daily reload budget otherwise.
     ///
     /// A failed write leaves the container holding the *previous* snapshot, so
     /// it also leaves `lastPersistedStatusSnapshot` where it is: reloading would

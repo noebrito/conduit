@@ -384,11 +384,15 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
   `HomeViewModel.deriveStatus` / `SettingsViewModel.statusTitle(for:)` verbatim rather than
   inventing new wording for the same states.
 - `WidgetCenter.reloadAllTimelines()` fires only on a state-*class* change (`ConduitStatusSnapshot
-  .shouldReloadTimelines`) — an error appearing/clearing, the import headline changing, or the
-  failed count crossing zero — never on every stamp. Conduit's background cadence (≥96
-  `BGAppRefreshTask` wakes/day, plus HealthKit observer wakes) would blow the widget's ~40-70/day
-  reload budget otherwise; the relative-time text ticks forward on its own between reloads at zero
-  cost, which is what makes this worth doing.
+  .shouldReloadTimelines`) — an error appearing/clearing, the import headline changing, the failed
+  count crossing zero, or the first sync leaving `.idle` — never on every stamp. Conduit's
+  background cadence (≥96 `BGAppRefreshTask` wakes/day, plus HealthKit observer wakes) would blow
+  the widget's ~40-70/day reload budget otherwise; the relative-time text ticks forward on its own
+  between reloads at zero cost, which is what makes this worth doing. **The gate is only as good as
+  what it compares against**: `AppState.lastPersistedStatusSnapshot` is seeded from the App Group
+  container before the observation starts, because a background launch starts the observation fresh
+  and immediately receives an initial value — against an in-memory `nil` every one of those ≥96
+  wakes looks like a first-ever snapshot and spends a reload.
 - Registering the `group.dev.noebrito.Conduit` App Group capability in the developer portal (for
   both the app and `ConduitWidgets` targets) is a one-time manual step this repo's automated CI
   cannot perform — do it before the first TestFlight build that includes the widget.

@@ -104,19 +104,28 @@ struct ConduitStatusSnapshot: Codable, Equatable {
 
     /// Whether moving from `previous` to `next` is a state-*class* change that
     /// justifies spending a `WidgetCenter.reloadAllTimelines()` call: an error
-    /// appearing/clearing, the import headline changing, or the failed count
-    /// crossing zero. Deliberately NOT true for a timestamp/count-only change —
-    /// Conduit's background cadence (≥96 `BGAppRefreshTask` wakes/day, plus
-    /// HealthKit observer wakes) would exhaust the widget's daily reload budget
-    /// if every `sync_state` stamp triggered a reload.
+    /// appearing/clearing, the import headline changing, the failed count
+    /// crossing zero, or the very first sync leaving `.idle`. Deliberately NOT
+    /// true for a timestamp/count-only change — Conduit's background cadence
+    /// (≥96 `BGAppRefreshTask` wakes/day, plus HealthKit observer wakes) would
+    /// exhaust the widget's daily reload budget if every `sync_state` stamp
+    /// triggered a reload.
+    ///
+    /// The `.idle` transition is on the list because it changes both the symbol
+    /// and the first line ("No syncs yet" → "Synced N ago") and costs nothing
+    /// ongoing: `HomeViewModel.deriveStatus` returns `.idle` only while there is
+    /// neither a stamp nor a delivery, so an install leaves it exactly once.
     static func shouldReloadTimelines(previous: ConduitStatusSnapshot?, next: ConduitStatusSnapshot) -> Bool {
         guard let previous else { return true }
         let hadError = previous.syncStatus == .error
         let hasError = next.syncStatus == .error
         let hadFailures = previous.failedCount > 0
         let hasFailures = next.failedCount > 0
+        let wasIdle = previous.syncStatus == .idle
+        let isIdle = next.syncStatus == .idle
         return hadError != hasError
             || hadFailures != hasFailures
+            || wasIdle != isIdle
             || previous.importStatusHeadline != next.importStatusHeadline
     }
 }
