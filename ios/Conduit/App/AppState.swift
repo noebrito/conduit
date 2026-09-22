@@ -1,6 +1,8 @@
 import Foundation
+import GRDB
 import HealthKit
 import Observation
+import WidgetKit
 import os
 
 private let logger = Logger(subsystem: "dev.noebrito.Conduit", category: "AppState")
@@ -37,6 +39,14 @@ final class AppState {
 
     private(set) var isOnboardingComplete: Bool
 
+    /// Process-lifetime observation feeding the Lock Screen widget's status
+    /// snapshot. Started here — not in `HomeViewModel`, which only lives while
+    /// Home is on screen — so every path that changes status (observer wakes,
+    /// `BGAppRefreshTask`, foreground sync) is covered even when Home was never
+    /// opened this launch.
+    private var statusSnapshotCancellable: AnyDatabaseCancellable?
+    private var lastPersistedStatusSnapshot: ConduitStatusSnapshot?
+
     init(database: AppDatabase) {
         let store = HKHealthStore()
         self.database = database
@@ -46,6 +56,92 @@ final class AppState {
         self.observerCoordinator = ObserverCoordinator(store: store, syncEngine: engine)
         self.importBackground = ImportBackgroundCoordinator(database: database, engine: engine)
         self.isOnboardingComplete = UserDefaults.standard.bool(forKey: "conduit.onboardingComplete")
+        startStatusSnapshotObservation()
+    }
+
+    // MARK: - Lock Screen widget status snapshot
+
+    /// Recomputes the widget's status snapshot on every relevant DB change and
+    /// writes it to the App Group container. Reuses `HomeViewModel.deriveStatus`
+    /// and `SettingsViewModel.statusTitle(for:)` verbatim rather than inventing
+    /// new wording for the same states.
+    private func startStatusSnapshotObservation() {
+        let observation = ValueObservation.tracking { db -> ConduitStatusSnapshot in
+            let pending = try OutboxRow
+                .filter(Column("state") == OutboxState.pending.rawValue ||
+                        Column("state") == OutboxState.inflight.rawValue)
+                .fetchCount(db)
+            let failed = try OutboxRow
+                .filter(Column("state") == OutboxState.failed.rawValue)
+                .fetchCount(db)
+            let stagedToday = try StagedDailyCountDAO.count(db)
+            let lastSynced = try SyncStateDAO.lastSyncedAt(db)
+            let latestDelivery = try DeliveryLogEntry
+                .order(Column("sent_at").desc, Column("id").desc)
+                .fetchOne(db)
+            let homeStatus = HomeViewModel.deriveStatus(lastSynced: lastSynced, latestDelivery: latestDelivery)
+            let importRun = try ImportRunState.fetchOne(db, key: ImportProgressDAO.singletonID)
+            let importHeadline: String? = importRun.flatMap { run in
+                run.status == .completed ? nil : SettingsViewModel.statusTitle(for: run)
+            }
+
+            let syncStatus: ConduitStatusSnapshot.SyncStatus
+            let errorMessage: String?
+            let syncedAt: Date?
+            switch homeStatus {
+            case .idle:
+                syncStatus = .idle
+                errorMessage = nil
+                syncedAt = nil
+            case .synced(let date):
+                syncStatus = .synced
+                errorMessage = nil
+                syncedAt = date
+            case .error(let message):
+                syncStatus = .error
+                errorMessage = message
+                syncedAt = lastSynced
+            }
+
+            return ConduitStatusSnapshot(
+                syncStatus: syncStatus,
+                lastSyncedAt: syncedAt,
+                errorMessage: errorMessage,
+                pendingCount: pending,
+                failedCount: failed,
+                stagedTodayCount: stagedToday,
+                importStatusHeadline: importHeadline,
+                historyFloor: importRun?.historyFloor,
+                updatedAt: Date()
+            )
+        }
+
+        statusSnapshotCancellable = observation.start(
+            in: database.dbWriter,
+            onError: { error in
+                logger.error("Status snapshot observation error: \(error.localizedDescription, privacy: .public)")
+            },
+            onChange: { [weak self] snapshot in
+                self?.persistStatusSnapshot(snapshot)
+            }
+        )
+    }
+
+    /// Writes the snapshot to the App Group container, then reloads the
+    /// widget's timelines only on a state-*class* change (an error
+    /// appearing/clearing, the import headline changing, or the failed count
+    /// crossing zero) — never on every stamp, since Conduit's background
+    /// cadence would exhaust the widget's daily reload budget otherwise.
+    private func persistStatusSnapshot(_ snapshot: ConduitStatusSnapshot) {
+        do {
+            try snapshot.writeToAppGroup()
+        } catch {
+            logger.error("Failed to write status snapshot: \(error.localizedDescription, privacy: .public)")
+        }
+        if ConduitStatusSnapshot.shouldReloadTimelines(previous: lastPersistedStatusSnapshot, next: snapshot) {
+            WidgetCenter.shared.reloadAllTimelines()
+        }
+        lastPersistedStatusSnapshot = snapshot
     }
 
     /// Start HealthKit data capture for the currently-enabled data types.

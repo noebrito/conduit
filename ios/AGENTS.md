@@ -157,8 +157,10 @@ subsequent Xcode Cloud archive fails with the opaque `Preparing build for App St
 (one error, no annotations, no compiler diagnostic) while **Build - iOS and Test - iOS stay green** —
 the code is fine; only the upload is refused. `ci_scripts/ci_post_clone.sh` only stamps
 `CURRENT_PROJECT_VERSION` from `$CI_BUILD_NUMBER`, so the build number is never the problem;
-`MARKETING_VERSION` is hand-managed in `Conduit.xcodeproj/project.pbxproj` (4 occurrences — app +
-test target, Debug + Release; keep them equal).
+`MARKETING_VERSION` is hand-managed in `Conduit.xcodeproj/project.pbxproj` (6 occurrences — app,
+test, and `ConduitWidgets` extension targets, Debug + Release; keep them all equal). An extension's
+`CFBundleShortVersionString` must match its containing app's or the upload is rejected, so the
+widget extension target is not optional here — it grew the count from 4 to 6 when it was added.
 
 **A manual archive is not an escape hatch** — the refusal comes from App Store Connect, not Xcode
 Cloud, so an Organizer/Transporter upload of the same version is rejected too, just with the reason
@@ -362,6 +364,34 @@ regression signal.
   `onAppear` load the static host doesn't pump), Activity is its empty state (no dated rows),
   Settings is seeded (`SnapshotFixtures.seedSettings`) because it loads in its **outer** `onAppear`.
   `setUp` clears any keychain webhook token so `hasToken` is stable.
+
+## Lock Screen widget (`ConduitWidgets`) — App Group snapshot, not a shared database
+
+`ConduitWidgets` is the project's first extension target (`project.pbxproj` now has 3 hand-maintained
+targets: `Conduit`, `ConduitWidgets`, `ConduitTests`). It shows sync-status only — last-synced
+relative time, pending/failed counts, import status headline — **never a health value**; that is a
+permanent product decision, not a v1 scope cut (`data/conduit-live-activities-scout/report.md`,
+outside this repo).
+
+The extension never opens GRDB or the app's SQLite database — its memory ceiling is tight and
+undocumented by Apple, and two processes writing one SQLite file is its own hazard. Instead:
+- `ConduitShared/ConduitStatusSnapshot.swift` (target membership: `Conduit` **and** `ConduitWidgets`)
+  is a small `Codable` transport type, written atomically to the `group.dev.noebrito.Conduit` App
+  Group container and read back by the widget's `TimelineProvider`.
+- `AppState` (not `HomeViewModel`, which only lives while Home is on screen) starts a
+  process-lifetime `ValueObservation` that recomputes the snapshot on every relevant DB change —
+  observer wakes, `BGAppRefreshTask`, foreground sync all go through this one path — and reuses
+  `HomeViewModel.deriveStatus` / `SettingsViewModel.statusTitle(for:)` verbatim rather than
+  inventing new wording for the same states.
+- `WidgetCenter.reloadAllTimelines()` fires only on a state-*class* change (`ConduitStatusSnapshot
+  .shouldReloadTimelines`) — an error appearing/clearing, the import headline changing, or the
+  failed count crossing zero — never on every stamp. Conduit's background cadence (≥96
+  `BGAppRefreshTask` wakes/day, plus HealthKit observer wakes) would blow the widget's ~40-70/day
+  reload budget otherwise; the relative-time text ticks forward on its own between reloads at zero
+  cost, which is what makes this worth doing.
+- Registering the `group.dev.noebrito.Conduit` App Group capability in the developer portal (for
+  both the app and `ConduitWidgets` targets) is a one-time manual step this repo's automated CI
+  cannot perform — do it before the first TestFlight build that includes the widget.
 
 ## Maintaining this file
 
