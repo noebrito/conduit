@@ -63,6 +63,18 @@ final class AppState {
     )
 
     private var statusSnapshotCancellable: AnyDatabaseCancellable?
+    /// Serializes everything downstream of the observation that is not SwiftUI
+    /// state: encoding the snapshot, the App Group write, the reload gate and
+    /// its bookkeeping. `ValueObservation` delivers on the main queue, and this
+    /// path runs after every committed transaction touching the observed region
+    /// — on the order of 10^4 times across a large import — so the file I/O
+    /// must not be there. Serial and single, so a write still lands before the
+    /// reload that asks the widget to redraw from it.
+    @ObservationIgnored
+    private let statusSnapshotQueue = DispatchQueue(
+        label: "dev.noebrito.Conduit.statusSnapshot",
+        qos: .utility
+    )
     /// What the App Group container already holds, so the reload gate compares
     /// against the snapshot the widget is actually showing rather than against
     /// "nothing yet". Seeded from the container in
@@ -71,6 +83,9 @@ final class AppState {
     /// and each one starts the observation fresh and receives an initial value,
     /// so a purely in-memory nil would make every wake look like a first-ever
     /// snapshot and spend a reload the gate exists to withhold.
+    ///
+    /// Owned by `statusSnapshotQueue` — never read or written anywhere else.
+    @ObservationIgnored
     private var lastPersistedStatusSnapshot: ConduitStatusSnapshot?
 
     init(database: AppDatabase) {
@@ -98,15 +113,21 @@ final class AppState {
             return (home, AppState.importHeadline(for: importRun))
         }
 
-        lastPersistedStatusSnapshot = ConduitStatusSnapshot.readFromAppGroup()
+        statusSnapshotQueue.async { [weak self] in
+            self?.lastPersistedStatusSnapshot = ConduitStatusSnapshot.readFromAppGroup()
+        }
         statusSnapshotCancellable = observation.start(
             in: database.dbWriter,
             onError: { error in
                 logger.error("Status snapshot observation error: \(error.localizedDescription, privacy: .public)")
             },
             onChange: { [weak self] home, importHeadline in
-                self?.status = home
-                self?.persistStatusSnapshot(AppState.widgetSnapshot(from: home, importHeadline: importHeadline))
+                guard let self else { return }
+                self.status = home
+                let snapshot = AppState.widgetSnapshot(from: home, importHeadline: importHeadline)
+                self.statusSnapshotQueue.async { [weak self] in
+                    self?.persistStatusSnapshot(snapshot)
+                }
             }
         )
     }
@@ -170,6 +191,8 @@ final class AppState {
     /// only redraw stale content, and advancing the bookkeeping would make the
     /// next successful write of the same state class look like no change at all,
     /// suppressing the reload that actually matters.
+    ///
+    /// Runs on `statusSnapshotQueue`, which owns `lastPersistedStatusSnapshot`.
     private func persistStatusSnapshot(_ snapshot: ConduitStatusSnapshot) {
         do {
             try snapshot.writeToAppGroup()

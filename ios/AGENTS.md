@@ -378,6 +378,12 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
 - `ConduitShared/ConduitStatusSnapshot.swift` (target membership: `Conduit` **and** `ConduitWidgets`)
   is a small `Codable` transport type, written atomically to the `group.dev.noebrito.Conduit` App
   Group container and read back by the widget's `TimelineProvider`.
+- **Only `self.status = home` runs on the main queue.** `ValueObservation` delivers there by
+  default, and the rest of the path — encode, the `.atomic` App Group write, the reload gate and its
+  bookkeeping — is serialized onto `AppState.statusSnapshotQueue` instead, because it runs after
+  every committed transaction touching the observed region (~10^4 times across an all-time import).
+  `ConduitStatusSnapshot.containerURL` is a `static let` for the same reason: resolving it is an IPC
+  round-trip to containermanagerd, not a lookup.
 - `AppState` (not `HomeViewModel`, which only lives while Home is on screen) starts a
   process-lifetime `ValueObservation` that recomputes the snapshot on every relevant DB change —
   observer wakes, `BGAppRefreshTask`, foreground sync all go through this one path — and reuses
@@ -390,8 +396,10 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
   local day, but a clock crossing midnight is not a database write, so nothing recomputes the
   snapshot sitting in the container. The widget compares the carried day against the rendering
   entry's date (`ConduitStatusSnapshot.stagedToday(asOf:)`) and shows 0 once the day has turned;
-  `timelineEntryDates` puts an entry on the midnight boundary so that lands on time instead of up
-  to a refresh interval late.
+  `timelineEntryDates` always puts an entry on the next midnight so that lands on time. It is
+  unconditional on purpose — a refresh policy is a hint WidgetKit may never honour (Low Power Mode
+  suspends refreshes outright), so a timeline that is never rebuilt must still flip the tally.
+  Extra entries within a timeline are free; only rebuilding one is budgeted.
 - `WidgetCenter.reloadAllTimelines()` fires only on a state-*class* change (`ConduitStatusSnapshot
   .shouldReloadTimelines`) — an error appearing/clearing, the import headline changing, the failed
   count crossing zero, or the first sync leaving `.idle` — never on every stamp. Conduit's

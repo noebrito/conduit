@@ -32,7 +32,7 @@ struct ConduitStatusProvider: TimelineProvider {
         let now = Date()
         let snapshot = ConduitStatusSnapshot.readFromAppGroup()
         let entries = ConduitStatusSnapshot
-            .timelineEntryDates(from: now, refreshingAfter: Self.refreshInterval)
+            .timelineEntryDates(from: now)
             .map { ConduitStatusEntry(date: $0, snapshot: snapshot) }
         completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(Self.refreshInterval))))
     }

@@ -113,24 +113,37 @@ final class ConduitStatusSnapshotTests: XCTestCase {
     // MARK: - timelineEntryDates — the midnight boundary entry
 
     /// A timeline holding one entry renders that entry's date until the next
-    /// refresh, so without a boundary entry the hourly policy would keep
-    /// yesterday's tally on screen for up to an hour past midnight.
-    func test_timelineEntryDates_addsTheMidnightBoundaryWhenItFallsInsideTheInterval() {
-        let calendar = Calendar.current
-        let midnight = calendar.startOfDay(for: Self.nextDayNoon)
+    /// rebuild, so without a boundary entry the widget keeps yesterday's tally
+    /// on screen past midnight.
+    func test_timelineEntryDates_carriesTheMidnightBoundaryWhenItIsImminent() {
+        let midnight = Calendar.current.startOfDay(for: Self.nextDayNoon)
         let now = midnight.addingTimeInterval(-10 * 60)
 
-        let dates = ConduitStatusSnapshot.timelineEntryDates(from: now, refreshingAfter: 3_600)
-
-        XCTAssertEqual(dates, [now, midnight])
+        XCTAssertEqual(ConduitStatusSnapshot.timelineEntryDates(from: now), [now, midnight])
     }
 
-    func test_timelineEntryDates_isJustNowWhenMidnightIsBeyondTheInterval() {
+    /// The boundary cannot be conditional on midnight falling inside one
+    /// refresh interval: WidgetKit treats the refresh policy as a hint, not a
+    /// promise (Low Power Mode suspends refreshes outright), so a timeline
+    /// built at noon and never rebuilt must still flip the tally at midnight
+    /// rather than render "Staged today 1204" on a day nothing was staged.
+    func test_timelineEntryDates_carriesTheMidnightBoundaryEvenWhenItIsHoursAway() {
         let now = Self.noon
+        let midnight = Calendar.current.startOfDay(for: Self.nextDayNoon)
 
-        let dates = ConduitStatusSnapshot.timelineEntryDates(from: now, refreshingAfter: 3_600)
+        XCTAssertEqual(ConduitStatusSnapshot.timelineEntryDates(from: now), [now, midnight])
+    }
 
-        XCTAssertEqual(dates, [now])
+    /// The entry only pays off if rendering against it actually zeroes the
+    /// tally — the whole point of carrying `stagedTodayDay`.
+    func test_timelineEntryDates_midnightEntryRendersTheTallyAsZero() throws {
+        let snapshot = makeSnapshot(stagedTodayCount: 1_204, stagedTodayDay: Self.noon)
+        let midnight = try XCTUnwrap(ConduitStatusSnapshot.timelineEntryDates(from: Self.noon).last)
+
+        XCTAssertEqual(
+            ConduitStatusSnapshot.secondLine(for: snapshot, now: midnight),
+            "Staged today 0"
+        )
     }
 
     // MARK: - symbolName(for:) — accessoryCircular
@@ -203,7 +216,7 @@ final class ConduitStatusSnapshotTests: XCTestCase {
     /// A fresh install's first successful sync flips both the symbol
     /// (`clock.badge.exclamationmark` → `checkmark.circle`) and the first line
     /// ("No syncs yet" → "Synced N ago"). Without a reload the Lock Screen keeps
-    /// claiming the app has never synced until the best-effort 15-minute
+    /// claiming the app has never synced until the best-effort hourly
     /// timeline policy happens to fire.
     func test_shouldReload_firstSyncLeavingIdle_reloads() {
         let previous = makeSnapshot(syncStatus: .idle, lastSyncedAt: nil)

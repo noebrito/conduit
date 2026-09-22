@@ -40,9 +40,11 @@ struct ConduitStatusSnapshot: Codable, Equatable {
     static let appGroupIdentifier = "group.dev.noebrito.Conduit"
     private static let fileName = "conduit_status_snapshot.json"
 
-    private static var containerURL: URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
-    }
+    /// Resolved once per process: `containerURL(forSecurityApplicationGroupIdentifier:)`
+    /// is an IPC round-trip to containermanagerd, and this is on the path taken
+    /// after every committed transaction.
+    private static let containerURL: URL? = FileManager.default
+        .containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
 
     // MARK: - Pure codec (directly testable without an App Group container)
 
@@ -108,25 +110,22 @@ struct ConduitStatusSnapshot: Codable, Equatable {
         return "Staged today \(snapshot.stagedToday(asOf: now, calendar: calendar))"
     }
 
-    /// Entry dates for one timeline: `now`, plus the next local midnight when
-    /// that falls before the timeline is due to be rebuilt.
+    /// Entry dates for one timeline: `now`, plus the next local midnight.
     ///
     /// The midnight entry is what makes `stagedToday(asOf:)` land on time. A
     /// timeline holding one entry renders that entry's date until the next
-    /// refresh, so without a boundary entry the widget would keep showing
-    /// yesterday's tally for however long is left on the refresh interval.
-    /// Extra entries inside a timeline are free — only rebuilding it is
-    /// budgeted — so this costs nothing against the refresh allowance.
-    static func timelineEntryDates(
-        from now: Date,
-        refreshingAfter interval: TimeInterval,
-        calendar: Calendar = .current
-    ) -> [Date] {
+    /// rebuild, and a rebuild is something WidgetKit treats as a hint rather
+    /// than a promise — Low Power Mode suspends refreshes outright, and a
+    /// rarely-surfaced widget gets throttled — so the boundary is carried
+    /// unconditionally rather than only when it happens to fall inside one
+    /// refresh interval. Extra entries inside a timeline are free; only
+    /// rebuilding one is budgeted.
+    static func timelineEntryDates(from now: Date, calendar: Calendar = .current) -> [Date] {
         guard let midnight = calendar.nextDate(
             after: now,
             matching: DateComponents(hour: 0, minute: 0, second: 0),
             matchingPolicy: .nextTime
-        ), midnight < now.addingTimeInterval(interval) else {
+        ) else {
             return [now]
         }
         return [now, midnight]
