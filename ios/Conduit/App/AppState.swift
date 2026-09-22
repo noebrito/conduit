@@ -39,11 +39,29 @@ final class AppState {
 
     private(set) var isOnboardingComplete: Bool
 
-    /// Process-lifetime observation feeding the Lock Screen widget's status
-    /// snapshot. Started here — not in `HomeViewModel`, which only lives while
-    /// Home is on screen — so every path that changes status (observer wakes,
-    /// `BGAppRefreshTask`, foreground sync) is covered even when Home was never
-    /// opened this launch.
+    /// The current sync status, recomputed on every relevant database change by
+    /// the one observation this app runs for it.
+    ///
+    /// Process-lifetime and owned here — not by `HomeViewModel`, which only
+    /// exists while Home is on screen — so every path that changes status
+    /// (observer wakes, `BGAppRefreshTask`, foreground sync) is covered even
+    /// when Home was never opened this launch. Home reads this rather than
+    /// opening a second observation over the same tables: both wanted the
+    /// identical fetch, and a duplicate would scan the outbox state index twice
+    /// per committed transaction for the rest of the process lifetime.
+    ///
+    /// The defaults stand in for the window between launch and the observation's
+    /// first (asynchronous) value; the initial read stays off the main thread
+    /// because a bulk import's in-flight write would otherwise stall launch.
+    private(set) var status = HomeViewModel.StatusSnapshot(
+        pending: 0,
+        failed: 0,
+        today: 0,
+        todayStart: StagedDailyCountDAO.day(for: Date()),
+        lastSynced: nil,
+        status: .idle
+    )
+
     private var statusSnapshotCancellable: AnyDatabaseCancellable?
     /// What the App Group container already holds, so the reload gate compares
     /// against the snapshot the widget is actually showing rather than against
@@ -69,37 +87,15 @@ final class AppState {
 
     // MARK: - Lock Screen widget status snapshot
 
-    /// Recomputes the widget's status snapshot on every relevant DB change and
-    /// writes it to the App Group container. Reuses `HomeViewModel.deriveStatus`
-    /// and `SettingsViewModel.statusTitle(for:)` verbatim rather than inventing
-    /// new wording for the same states.
+    /// Recomputes `status` on every relevant DB change, publishes it for Home,
+    /// and writes the widget's snapshot to the App Group container. Reuses
+    /// `HomeViewModel.deriveStatus` and `SettingsViewModel.statusTitle(for:)`
+    /// verbatim rather than inventing new wording for the same states.
     private func startStatusSnapshotObservation() {
-        let observation = ValueObservation.tracking { db -> ConduitStatusSnapshot in
+        let observation = ValueObservation.tracking { db -> (HomeViewModel.StatusSnapshot, String?) in
             let home = try HomeViewModel.fetchStatus(db)
             let importRun = try ImportRunState.fetchOne(db, key: ImportProgressDAO.singletonID)
-
-            let syncStatus: ConduitStatusSnapshot.SyncStatus
-            let syncedAt: Date?
-            switch home.status {
-            case .idle:
-                syncStatus = .idle
-                syncedAt = nil
-            case .synced(let date):
-                syncStatus = .synced
-                syncedAt = date
-            case .error:
-                syncStatus = .error
-                syncedAt = home.lastSynced
-            }
-
-            return ConduitStatusSnapshot(
-                syncStatus: syncStatus,
-                lastSyncedAt: syncedAt,
-                pendingCount: home.pending,
-                failedCount: home.failed,
-                stagedTodayCount: home.today,
-                importStatusHeadline: AppState.importHeadline(for: importRun)
-            )
+            return (home, AppState.importHeadline(for: importRun))
         }
 
         lastPersistedStatusSnapshot = ConduitStatusSnapshot.readFromAppGroup()
@@ -108,9 +104,40 @@ final class AppState {
             onError: { error in
                 logger.error("Status snapshot observation error: \(error.localizedDescription, privacy: .public)")
             },
-            onChange: { [weak self] snapshot in
-                self?.persistStatusSnapshot(snapshot)
+            onChange: { [weak self] home, importHeadline in
+                self?.status = home
+                self?.persistStatusSnapshot(AppState.widgetSnapshot(from: home, importHeadline: importHeadline))
             }
+        )
+    }
+
+    /// Project the app's status onto the widget's transport type.
+    static func widgetSnapshot(
+        from home: HomeViewModel.StatusSnapshot,
+        importHeadline: String?
+    ) -> ConduitStatusSnapshot {
+        let syncStatus: ConduitStatusSnapshot.SyncStatus
+        let syncedAt: Date?
+        switch home.status {
+        case .idle:
+            syncStatus = .idle
+            syncedAt = nil
+        case .synced(let date):
+            syncStatus = .synced
+            syncedAt = date
+        case .error:
+            syncStatus = .error
+            syncedAt = home.lastSynced
+        }
+
+        return ConduitStatusSnapshot(
+            syncStatus: syncStatus,
+            lastSyncedAt: syncedAt,
+            pendingCount: home.pending,
+            failedCount: home.failed,
+            stagedTodayCount: home.today,
+            stagedTodayDay: home.todayStart,
+            importStatusHeadline: importHeadline
         )
     }
 

@@ -382,13 +382,24 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
   process-lifetime `ValueObservation` that recomputes the snapshot on every relevant DB change —
   observer wakes, `BGAppRefreshTask`, foreground sync all go through this one path — and reuses
   `HomeViewModel.deriveStatus` / `SettingsViewModel.statusTitle(for:)` verbatim rather than
-  inventing new wording for the same states.
+  inventing new wording for the same states. It is also the **only** observation over these tables:
+  Home renders `AppState.status` rather than opening its own, because both wanted the identical
+  fetch and `HomeViewModel`'s cancellable was never torn down — a second copy would scan the outbox
+  state index twice per committed transaction for the rest of the process lifetime.
+- **`stagedTodayCount` is meaningless without `stagedTodayDay`.** `staged_daily_count` buckets per
+  local day, but a clock crossing midnight is not a database write, so nothing recomputes the
+  snapshot sitting in the container. The widget compares the carried day against the rendering
+  entry's date (`ConduitStatusSnapshot.stagedToday(asOf:)`) and shows 0 once the day has turned;
+  `timelineEntryDates` puts an entry on the midnight boundary so that lands on time instead of up
+  to a refresh interval late.
 - `WidgetCenter.reloadAllTimelines()` fires only on a state-*class* change (`ConduitStatusSnapshot
   .shouldReloadTimelines`) — an error appearing/clearing, the import headline changing, the failed
   count crossing zero, or the first sync leaving `.idle` — never on every stamp. Conduit's
   background cadence (≥96 `BGAppRefreshTask` wakes/day, plus HealthKit observer wakes) would blow
   the widget's ~40-70/day reload budget otherwise; the relative-time text ticks forward on its own
-  between reloads at zero cost, which is what makes this worth doing. **The gate is only as good as
+  between reloads at zero cost, which is what makes this worth doing. The widget's own
+  `getTimeline` policy is hourly (~24/day) for the same reason — a shorter self-refresh cadence
+  would hand back everything the gate withholds and then some. **The gate is only as good as
   what it compares against**: `AppState.lastPersistedStatusSnapshot` is seeded from the App Group
   container before the observation starts, because a background launch starts the observation fresh
   and immediately receives an initial value — against an in-memory `nil` every one of those ≥96

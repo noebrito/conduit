@@ -19,15 +19,22 @@ struct ConduitStatusProvider: TimelineProvider {
         completion(ConduitStatusEntry(date: Date(), snapshot: ConduitStatusSnapshot.readFromAppGroup()))
     }
 
-    /// Timeline refresh policy on the order of 15 minutes. Relative-time text
-    /// does the ticking between reloads at zero refresh cost — see
-    /// `RectangularAccessoryView` / `CircularAccessoryView` below — so this
-    /// cadence only needs to keep the second line and symbol current, not the
-    /// "synced N ago" wording itself.
+    /// Hourly baseline refresh, deliberately well under the ~40-70/day the
+    /// system budgets: at ~24/day it leaves the rest of the allowance for the
+    /// urgent pushes `AppState.persistStatusSnapshot` makes when the status
+    /// changes class. Neither piece of freshness this widget needs depends on
+    /// this cadence — the relative-time first line ticks on its own at zero
+    /// refresh cost (see `RectangularAccessoryView` / `CircularAccessoryView`),
+    /// and a state-class change arrives as a push rather than waiting for it.
+    private static let refreshInterval: TimeInterval = 60 * 60
+
     func getTimeline(in context: Context, completion: @escaping (Timeline<ConduitStatusEntry>) -> Void) {
-        let entry = ConduitStatusEntry(date: Date(), snapshot: ConduitStatusSnapshot.readFromAppGroup())
-        let nextRefresh = Calendar.current.date(byAdding: .minute, value: 15, to: Date()) ?? Date().addingTimeInterval(15 * 60)
-        completion(Timeline(entries: [entry], policy: .after(nextRefresh)))
+        let now = Date()
+        let snapshot = ConduitStatusSnapshot.readFromAppGroup()
+        let entries = ConduitStatusSnapshot
+            .timelineEntryDates(from: now, refreshingAfter: Self.refreshInterval)
+            .map { ConduitStatusEntry(date: $0, snapshot: snapshot) }
+        completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(Self.refreshInterval))))
     }
 }
 
@@ -42,7 +49,7 @@ struct ConduitStatusWidgetEntryView: View {
         case .accessoryInline:
             InlineAccessoryView(snapshot: entry.snapshot)
         default:
-            RectangularAccessoryView(snapshot: entry.snapshot)
+            RectangularAccessoryView(snapshot: entry.snapshot, date: entry.date)
         }
     }
 }
@@ -55,6 +62,7 @@ struct ConduitStatusWidgetEntryView: View {
 /// exists to make visible.
 private struct RectangularAccessoryView: View {
     let snapshot: ConduitStatusSnapshot?
+    let date: Date
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -68,7 +76,7 @@ private struct RectangularAccessoryView: View {
                 } icon: {
                     Image(systemName: ConduitStatusSnapshot.symbolName(for: snapshot))
                 }
-                Text(ConduitStatusSnapshot.secondLine(for: snapshot))
+                Text(ConduitStatusSnapshot.secondLine(for: snapshot, now: date))
                     .font(.caption2)
             } else {
                 Label("No syncs yet", systemImage: "clock.badge.exclamationmark")

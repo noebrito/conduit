@@ -7,8 +7,8 @@ import XCTest
 /// policy deciding which import runs earn the widget's second line. None of the
 /// snapshot helpers touch the App Group container or GRDB — the widget
 /// extension never opens either (`data/conduit-live-activities-scout/report.md`
-/// §7.2); only the import-headline group below reads a real run row, since the
-/// state it must distinguish is one the `ImportProgressDAO` writes.
+/// §7.2); the import-headline and shared-observation groups below do read real
+/// rows, since the states they must distinguish are ones the DAOs write.
 final class ConduitStatusSnapshotTests: XCTestCase {
     private func makeSnapshot(
         syncStatus: ConduitStatusSnapshot.SyncStatus = .synced,
@@ -16,6 +16,7 @@ final class ConduitStatusSnapshotTests: XCTestCase {
         pendingCount: Int = 0,
         failedCount: Int = 0,
         stagedTodayCount: Int = 0,
+        stagedTodayDay: Date = ConduitStatusSnapshotTests.noon,
         importStatusHeadline: String? = nil
     ) -> ConduitStatusSnapshot {
         ConduitStatusSnapshot(
@@ -24,8 +25,18 @@ final class ConduitStatusSnapshotTests: XCTestCase {
             pendingCount: pendingCount,
             failedCount: failedCount,
             stagedTodayCount: stagedTodayCount,
+            stagedTodayDay: stagedTodayDay,
             importStatusHeadline: importStatusHeadline
         )
+    }
+
+    /// A fixed local day the staged tally is attributed to, plus the same wall
+    /// clock a day later. Built from the current calendar so the day boundary
+    /// under test is the one the code actually uses.
+    private static let noon = Calendar.current.startOfDay(for: Date(timeIntervalSince1970: 1_700_000_000))
+        .addingTimeInterval(12 * 3_600)
+    private static var nextDayNoon: Date {
+        Calendar.current.date(byAdding: .day, value: 1, to: noon)!
     }
 
     // MARK: - Codec round-trip
@@ -58,22 +69,68 @@ final class ConduitStatusSnapshotTests: XCTestCase {
             stagedTodayCount: 99,
             importStatusHeadline: "Import paused"
         )
-        XCTAssertEqual(ConduitStatusSnapshot.secondLine(for: snapshot), "1 failed")
+        XCTAssertEqual(ConduitStatusSnapshot.secondLine(for: snapshot, now: Self.noon), "1 failed")
     }
 
     func test_secondLine_importHeadline_whenNoFailures() {
         let snapshot = makeSnapshot(pendingCount: 5, importStatusHeadline: "History limited")
-        XCTAssertEqual(ConduitStatusSnapshot.secondLine(for: snapshot), "History limited")
+        XCTAssertEqual(ConduitStatusSnapshot.secondLine(for: snapshot, now: Self.noon), "History limited")
     }
 
     func test_secondLine_pendingCount_whenNoFailuresOrImportHeadline() {
         let snapshot = makeSnapshot(pendingCount: 7, stagedTodayCount: 12)
-        XCTAssertEqual(ConduitStatusSnapshot.secondLine(for: snapshot), "7 pending")
+        XCTAssertEqual(ConduitStatusSnapshot.secondLine(for: snapshot, now: Self.noon), "7 pending")
     }
 
     func test_secondLine_stagedToday_steadyState() {
         let snapshot = makeSnapshot(stagedTodayCount: 1_204)
-        XCTAssertEqual(ConduitStatusSnapshot.secondLine(for: snapshot), "Staged today 1204")
+        XCTAssertEqual(ConduitStatusSnapshot.secondLine(for: snapshot, now: Self.noon), "Staged today 1204")
+    }
+
+    /// `staged_daily_count` buckets per local day, and a clock crossing midnight
+    /// is not a database write — so nothing recomputes the snapshot sitting in
+    /// the App Group container. Rendered against the next day it must read 0,
+    /// not yesterday's tally under a "today" label.
+    func test_secondLine_stagedToday_isZeroOnceTheDayHasTurned() {
+        let snapshot = makeSnapshot(stagedTodayCount: 1_204, stagedTodayDay: Self.noon)
+        XCTAssertEqual(
+            ConduitStatusSnapshot.secondLine(for: snapshot, now: Self.nextDayNoon),
+            "Staged today 0"
+        )
+    }
+
+    /// The same rule must not fire early: any moment still inside the tallied
+    /// day keeps the real count.
+    func test_secondLine_stagedToday_survivesToTheEndOfItsOwnDay() {
+        let snapshot = makeSnapshot(stagedTodayCount: 1_204, stagedTodayDay: Self.noon)
+        let lastSecond = Calendar.current.startOfDay(for: Self.nextDayNoon).addingTimeInterval(-1)
+        XCTAssertEqual(
+            ConduitStatusSnapshot.secondLine(for: snapshot, now: lastSecond),
+            "Staged today 1204"
+        )
+    }
+
+    // MARK: - timelineEntryDates — the midnight boundary entry
+
+    /// A timeline holding one entry renders that entry's date until the next
+    /// refresh, so without a boundary entry the hourly policy would keep
+    /// yesterday's tally on screen for up to an hour past midnight.
+    func test_timelineEntryDates_addsTheMidnightBoundaryWhenItFallsInsideTheInterval() {
+        let calendar = Calendar.current
+        let midnight = calendar.startOfDay(for: Self.nextDayNoon)
+        let now = midnight.addingTimeInterval(-10 * 60)
+
+        let dates = ConduitStatusSnapshot.timelineEntryDates(from: now, refreshingAfter: 3_600)
+
+        XCTAssertEqual(dates, [now, midnight])
+    }
+
+    func test_timelineEntryDates_isJustNowWhenMidnightIsBeyondTheInterval() {
+        let now = Self.noon
+
+        let dates = ConduitStatusSnapshot.timelineEntryDates(from: now, refreshingAfter: 3_600)
+
+        XCTAssertEqual(dates, [now])
     }
 
     // MARK: - symbolName(for:) — accessoryCircular
@@ -172,7 +229,7 @@ final class ConduitStatusSnapshotTests: XCTestCase {
         XCTAssertNil(AppState.importHeadline(for: run))
 
         let snapshot = makeSnapshot(pendingCount: 7, importStatusHeadline: AppState.importHeadline(for: run))
-        XCTAssertEqual(ConduitStatusSnapshot.secondLine(for: snapshot), "7 pending")
+        XCTAssertEqual(ConduitStatusSnapshot.secondLine(for: snapshot, now: Self.noon), "7 pending")
     }
 
     /// The other half of the same rule: a stop the user can still act on keeps
@@ -198,7 +255,7 @@ final class ConduitStatusSnapshotTests: XCTestCase {
             XCTAssertEqual(AppState.importHeadline(for: run), expected, "stopCause \(cause)")
 
             let snapshot = makeSnapshot(pendingCount: 7, importStatusHeadline: AppState.importHeadline(for: run))
-            XCTAssertEqual(ConduitStatusSnapshot.secondLine(for: snapshot), expected, "stopCause \(cause)")
+            XCTAssertEqual(ConduitStatusSnapshot.secondLine(for: snapshot, now: Self.noon), expected, "stopCause \(cause)")
         }
     }
 
@@ -217,5 +274,48 @@ final class ConduitStatusSnapshotTests: XCTestCase {
         try dao.finishRun(status: .completed)
 
         XCTAssertNil(AppState.importHeadline(for: try XCTUnwrap(dao.currentRun())))
+    }
+
+    // MARK: - The single shared status observation
+
+    /// Home renders `AppState.status`, republished by the one observation this
+    /// app runs over the outbox/staged/sync tables. That is the behavior the
+    /// duplicate-observation removal had to preserve: a write must still reach
+    /// the screen's public surface even though `HomeViewModel` no longer opens
+    /// an observation, and no longer has a `start()` to call.
+    @MainActor
+    func test_homeViewModel_reflectsWritesThroughTheSharedObservation() async throws {
+        let database = try AppDatabase.makeInMemory()
+        let appState = AppState(database: database)
+        let viewModel = HomeViewModel(appState: appState)
+
+        let syncedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        try await database.dbWriter.write { db in
+            try SyncStateDAO.setLastSyncedAt(db, syncedAt)
+            try StagedDailyCountDAO.increment(db, enqueuedAt: Date(), by: 42)
+        }
+
+        try await Self.waitUntil("Home sees the staged tally") { await viewModel.stagedTodayCount == 42 }
+
+        XCTAssertEqual(viewModel.syncStatus, .synced(syncedAt))
+        XCTAssertFalse(viewModel.statusIsError)
+        XCTAssertEqual(viewModel.syncStatusLabel.hasPrefix("Synced"), true, viewModel.syncStatusLabel)
+        XCTAssertEqual(viewModel.pendingCount, 0)
+        XCTAssertEqual(viewModel.failedCount, 0)
+    }
+
+    /// The observation delivers asynchronously (deliberately — the initial read
+    /// stays off the main thread), so poll rather than assume a fixed delay.
+    private static func waitUntil(
+        _ what: String,
+        timeout: TimeInterval = 5,
+        _ condition: @Sendable () async -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if await condition() { return }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTFail("Timed out waiting for: \(what)")
     }
 }

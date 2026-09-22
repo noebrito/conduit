@@ -24,6 +24,14 @@ struct ConduitStatusSnapshot: Codable, Equatable {
     var pendingCount: Int
     var failedCount: Int
     var stagedTodayCount: Int
+    /// The local start-of-day `stagedTodayCount` was tallied for.
+    ///
+    /// `staged_daily_count` is bucketed per local day, so the count is only
+    /// true for the day it was read on — and a clock crossing midnight is not a
+    /// database write, so the observation that produces this snapshot never
+    /// re-fires for it. Carrying the bucket key lets the reader decide, against
+    /// its own clock, whether the count still describes "today".
+    var stagedTodayDay: Date
     /// `SettingsViewModel.statusTitle(for:)`'s wording, verbatim, when the most
     /// recent import run is not `.completed`. `nil` when there is no run or the
     /// run completed — the widget then falls back to pending/staged counts.
@@ -72,11 +80,22 @@ struct ConduitStatusSnapshot: Codable, Equatable {
 
     // MARK: - Pure view helpers, shared by the widget's three accessory families
 
+    /// The staged tally as of `now`, which is 0 once the local day has moved on
+    /// from the one it was counted for. The snapshot in the container can be
+    /// arbitrarily old — nothing rewrites it until the next database write — so
+    /// the reader's own clock, not the writer's, decides what "today" means.
+    func stagedToday(asOf now: Date, calendar: Calendar = .current) -> Int {
+        calendar.isDate(stagedTodayDay, inSameDayAs: now) ? stagedTodayCount : 0
+    }
+
     /// Second line for `accessoryRectangular`, first match wins. Reuses the
     /// app's existing wording (via `importStatusHeadline`, already produced by
     /// `SettingsViewModel.statusTitle(for:)`) rather than inventing new copy
     /// for the same states.
-    static func secondLine(for snapshot: ConduitStatusSnapshot) -> String {
+    ///
+    /// `now` is the date of the timeline entry being rendered, so the staged
+    /// tally is judged against the moment the user actually sees it.
+    static func secondLine(for snapshot: ConduitStatusSnapshot, now: Date, calendar: Calendar = .current) -> String {
         if snapshot.failedCount > 0 {
             return "\(snapshot.failedCount) failed"
         }
@@ -86,7 +105,31 @@ struct ConduitStatusSnapshot: Codable, Equatable {
         if snapshot.pendingCount > 0 {
             return "\(snapshot.pendingCount) pending"
         }
-        return "Staged today \(snapshot.stagedTodayCount)"
+        return "Staged today \(snapshot.stagedToday(asOf: now, calendar: calendar))"
+    }
+
+    /// Entry dates for one timeline: `now`, plus the next local midnight when
+    /// that falls before the timeline is due to be rebuilt.
+    ///
+    /// The midnight entry is what makes `stagedToday(asOf:)` land on time. A
+    /// timeline holding one entry renders that entry's date until the next
+    /// refresh, so without a boundary entry the widget would keep showing
+    /// yesterday's tally for however long is left on the refresh interval.
+    /// Extra entries inside a timeline are free — only rebuilding it is
+    /// budgeted — so this costs nothing against the refresh allowance.
+    static func timelineEntryDates(
+        from now: Date,
+        refreshingAfter interval: TimeInterval,
+        calendar: Calendar = .current
+    ) -> [Date] {
+        guard let midnight = calendar.nextDate(
+            after: now,
+            matching: DateComponents(hour: 0, minute: 0, second: 0),
+            matchingPolicy: .nextTime
+        ), midnight < now.addingTimeInterval(interval) else {
+            return [now]
+        }
+        return [now, midnight]
     }
 
     /// Symbol for `accessoryCircular`. The Lock Screen renders widgets in
