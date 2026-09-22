@@ -11,23 +11,18 @@ final class ConduitStatusSnapshotTests: XCTestCase {
     private func makeSnapshot(
         syncStatus: ConduitStatusSnapshot.SyncStatus = .synced,
         lastSyncedAt: Date? = Date(timeIntervalSince1970: 1_000),
-        errorMessage: String? = nil,
         pendingCount: Int = 0,
         failedCount: Int = 0,
         stagedTodayCount: Int = 0,
-        importStatusHeadline: String? = nil,
-        historyFloor: Date? = nil
+        importStatusHeadline: String? = nil
     ) -> ConduitStatusSnapshot {
         ConduitStatusSnapshot(
             syncStatus: syncStatus,
             lastSyncedAt: lastSyncedAt,
-            errorMessage: errorMessage,
             pendingCount: pendingCount,
             failedCount: failedCount,
             stagedTodayCount: stagedTodayCount,
-            importStatusHeadline: importStatusHeadline,
-            historyFloor: historyFloor,
-            updatedAt: Date(timeIntervalSince1970: 2_000)
+            importStatusHeadline: importStatusHeadline
         )
     }
 
@@ -36,12 +31,10 @@ final class ConduitStatusSnapshotTests: XCTestCase {
     func test_codec_roundTripsAllFields() throws {
         let snapshot = makeSnapshot(
             syncStatus: .error,
-            errorMessage: "HTTP 500",
             pendingCount: 3,
             failedCount: 2,
             stagedTodayCount: 42,
-            importStatusHeadline: "History limited",
-            historyFloor: Date(timeIntervalSince1970: 500)
+            importStatusHeadline: "History limited"
         )
         let data = try snapshot.encoded()
         let decoded = try ConduitStatusSnapshot.decoded(from: data)
@@ -89,7 +82,7 @@ final class ConduitStatusSnapshotTests: XCTestCase {
     }
 
     func test_symbolName_errorStatus_isFailing() {
-        let snapshot = makeSnapshot(syncStatus: .error, errorMessage: "boom")
+        let snapshot = makeSnapshot(syncStatus: .error)
         XCTAssertEqual(ConduitStatusSnapshot.symbolName(for: snapshot), "exclamationmark.triangle")
     }
 
@@ -111,12 +104,12 @@ final class ConduitStatusSnapshotTests: XCTestCase {
 
     func test_shouldReload_errorAppearing_reloads() {
         let previous = makeSnapshot(syncStatus: .synced)
-        let next = makeSnapshot(syncStatus: .error, errorMessage: "boom")
+        let next = makeSnapshot(syncStatus: .error)
         XCTAssertTrue(ConduitStatusSnapshot.shouldReloadTimelines(previous: previous, next: next))
     }
 
     func test_shouldReload_errorClearing_reloads() {
-        let previous = makeSnapshot(syncStatus: .error, errorMessage: "boom")
+        let previous = makeSnapshot(syncStatus: .error)
         let next = makeSnapshot(syncStatus: .synced)
         XCTAssertTrue(ConduitStatusSnapshot.shouldReloadTimelines(previous: previous, next: next))
     }

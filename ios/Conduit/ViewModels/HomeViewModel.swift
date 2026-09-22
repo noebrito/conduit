@@ -92,23 +92,7 @@ final class HomeViewModel {
     /// primes the very first frame and refreshes after a manual "Sync Now".
     private func loadInitialStatus() async {
         do {
-            let snapshot = try await appState.database.dbWriter.read { db -> StatusSnapshot in
-                let pending = try OutboxRow
-                    .filter(Column("state") == OutboxState.pending.rawValue ||
-                            Column("state") == OutboxState.inflight.rawValue)
-                    .fetchCount(db)
-                let failed = try OutboxRow
-                    .filter(Column("state") == OutboxState.failed.rawValue)
-                    .fetchCount(db)
-                let today = try StagedDailyCountDAO.count(db)
-                let status = Self.deriveStatus(
-                    lastSynced: try SyncStateDAO.lastSyncedAt(db),
-                    latestDelivery: try DeliveryLogEntry
-                        .order(Column("sent_at").desc, Column("id").desc)
-                        .fetchOne(db)
-                )
-                return StatusSnapshot(pending: pending, failed: failed, today: today, status: status)
-            }
+            let snapshot = try await appState.database.dbWriter.read(Self.fetchStatus)
             await MainActor.run {
                 self.pendingCount = snapshot.pending
                 self.failedCount = snapshot.failed
@@ -120,38 +104,48 @@ final class HomeViewModel {
         }
     }
 
-    /// Snapshot the observation computes on every relevant DB change.
-    private struct StatusSnapshot {
+    /// Snapshot the observation computes on every relevant DB change. Also the
+    /// input the Lock Screen widget's status snapshot is built from, so the
+    /// pending/inflight predicate is defined exactly once — see
+    /// `AppState.startStatusSnapshotObservation`.
+    struct StatusSnapshot {
         let pending: Int
         let failed: Int
         let today: Int
+        let lastSynced: Date?
         let status: SyncStatus
     }
 
+    /// The single place these status counts are read from the database, shared
+    /// by Home's initial load, Home's observation, and the widget snapshot
+    /// observation in `AppState`.
+    static func fetchStatus(_ db: Database) throws -> StatusSnapshot {
+        let pending = try OutboxRow
+            .filter(Column("state") == OutboxState.pending.rawValue ||
+                    Column("state") == OutboxState.inflight.rawValue)
+            .fetchCount(db)
+        let failed = try OutboxRow
+            .filter(Column("state") == OutboxState.failed.rawValue)
+            .fetchCount(db)
+        // "Staged today" is the persisted tally, not a live outbox row count,
+        // so it keeps rising as the queue drains (delivered rows are deleted).
+        let today = try StagedDailyCountDAO.count(db)
+        // Track the sync-completion stamp + latest delivery so the "Synced X
+        // ago" label updates reactively the moment a background upload lands
+        // (or an empty flush stamps). The relative-time wording itself is
+        // ticked forward by the HomeView TimelineView, not a DB-reading timer.
+        let lastSynced = try SyncStateDAO.lastSyncedAt(db)
+        let status = deriveStatus(
+            lastSynced: lastSynced,
+            latestDelivery: try DeliveryLogEntry
+                .order(Column("sent_at").desc, Column("id").desc)
+                .fetchOne(db)
+        )
+        return StatusSnapshot(pending: pending, failed: failed, today: today, lastSynced: lastSynced, status: status)
+    }
+
     private func observeOutbox() {
-        let observation = ValueObservation.tracking { db -> StatusSnapshot in
-            let pending = try OutboxRow
-                .filter(Column("state") == OutboxState.pending.rawValue ||
-                        Column("state") == OutboxState.inflight.rawValue)
-                .fetchCount(db)
-            let failed = try OutboxRow
-                .filter(Column("state") == OutboxState.failed.rawValue)
-                .fetchCount(db)
-            // "Staged today" is the persisted tally, not a live outbox row count,
-            // so it keeps rising as the queue drains (delivered rows are deleted).
-            let today = try StagedDailyCountDAO.count(db)
-            // Track the sync-completion stamp + latest delivery so the "Synced X
-            // ago" label updates reactively the moment a background upload lands
-            // (or an empty flush stamps). The relative-time wording itself is
-            // ticked forward by the HomeView TimelineView, not a DB-reading timer.
-            let status = Self.deriveStatus(
-                lastSynced: try SyncStateDAO.lastSyncedAt(db),
-                latestDelivery: try DeliveryLogEntry
-                    .order(Column("sent_at").desc, Column("id").desc)
-                    .fetchOne(db)
-            )
-            return StatusSnapshot(pending: pending, failed: failed, today: today, status: status)
-        }
+        let observation = ValueObservation.tracking(Self.fetchStatus)
 
         observationCancellable = observation.start(
             in: appState.database.dbWriter,

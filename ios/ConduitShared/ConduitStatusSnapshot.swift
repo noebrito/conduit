@@ -21,7 +21,6 @@ struct ConduitStatusSnapshot: Codable, Equatable {
 
     var syncStatus: SyncStatus
     var lastSyncedAt: Date?
-    var errorMessage: String?
     var pendingCount: Int
     var failedCount: Int
     var stagedTodayCount: Int
@@ -29,8 +28,6 @@ struct ConduitStatusSnapshot: Codable, Equatable {
     /// recent import run is not `.completed`. `nil` when there is no run or the
     /// run completed — the widget then falls back to pending/staged counts.
     var importStatusHeadline: String?
-    var historyFloor: Date?
-    var updatedAt: Date
 
     static let appGroupIdentifier = "group.dev.noebrito.Conduit"
     private static let fileName = "conduit_status_snapshot.json"

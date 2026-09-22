@@ -49,14 +49,22 @@ struct ConduitStatusWidgetEntryView: View {
 
 /// Primary family: a relative-time line (system-ticked, zero refresh cost)
 /// plus one conditional second line. See `ConduitStatusSnapshot.secondLine`.
+/// A snapshot that has never synced still renders its state symbol and second
+/// line — only the relative-time wording falls back to "No syncs yet" — since a
+/// fresh install whose very first sync is failing is exactly what this surface
+/// exists to make visible.
 private struct RectangularAccessoryView: View {
     let snapshot: ConduitStatusSnapshot?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            if let snapshot, let lastSyncedAt = snapshot.lastSyncedAt {
+            if let snapshot {
                 Label {
-                    Text("Synced \(Text(lastSyncedAt, style: .relative)) ago")
+                    if let lastSyncedAt = snapshot.lastSyncedAt {
+                        Text("Synced \(Text(lastSyncedAt, style: .relative)) ago")
+                    } else {
+                        Text("No syncs yet")
+                    }
                 } icon: {
                     Image(systemName: ConduitStatusSnapshot.symbolName(for: snapshot))
                 }
@@ -98,15 +106,17 @@ private struct InlineAccessoryView: View {
     let snapshot: ConduitStatusSnapshot?
 
     var body: some View {
-        if let snapshot, let lastSyncedAt = snapshot.lastSyncedAt {
-            if snapshot.failedCount > 0 {
-                Label("Conduit · \(snapshot.failedCount) failed", systemImage: ConduitStatusSnapshot.symbolName(for: snapshot))
-            } else {
-                Label {
+        if let snapshot {
+            Label {
+                if snapshot.failedCount > 0 {
+                    Text("Conduit · \(snapshot.failedCount) failed")
+                } else if let lastSyncedAt = snapshot.lastSyncedAt {
                     Text("Conduit · Synced \(Text(lastSyncedAt, style: .relative)) ago")
-                } icon: {
-                    Image(systemName: ConduitStatusSnapshot.symbolName(for: snapshot))
+                } else {
+                    Text("Conduit · No syncs yet")
                 }
+            } icon: {
+                Image(systemName: ConduitStatusSnapshot.symbolName(for: snapshot))
             }
         } else {
             Label("Conduit · No syncs yet", systemImage: "clock.badge.exclamationmark")

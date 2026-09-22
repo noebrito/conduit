@@ -67,52 +67,33 @@ final class AppState {
     /// new wording for the same states.
     private func startStatusSnapshotObservation() {
         let observation = ValueObservation.tracking { db -> ConduitStatusSnapshot in
-            let pending = try OutboxRow
-                .filter(Column("state") == OutboxState.pending.rawValue ||
-                        Column("state") == OutboxState.inflight.rawValue)
-                .fetchCount(db)
-            let failed = try OutboxRow
-                .filter(Column("state") == OutboxState.failed.rawValue)
-                .fetchCount(db)
-            let stagedToday = try StagedDailyCountDAO.count(db)
-            let lastSynced = try SyncStateDAO.lastSyncedAt(db)
-            let latestDelivery = try DeliveryLogEntry
-                .order(Column("sent_at").desc, Column("id").desc)
-                .fetchOne(db)
-            let homeStatus = HomeViewModel.deriveStatus(lastSynced: lastSynced, latestDelivery: latestDelivery)
+            let home = try HomeViewModel.fetchStatus(db)
             let importRun = try ImportRunState.fetchOne(db, key: ImportProgressDAO.singletonID)
             let importHeadline: String? = importRun.flatMap { run in
                 run.status == .completed ? nil : SettingsViewModel.statusTitle(for: run)
             }
 
             let syncStatus: ConduitStatusSnapshot.SyncStatus
-            let errorMessage: String?
             let syncedAt: Date?
-            switch homeStatus {
+            switch home.status {
             case .idle:
                 syncStatus = .idle
-                errorMessage = nil
                 syncedAt = nil
             case .synced(let date):
                 syncStatus = .synced
-                errorMessage = nil
                 syncedAt = date
-            case .error(let message):
+            case .error:
                 syncStatus = .error
-                errorMessage = message
-                syncedAt = lastSynced
+                syncedAt = home.lastSynced
             }
 
             return ConduitStatusSnapshot(
                 syncStatus: syncStatus,
                 lastSyncedAt: syncedAt,
-                errorMessage: errorMessage,
-                pendingCount: pending,
-                failedCount: failed,
-                stagedTodayCount: stagedToday,
-                importStatusHeadline: importHeadline,
-                historyFloor: importRun?.historyFloor,
-                updatedAt: Date()
+                pendingCount: home.pending,
+                failedCount: home.failed,
+                stagedTodayCount: home.today,
+                importStatusHeadline: importHeadline
             )
         }
 
@@ -132,11 +113,18 @@ final class AppState {
     /// appearing/clearing, the import headline changing, or the failed count
     /// crossing zero) — never on every stamp, since Conduit's background
     /// cadence would exhaust the widget's daily reload budget otherwise.
+    ///
+    /// A failed write leaves the container holding the *previous* snapshot, so
+    /// it also leaves `lastPersistedStatusSnapshot` where it is: reloading would
+    /// only redraw stale content, and advancing the bookkeeping would make the
+    /// next successful write of the same state class look like no change at all,
+    /// suppressing the reload that actually matters.
     private func persistStatusSnapshot(_ snapshot: ConduitStatusSnapshot) {
         do {
             try snapshot.writeToAppGroup()
         } catch {
             logger.error("Failed to write status snapshot: \(error.localizedDescription, privacy: .public)")
+            return
         }
         if ConduitStatusSnapshot.shouldReloadTimelines(previous: lastPersistedStatusSnapshot, next: snapshot) {
             WidgetCenter.shared.reloadAllTimelines()
