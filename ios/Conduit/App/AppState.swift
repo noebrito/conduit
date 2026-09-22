@@ -168,15 +168,32 @@ final class AppState {
     /// `import_run` is a singleton row that survives until a brand-new run
     /// begins, so any headline returned here pins the widget's second line —
     /// it outranks the pending count in `ConduitStatusSnapshot.secondLine` —
-    /// until the user imports again. Only a run that is live or still
-    /// actionable earns that: a completed run has nothing to report, and a run
-    /// the user deliberately cancelled is not a condition worth advertising
-    /// over a stuck upload queue, which is the silent failure this surface
-    /// exists to expose. Every other stop cause names a problem the user can
-    /// still act on and keeps its priority.
+    /// until the user imports again. Only a run that is live, failed, or
+    /// stopped on something still worth acting on earns that: a completed run
+    /// has nothing to report, and a routine pause is not a condition worth
+    /// advertising over a stuck upload queue, which is the silent failure this
+    /// surface exists to expose.
     static func importHeadline(for run: ImportRunState?) -> String? {
-        guard let run, run.status != .completed, run.stopCause != .userCancelled else { return nil }
+        guard let run, run.status != .completed, !isRoutinePause(run) else { return nil }
         return SettingsViewModel.statusTitle(for: run)
+    }
+
+    /// Whether a run stopped for a reason the user neither has to act on nor
+    /// would read as a problem — the two ordinary ways an import ends early.
+    ///
+    /// Deliberately an exhaustive switch rather than a list of exclusions: a
+    /// new `ImportStopCause` must not inherit a permanent pin on the Lock
+    /// Screen by default, so adding one has to fail to compile here until it is
+    /// classified. `nil` is not evidence of a routine stop — legacy rows
+    /// predate the column — so it keeps the headline.
+    private static func isRoutinePause(_ run: ImportRunState) -> Bool {
+        guard run.status == .interrupted else { return false }
+        switch run.stopCause {
+        case .userCancelled, .backgrounded:
+            return true
+        case .queueNotDraining, .historyLimited, .historyAccessUnknown, .endedShort, .none:
+            return false
+        }
     }
 
     /// Writes the snapshot to the App Group container, then reloads the

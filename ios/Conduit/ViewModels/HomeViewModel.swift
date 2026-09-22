@@ -31,7 +31,7 @@ final class HomeViewModel {
     /// resets at the local-day boundary (each day is its own bucket). The bucket
     /// key is the enqueue timestamp's local day, NOT the health sample's recorded
     /// date, so the UI labels it "Staged today" rather than "Samples today".
-    var stagedTodayCount: Int { appState.status.today }
+    var stagedTodayCount: Int { appState.status.stagedToday(asOf: Date()) }
     var pendingCount: Int { appState.status.pending }
     var failedCount: Int { appState.status.failed }
 
@@ -86,6 +86,15 @@ final class HomeViewModel {
         let todayStart: Date
         let lastSynced: Date?
         let status: SyncStatus
+
+        /// The staged tally as of `now`, which is 0 once the local day has moved
+        /// on from the one it was counted for. This snapshot is only recomputed
+        /// when a tracked table is written, and a clock crossing midnight is not
+        /// a write — so the reader's own clock, not the fetch's, decides what
+        /// "today" means.
+        func stagedToday(asOf now: Date, calendar: Calendar = .current) -> Int {
+            calendar.isDate(todayStart, inSameDayAs: now) ? today : 0
+        }
     }
 
     /// The single place these status counts are read from the database.

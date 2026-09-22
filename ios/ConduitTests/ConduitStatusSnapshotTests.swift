@@ -231,38 +231,40 @@ final class ConduitStatusSnapshotTests: XCTestCase {
     /// run the user cancelled must not produce a headline at all, or the Lock
     /// Screen reads "Import cancelled" forever and can never again surface the
     /// stuck upload queue this widget exists to expose.
-    func test_importHeadline_cancelledRun_doesNotPinTheSecondLine() throws {
-        let dao = ImportProgressDAO(try AppDatabase.makeInMemory())
-        try dao.beginRun(runId: "r1", rangeId: ImportRange.allTime.rawValue, rangeStart: nil, typesTotal: 1)
-        try dao.finishRun(status: .interrupted, autoResume: false, stopCause: .userCancelled)
+    func test_importHeadline_routinePauses_doNotPinTheSecondLine() throws {
+        let cases: [(ImportStopCause, String)] = [
+            (.userCancelled, "Import cancelled"),
+            (.backgrounded, "Import paused"),
+        ]
+        for (cause, settingsWording) in cases {
+            let dao = ImportProgressDAO(try AppDatabase.makeInMemory())
+            try dao.beginRun(runId: "r1", rangeId: ImportRange.allTime.rawValue, rangeStart: nil, typesTotal: 1)
+            try dao.finishRun(status: .interrupted, autoResume: cause == .backgrounded, stopCause: cause)
 
-        let run = try XCTUnwrap(dao.currentRun())
-        XCTAssertEqual(SettingsViewModel.statusTitle(for: run), "Import cancelled",
-                       "Settings still names the cancel — only the Lock Screen declines to pin it")
-        XCTAssertNil(AppState.importHeadline(for: run))
+            let run = try XCTUnwrap(dao.currentRun())
+            XCTAssertEqual(SettingsViewModel.statusTitle(for: run), settingsWording,
+                           "Settings still names it — only the Lock Screen declines to pin it")
+            XCTAssertNil(AppState.importHeadline(for: run), "stopCause \(cause)")
 
-        let snapshot = makeSnapshot(pendingCount: 7, importStatusHeadline: AppState.importHeadline(for: run))
-        XCTAssertEqual(ConduitStatusSnapshot.secondLine(for: snapshot, now: Self.noon), "7 pending")
+            let snapshot = makeSnapshot(pendingCount: 7, importStatusHeadline: AppState.importHeadline(for: run))
+            XCTAssertEqual(ConduitStatusSnapshot.secondLine(for: snapshot, now: Self.noon), "7 pending",
+                           "stopCause \(cause)")
+        }
     }
 
-    /// The other half of the same rule: a stop the user can still act on keeps
-    /// its priority over the pending count.
+    /// The other half of the same rule: a stop that names an ongoing problem
+    /// keeps its priority over the pending count.
     func test_importHeadline_actionableStopCauses_keepPriority() throws {
         let cases: [(ImportStopCause, String)] = [
             (.historyLimited, "History limited"),
             (.historyAccessUnknown, "History access unknown"),
             (.queueNotDraining, "Import paused"),
-            (.backgrounded, "Import paused"),
             (.endedShort, "Import interrupted"),
         ]
         for (cause, expected) in cases {
             let dao = ImportProgressDAO(try AppDatabase.makeInMemory())
             try dao.beginRun(runId: "r1", rangeId: ImportRange.allTime.rawValue, rangeStart: nil, typesTotal: 1)
-            try dao.finishRun(
-                status: .interrupted,
-                autoResume: cause == .backgrounded,
-                stopCause: cause
-            )
+            try dao.finishRun(status: .interrupted, autoResume: false, stopCause: cause)
 
             let run = try XCTUnwrap(dao.currentRun())
             XCTAssertEqual(AppState.importHeadline(for: run), expected, "stopCause \(cause)")
@@ -270,6 +272,27 @@ final class ConduitStatusSnapshotTests: XCTestCase {
             let snapshot = makeSnapshot(pendingCount: 7, importStatusHeadline: AppState.importHeadline(for: run))
             XCTAssertEqual(ConduitStatusSnapshot.secondLine(for: snapshot, now: Self.noon), expected, "stopCause \(cause)")
         }
+    }
+
+    /// A row written before `stop_cause` existed carries `nil`, which is not
+    /// evidence the stop was routine — the conservative reading keeps the
+    /// headline rather than silently hiding a real problem.
+    func test_importHeadline_interruptedWithNoRecordedCause_keepsPriority() throws {
+        let dao = ImportProgressDAO(try AppDatabase.makeInMemory())
+        try dao.beginRun(runId: "r1", rangeId: ImportRange.allTime.rawValue, rangeStart: nil, typesTotal: 1)
+        try dao.finishRun(status: .interrupted, autoResume: false, stopCause: nil)
+
+        let run = try XCTUnwrap(dao.currentRun())
+        XCTAssertNil(run.stopCause)
+        XCTAssertEqual(AppState.importHeadline(for: run), "Import interrupted")
+    }
+
+    func test_importHeadline_failedRun_keepsPriority() throws {
+        let dao = ImportProgressDAO(try AppDatabase.makeInMemory())
+        try dao.beginRun(runId: "r1", rangeId: ImportRange.allTime.rawValue, rangeStart: nil, typesTotal: 1)
+        try dao.finishRun(status: .failed, failureReason: "boom")
+
+        XCTAssertEqual(AppState.importHeadline(for: try XCTUnwrap(dao.currentRun())), "Import failed")
     }
 
     func test_importHeadline_runningRun_isSurfaced() throws {
@@ -287,6 +310,26 @@ final class ConduitStatusSnapshotTests: XCTestCase {
         try dao.finishRun(status: .completed)
 
         XCTAssertNil(AppState.importHeadline(for: try XCTUnwrap(dao.currentRun())))
+    }
+
+    // MARK: - Home's own staged-today day check
+
+    /// Home reads the same day-bucketed tally the widget does, from a snapshot
+    /// only recomputed on a tracked write — so a clock crossing midnight leaves
+    /// it describing yesterday. Monday's last staging write, read on Tuesday,
+    /// must not render under a "today" label.
+    func test_homeStatusSnapshot_stagedTodayIsZeroOnceTheDayHasTurned() {
+        let snapshot = HomeViewModel.StatusSnapshot(
+            pending: 0,
+            failed: 0,
+            today: 1_204,
+            todayStart: Calendar.current.startOfDay(for: Self.noon),
+            lastSynced: nil,
+            status: .idle
+        )
+
+        XCTAssertEqual(snapshot.stagedToday(asOf: Self.noon), 1_204)
+        XCTAssertEqual(snapshot.stagedToday(asOf: Self.nextDayNoon), 0)
     }
 
     // MARK: - The single shared status observation
