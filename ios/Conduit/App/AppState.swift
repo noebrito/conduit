@@ -95,15 +95,6 @@ final class AppState {
     /// Owned by `statusSnapshotQueue` — never read or written anywhere else.
     @ObservationIgnored
     private var lastPersistedStatusSnapshotAt: Date?
-    /// Whether the observation has held back a state the container does not
-    /// hold yet — a probe result, or a change the write gate deferred — so
-    /// `flushStatusSnapshot` only recounts when there is something to flush.
-    /// A burst of observer wakes, one per enabled type, then pays for one
-    /// recount rather than one each.
-    ///
-    /// Owned by `statusSnapshotQueue` — never read or written anywhere else.
-    @ObservationIgnored
-    private var hasUnflushedStatus = false
     /// Consecutive observation failures since the last delivered value, which
     /// is what the restart delay backs off on. Reset on every delivery, so an
     /// unrelated failure much later starts over at the bottom of the backoff.
@@ -118,6 +109,15 @@ final class AppState {
         /// counts are only recounted when the write gate would publish them.
         var isForeground = false
         var lastFullFetch: (home: HomeViewModel.StatusSnapshot, importHeadline: String?, at: Date)?
+        /// Whether the observation has fetched since the last flush, so
+        /// `flushStatusSnapshot` only recounts when the container may be
+        /// behind. A burst of observer wakes, one per enabled type, then pays
+        /// for one recount rather than one each.
+        ///
+        /// Set by the fetch itself, which GRDB runs on the writer before the
+        /// committing write returns — so a wake's completion hook always sees
+        /// it, unlike anything set from the asynchronously delivered `onChange`.
+        var hasUnflushedFetch = false
     }
 
     /// Read by the observation's fetch on GRDB's queue, written from the main
@@ -174,12 +174,7 @@ final class AppState {
                 let (home, importHeadline, countsAreFresh) = value
                 self.statusObservationFailures = 0
                 self.status = home
-                guard countsAreFresh else {
-                    self.statusSnapshotQueue.async { [weak self] in
-                        self?.hasUnflushedStatus = true
-                    }
-                    return
-                }
+                guard countsAreFresh else { return }
                 let snapshot = AppState.widgetSnapshot(from: home, importHeadline: importHeadline)
                 self.statusSnapshotQueue.async { [weak self] in
                     self?.persistStatusSnapshot(snapshot)
@@ -205,7 +200,10 @@ final class AppState {
         state: OSAllocatedUnfairLock<StatusFetchState>,
         now: Date
     ) throws -> (HomeViewModel.StatusSnapshot, countsAreFresh: Bool) {
-        let (isForeground, lastFullFetch) = state.withLock { ($0.isForeground, $0.lastFullFetch) }
+        let (isForeground, lastFullFetch) = state.withLock {
+            $0.hasUnflushedFetch = true
+            return ($0.isForeground, $0.lastFullFetch)
+        }
         if !isForeground, let lastFullFetch {
             let probe = try HomeViewModel.fetchStatus(db, reusingCountsFrom: lastFullFetch.home)
             let countsAreDue = ConduitStatusSnapshot.shouldWriteToAppGroup(
@@ -237,8 +235,8 @@ final class AppState {
     }
 
     /// Writes a freshly counted snapshot to the App Group container past the
-    /// interval floor, returning once it has landed. A no-op when nothing has
-    /// been held back since the last write.
+    /// interval floor, returning once it has landed. A no-op when the
+    /// observation has not fetched since the last flush.
     ///
     /// The observation only writes when a delivery arrives, so without this a
     /// count change skipped by the floor — a stuck upload queue, say — would
@@ -248,10 +246,15 @@ final class AppState {
     /// since a background-only launch never passes through a scene phase.
     func flushStatusSnapshot() async {
         let database = self.database
+        let fetchState = statusFetchState
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             statusSnapshotQueue.async { [weak self] in
                 defer { continuation.resume() }
-                guard self?.hasUnflushedStatus == true else { return }
+                let isDue = fetchState.withLock { state in
+                    defer { state.hasUnflushedFetch = false }
+                    return state.hasUnflushedFetch
+                }
+                guard isDue, let self else { return }
                 do {
                     let snapshot = try database.dbWriter.read { db in
                         let importRun = try ImportRunState.fetchOne(db, key: ImportProgressDAO.singletonID)
@@ -260,9 +263,12 @@ final class AppState {
                             importHeadline: AppState.importHeadline(for: importRun)
                         )
                     }
-                    self?.persistStatusSnapshot(snapshot, ignoringIntervalFloor: true)
+                    if !self.persistStatusSnapshot(snapshot, ignoringIntervalFloor: true) {
+                        fetchState.withLock { $0.hasUnflushedFetch = true }
+                    }
                 } catch {
                     logger.error("Failed to flush status snapshot: \(error.localizedDescription, privacy: .public)")
+                    fetchState.withLock { $0.hasUnflushedFetch = true }
                 }
             }
         }
@@ -388,11 +394,12 @@ final class AppState {
     /// suppressing the reload that actually matters.
     ///
     /// Runs on `statusSnapshotQueue`, which owns `lastPersistedStatusSnapshot`.
+    @discardableResult
     private func persistStatusSnapshot(
         _ snapshot: ConduitStatusSnapshot,
         ignoringIntervalFloor: Bool = false,
         now: Date = Date()
-    ) {
+    ) -> Bool {
         let isDue = ignoringIntervalFloor
             ? lastPersistedStatusSnapshot != snapshot
             : ConduitStatusSnapshot.shouldWriteToAppGroup(
@@ -401,23 +408,19 @@ final class AppState {
                 next: snapshot,
                 now: now
             )
-        guard isDue else {
-            hasUnflushedStatus = lastPersistedStatusSnapshot != snapshot
-            return
-        }
+        guard isDue else { return lastPersistedStatusSnapshot == snapshot }
         do {
             try snapshot.writeToAppGroup()
         } catch {
             logger.error("Failed to write status snapshot: \(error.localizedDescription, privacy: .public)")
-            hasUnflushedStatus = true
-            return
+            return false
         }
-        hasUnflushedStatus = false
         if ConduitStatusSnapshot.shouldReloadTimelines(previous: lastPersistedStatusSnapshot, next: snapshot) {
             WidgetCenter.shared.reloadAllTimelines()
         }
         lastPersistedStatusSnapshot = snapshot
         lastPersistedStatusSnapshotAt = now
+        return true
     }
 
     /// Start HealthKit data capture for the currently-enabled data types.
