@@ -430,9 +430,11 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
   container before the observation starts, because a background launch starts the observation fresh
   and immediately receives an initial value — against an in-memory `nil` every one of those ≥96
   wakes looks like a first-ever snapshot and spends a reload.
-- Registering the `group.dev.noebrito.Conduit` App Group capability in the developer portal (for
-  both the app and `ConduitWidgets` targets) is a one-time manual step this repo's automated CI
-  cannot perform — do it before the first TestFlight build that includes the widget.
+- The `group.dev.noebrito.Conduit` App Group is registered in the developer portal and enabled on
+  both the `dev.noebrito.Conduit` and `dev.noebrito.Conduit.widgets` App IDs — a manual step CI
+  cannot perform. Any new App Group or extension App ID needs the same; until it exists only
+  **Archive - iOS** fails (a provisioning error, not a code one), and Xcode Cloud reruns only on a
+  new pushed commit.
 
 ## Maintaining this file
 
