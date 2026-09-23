@@ -1,3 +1,5 @@
+import GRDB
+import os
 import XCTest
 @testable import Conduit
 
@@ -487,11 +489,7 @@ final class ConduitStatusSnapshotTests: XCTestCase {
     @MainActor
     func test_flushStatusSnapshot_recountsAWriteWhoseDeliveryHasNotLandedYet() async throws {
         let sentinel = makeSnapshot(pendingCount: 999)
-        do {
-            try sentinel.writeToAppGroup()
-        } catch ConduitStatusSnapshotError.appGroupContainerUnavailable {
-            throw XCTSkip("The test host has no App Group container to flush into")
-        }
+        try sentinel.writeToAppGroup()
 
         let database = try AppDatabase.makeInMemory()
         var webhook = WebhookConfig.makeDefault(url: "https://example.com", bearerTokenKeychainRef: "test")
@@ -548,5 +546,104 @@ final class ConduitStatusSnapshotTests: XCTestCase {
             try await Task.sleep(nanoseconds: 20_000_000)
         }
         XCTFail("Timed out waiting for: \(what)")
+    }
+}
+
+/// A completed background delivery commits on the URLSession delegate's queue,
+/// after the wake that started the upload has ended. The stamp and pending
+/// purge must still reach the widget's container without waiting for another
+/// wake. The fixture starts from a two-hour-old stamp (steady state): from a
+/// never-synced state the first sync is a state-class change that writes
+/// immediately, which passes with or without the fix.
+final class WidgetDeliveryFlushTests: XCTestCase {
+    private let oldStamp = Date().addingTimeInterval(-2 * 3600)
+
+    override func tearDown() {
+        Uploader.shared.database = nil
+        Uploader.shared.backgroundCompletionHandler = nil
+        Uploader.shared.onDeliveryCommitted = nil
+        super.tearDown()
+    }
+
+    private func makeFixture() throws -> (AppDatabase, Int64) {
+        let database = try AppDatabase.makeInMemory()
+        var webhook = WebhookConfig.makeDefault(url: "https://example.com", bearerTokenKeychainRef: "test")
+        try WebhookConfigDAO(database).save(&webhook)
+        let stamp = oldStamp
+        try database.dbWriter.write { try SyncStateDAO.setLastSyncedAt($0, stamp) }
+        return (database, try XCTUnwrap(webhook.id))
+    }
+
+    private func stage(_ count: Int, database: AppDatabase, webhookID: Int64) throws {
+        for index in 0..<count {
+            var sample = Conduit_V1_Sample()
+            sample.uuid = "delivery-\(index)"
+            sample.startUnixMs = 1_700_000_000_000
+            sample.endUnixMs = 1_700_000_060_000
+            _ = try OutboxDAO(database).enqueue(
+                sample: sample, hkTypeId: "HKQuantityTypeIdentifierHeartRate", webhookId: webhookID
+            )
+        }
+    }
+
+    private func waitUntil(_ what: String, _ condition: @Sendable () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if condition() { return }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTFail("Timed out waiting for: \(what)")
+    }
+
+    @MainActor
+    func test_backgroundDeliveryCompletionReachesContainerWithoutAnotherWake() async throws {
+        let (database, webhookID) = try makeFixture()
+        let appState = AppState(database: database)     // not foreground, as on a background launch
+        Uploader.shared.database = database
+        try await waitUntil("the first full fetch is written") {
+            ConduitStatusSnapshot.readFromAppGroup()?.pendingCount == 0
+        }
+
+        try stage(5, database: database, webhookID: webhookID)
+        let batch = try XCTUnwrap(Batcher(database: database).buildBatch(webhookID: webhookID, limit: 500, deviceID: "dev"))
+        await appState.flushStatusSnapshot()            // the wake's own flush: old stamp, 5 pending
+        XCTAssertEqual(ConduitStatusSnapshot.readFromAppGroup()?.pendingCount, 5)
+
+        // The delivery lands after the wake, on the session's private delegate queue.
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .utility).async {
+                Uploader.shared.markSent(batchID: batch.batchID, httpStatus: 200, accepted: 5, deduped: 0)
+                done.resume()
+            }
+        }
+        await Uploader.shared.awaitDeliveryFlushes()
+
+        let container = try XCTUnwrap(ConduitStatusSnapshot.readFromAppGroup())
+        XCTAssertEqual(container.pendingCount, 0, "the delivered batch must not stay pending in the container")
+        XCTAssertGreaterThan(
+            try XCTUnwrap(container.lastSyncedAt), oldStamp.addingTimeInterval(60),
+            "the container must carry this delivery's stamp, not the previous one's"
+        )
+    }
+
+    @MainActor
+    func test_backgroundSessionCompletionHandlerWaitsForTheDeliveryFlush() async throws {
+        let (database, _) = try makeFixture()
+        _ = AppState(database: database)
+        Uploader.shared.database = database
+        let flushFinished = OSAllocatedUnfairLock(initialState: false)
+        Uploader.shared.onDeliveryCommitted = {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            flushFinished.withLock { $0 = true }
+        }
+        let handlerSawFlush = expectation(description: "completion handler called")
+        Uploader.shared.backgroundCompletionHandler = {
+            XCTAssertTrue(flushFinished.withLock { $0 }, "iOS must not be told we are done before the flush lands")
+            handlerSawFlush.fulfill()
+        }
+
+        Uploader.shared.markSent(batchID: "none", httpStatus: 200, accepted: 0, deduped: 0)
+        Uploader.shared.urlSessionDidFinishEvents(forBackgroundURLSession: URLSession.shared)
+        await fulfillment(of: [handlerSawFlush], timeout: 5)
     }
 }
