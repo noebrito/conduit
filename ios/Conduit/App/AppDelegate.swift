@@ -20,7 +20,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // end of launch. It's the fallback that drains the outbox when HealthKit
         // observer background delivery is throttled/skipped, so sync no longer
         // depends solely on observer wakes (§4.4).
-        AppState.shared.syncEngine.registerBackgroundTask()
+        AppState.shared.syncEngine.registerBackgroundTask {
+            await AppState.shared.flushStatusSnapshot()
+        }
         // Second, separate background task: resuming a paused "Import history"
         // run. Registered here for the same reason (all handlers must exist by
         // the end of launch) and on its own identifier, so the upload-drain task

@@ -413,9 +413,11 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
   redraw from a container still holding the old state) and everything else at most once per
   `timelineRefreshInterval`, so the ~10^4 deliveries of an all-time import no longer each pay a
   write nothing will read. That floor only fires on a later delivery, so it is not a freshness
-  guarantee: the scene-phase `.background` hook (`AppState.statusSurfaceDidEnterBackground`)
-  flushes a freshly counted snapshot past it. Off screen, the observation's fetch applies the same
-  gate to the two outbox `COUNT(*)`s, recounting only when the write gate would publish. Conduit's
+  guarantee: `AppState.flushStatusSnapshot` writes a freshly counted snapshot past it when the app
+  leaves the screen (scene phase `.background`) and at the end of every background wake
+  (`BGAppRefreshTask`, HealthKit observer), since a background-only launch never changes scene
+  phase. Off screen, the observation's fetch applies the same gate to the two outbox `COUNT(*)`s;
+  a probe result carries its counts over, so it is never written to the container. Conduit's
   background cadence (≥96 `BGAppRefreshTask` wakes/day, plus HealthKit observer wakes) would blow
   the widget's ~40-70/day reload budget otherwise; the relative-time text ticks forward on its own
   between reloads at zero cost, which is what makes this worth doing. The widget's own

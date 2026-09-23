@@ -193,7 +193,8 @@ struct ConduitStatusSnapshot: Codable, Equatable {
     /// hold it. Everything else — a climbing pending count, a fresh sync stamp
     /// — is written on the first delivery after the interval has passed. That
     /// floor is opportunistic, not scheduled: with no further delivery the
-    /// change waits for `AppState`'s flush when the app goes to the background.
+    /// change waits for `AppState.flushStatusSnapshot`, run when the app leaves
+    /// the screen and at the end of every background wake.
     static func shouldWriteToAppGroup(
         previous: ConduitStatusSnapshot?,
         writtenAt: Date?,

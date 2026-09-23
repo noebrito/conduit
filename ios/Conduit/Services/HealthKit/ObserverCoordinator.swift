@@ -23,6 +23,9 @@ final class ObserverCoordinator {
 
     private var activeQueries: [String: HKObserverQuery] = [:]
 
+    /// Awaited after each observer wake's work, before iOS is told it is done.
+    var onWakeHandled: (() async -> Void)?
+
     init(store: HKHealthStore = HKHealthStore(), syncEngine: SyncEngine) {
         self.store = store
         self.syncEngine = syncEngine
@@ -56,6 +59,7 @@ final class ObserverCoordinator {
                 Task {
                     defer { completionHandler() }
                     await self.syncEngine.handleObserverWake(typeIdentifier: identifier)
+                    await self.onWakeHandled?()
                 }
             }
 

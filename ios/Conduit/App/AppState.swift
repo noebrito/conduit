@@ -128,6 +128,9 @@ final class AppState {
         statusSnapshotQueue.async { [weak self] in
             self?.lastPersistedStatusSnapshot = ConduitStatusSnapshot.readFromAppGroup()
         }
+        observerCoordinator.onWakeHandled = { [weak self] in
+            await self?.flushStatusSnapshot()
+        }
         startStatusSnapshotObservation()
     }
 
@@ -139,11 +142,16 @@ final class AppState {
     /// verbatim rather than inventing new wording for the same states.
     private func startStatusSnapshotObservation() {
         let fetchState = statusFetchState
-        let observation = ValueObservation.tracking { db -> (HomeViewModel.StatusSnapshot, String?) in
+        let observation = ValueObservation.tracking { db -> (HomeViewModel.StatusSnapshot, String?, Bool) in
             let importRun = try ImportRunState.fetchOne(db, key: ImportProgressDAO.singletonID)
             let importHeadline = AppState.importHeadline(for: importRun)
-            let home = try AppState.fetchStatus(db, importHeadline: importHeadline, state: fetchState, now: Date())
-            return (home, importHeadline)
+            let (home, countsAreFresh) = try AppState.fetchStatus(
+                db,
+                importHeadline: importHeadline,
+                state: fetchState,
+                now: Date()
+            )
+            return (home, importHeadline, countsAreFresh)
         }
 
         statusSnapshotCancellable = observation.start(
@@ -152,10 +160,12 @@ final class AppState {
                 logger.error("Status snapshot observation error: \(error.localizedDescription, privacy: .public)")
                 self?.scheduleStatusSnapshotObservationRestart()
             },
-            onChange: { [weak self] home, importHeadline in
+            onChange: { [weak self] value in
                 guard let self else { return }
+                let (home, importHeadline, countsAreFresh) = value
                 self.statusObservationFailures = 0
                 self.status = home
+                guard countsAreFresh else { return }
                 let snapshot = AppState.widgetSnapshot(from: home, importHeadline: importHeadline)
                 self.statusSnapshotQueue.async { [weak self] in
                     self?.persistStatusSnapshot(snapshot)
@@ -172,13 +182,15 @@ final class AppState {
     /// nothing `shouldWriteToAppGroup` would publish. The cheap reads run
     /// first; the counts are recounted only when that probe differs from the
     /// last full fetch by a state class, or once the refresh interval has
-    /// passed — exactly when the write gate would let the result through.
+    /// passed. A probe result is never written to the App Group container —
+    /// its counts are carried over, not current — so the second value is
+    /// `false` for it and the observation skips the write.
     private static func fetchStatus(
         _ db: Database,
         importHeadline: String?,
         state: OSAllocatedUnfairLock<StatusFetchState>,
         now: Date
-    ) throws -> HomeViewModel.StatusSnapshot {
+    ) throws -> (HomeViewModel.StatusSnapshot, countsAreFresh: Bool) {
         let (isForeground, lastFullFetch) = state.withLock { ($0.isForeground, $0.lastFullFetch) }
         if !isForeground, let lastFullFetch {
             let probe = try HomeViewModel.fetchStatus(db, reusingCountsFrom: lastFullFetch.home)
@@ -188,11 +200,11 @@ final class AppState {
                 next: widgetSnapshot(from: probe, importHeadline: importHeadline),
                 now: now
             )
-            if !countsAreDue { return probe }
+            if !countsAreDue { return (probe, false) }
         }
         let home = try HomeViewModel.fetchStatus(db)
         state.withLock { $0.lastFullFetch = (home, importHeadline, now) }
-        return home
+        return (home, true)
     }
 
     /// The app came on screen: recount everything from here on, and restart
@@ -203,27 +215,39 @@ final class AppState {
         startStatusSnapshotObservation()
     }
 
-    /// The app is leaving the screen: flush a freshly counted snapshot to the
-    /// App Group container past the interval floor.
+    /// The app is leaving the screen: stop recounting on every delivery and
+    /// flush the current state to the widget.
+    func statusSurfaceDidEnterBackground() {
+        statusFetchState.withLock { $0.isForeground = false }
+        Task { await flushStatusSnapshot() }
+    }
+
+    /// Writes a freshly counted snapshot to the App Group container past the
+    /// interval floor, returning once it has landed.
     ///
     /// The observation only writes when a delivery arrives, so without this a
     /// count change skipped by the floor — a stuck upload queue, say — would
-    /// sit unwritten for as long as no further transaction came along.
-    func statusSurfaceDidEnterBackground() {
-        statusFetchState.withLock { $0.isForeground = false }
+    /// sit unwritten for as long as no further transaction came along. Called
+    /// wherever the app is about to stop running: leaving the screen, and the
+    /// end of each background wake (`BGAppRefreshTask`, HealthKit observer),
+    /// since a background-only launch never passes through a scene phase.
+    func flushStatusSnapshot() async {
         let database = self.database
-        statusSnapshotQueue.async { [weak self] in
-            do {
-                let snapshot = try database.dbWriter.read { db in
-                    let importRun = try ImportRunState.fetchOne(db, key: ImportProgressDAO.singletonID)
-                    return AppState.widgetSnapshot(
-                        from: try HomeViewModel.fetchStatus(db),
-                        importHeadline: AppState.importHeadline(for: importRun)
-                    )
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            statusSnapshotQueue.async { [weak self] in
+                defer { continuation.resume() }
+                do {
+                    let snapshot = try database.dbWriter.read { db in
+                        let importRun = try ImportRunState.fetchOne(db, key: ImportProgressDAO.singletonID)
+                        return AppState.widgetSnapshot(
+                            from: try HomeViewModel.fetchStatus(db),
+                            importHeadline: AppState.importHeadline(for: importRun)
+                        )
+                    }
+                    self?.persistStatusSnapshot(snapshot, ignoringIntervalFloor: true)
+                } catch {
+                    logger.error("Failed to flush status snapshot: \(error.localizedDescription, privacy: .public)")
                 }
-                self?.persistStatusSnapshot(snapshot, ignoringIntervalFloor: true)
-            } catch {
-                logger.error("Failed to flush status snapshot: \(error.localizedDescription, privacy: .public)")
             }
         }
     }

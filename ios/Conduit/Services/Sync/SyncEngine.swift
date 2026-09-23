@@ -614,7 +614,8 @@ actor SyncEngine {
     /// Register the BGAppRefreshTask handler. MUST be called from
     /// `application(_:didFinishLaunchingWithOptions:)` **before** it returns —
     /// iOS requires all task handlers to be registered by the end of launch.
-    nonisolated func registerBackgroundTask() {
+    /// `onFinished` is awaited after the flush, before the task is completed.
+    nonisolated func registerBackgroundTask(onFinished: @escaping @Sendable () async -> Void = {}) {
         BGTaskScheduler.shared.register(
             forTaskWithIdentifier: SyncEngine.bgRefreshTaskID,
             using: nil
@@ -629,6 +630,7 @@ actor SyncEngine {
             task.expirationHandler = { task.setTaskCompleted(success: false) }
             Task {
                 await self.flushNow()
+                await onFinished()
                 task.setTaskCompleted(success: true)
             }
         }
