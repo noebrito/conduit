@@ -391,7 +391,12 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
   inventing new wording for the same states. It is also the **only** observation over these tables:
   Home renders `AppState.status` rather than opening its own, because both wanted the identical
   fetch and `HomeViewModel`'s cancellable was never torn down — a second copy would scan the outbox
-  state index twice per committed transaction for the rest of the process lifetime.
+  state index twice per committed transaction for the rest of the process lifetime. **It re-arms
+  itself**: GRDB cancels a `ValueObservation` the moment it delivers an error, so `onError`
+  restarts it on a doubling backoff capped at `AppState.statusObservationRetryCeiling` (the counter
+  resets on every delivered value). Without that, one throwing fetch froze `status` — and the Lock
+  Screen snapshot — for the rest of the process, which the widget asks the user to read as "sync is
+  stuck".
 - **`stagedTodayCount` is meaningless without `stagedTodayDay`.** `staged_daily_count` buckets per
   local day, but a clock crossing midnight is not a database write, so nothing recomputes the
   snapshot sitting in the container. The widget compares the carried day against the rendering
@@ -400,9 +405,14 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
   unconditional on purpose — a refresh policy is a hint WidgetKit may never honour (Low Power Mode
   suspends refreshes outright), so a timeline that is never rebuilt must still flip the tally.
   Extra entries within a timeline are free; only rebuilding one is budgeted.
-- `WidgetCenter.reloadAllTimelines()` fires only on a state-*class* change (`ConduitStatusSnapshot
-  .shouldReloadTimelines`) — an error appearing/clearing, the import headline changing, the failed
-  count crossing zero, or the first sync leaving `.idle` — never on every stamp. Conduit's
+- **The same state-class rule gates the write and the reload.** `WidgetCenter.reloadAllTimelines()`
+  fires only on a state-*class* change (`ConduitStatusSnapshot.shouldReloadTimelines`) — an error
+  appearing/clearing, the import headline changing, the failed count crossing zero, or the first
+  sync leaving `.idle` — never on every stamp. The encode + `.atomic` App Group write is gated on
+  `shouldWriteToAppGroup`, which writes a class change immediately (the reload would otherwise
+  redraw from a container still holding the old state) and everything else at most once per
+  `timelineRefreshInterval`, so the ~10^4 deliveries of an all-time import no longer each pay a
+  write nothing will read. Conduit's
   background cadence (≥96 `BGAppRefreshTask` wakes/day, plus HealthKit observer wakes) would blow
   the widget's ~40-70/day reload budget otherwise; the relative-time text ticks forward on its own
   between reloads at zero cost, which is what makes this worth doing. The widget's own

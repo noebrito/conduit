@@ -170,6 +170,40 @@ struct ConduitStatusSnapshot: Codable, Equatable {
             || wasIdle != isIdle
             || previous.importStatusHeadline != next.importStatusHeadline
     }
+
+    /// The widget's baseline timeline-rebuild cadence, and therefore the
+    /// freshness the container actually owes it. Lives here rather than in the
+    /// widget target so the writer's coalescing and the reader's refresh policy
+    /// cannot drift apart.
+    static let timelineRefreshInterval: TimeInterval = 60 * 60
+
+    /// Whether `next` earns the encode plus `.atomic` App Group write, given
+    /// what the container already holds (`previous`) and when that landed.
+    ///
+    /// The writer is a `ValueObservation` that re-delivers after every
+    /// committed transaction touching the outbox/staged/sync tables — on the
+    /// order of 10^4 times across an all-time import — while the container is
+    /// read at most once per `timelineRefreshInterval`, plus the reloads
+    /// `shouldReloadTimelines` grants. Writing every delivery therefore spends
+    /// thousands of encodes and file writes publishing states nothing reads,
+    /// on a path a background-only launch pays with no screen to show for it.
+    ///
+    /// A state-*class* change is the one thing that cannot wait: it is pushed
+    /// to the widget the moment it is written, so the container has to already
+    /// hold it. Everything else — a climbing pending count, a fresh sync stamp
+    /// — only has to be there by the next rebuild, which is what the interval
+    /// floor guarantees.
+    static func shouldWriteToAppGroup(
+        previous: ConduitStatusSnapshot?,
+        writtenAt: Date?,
+        next: ConduitStatusSnapshot,
+        now: Date
+    ) -> Bool {
+        guard let previous, let writtenAt else { return true }
+        if previous == next { return false }
+        if shouldReloadTimelines(previous: previous, next: next) { return true }
+        return now.timeIntervalSince(writtenAt) >= timelineRefreshInterval
+    }
 }
 
 enum ConduitStatusSnapshotError: Error {

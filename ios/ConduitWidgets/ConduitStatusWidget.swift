@@ -19,22 +19,22 @@ struct ConduitStatusProvider: TimelineProvider {
         completion(ConduitStatusEntry(date: Date(), snapshot: ConduitStatusSnapshot.readFromAppGroup()))
     }
 
-    /// Hourly baseline refresh, deliberately well under the ~40-70/day the
-    /// system budgets: at ~24/day it leaves the rest of the allowance for the
-    /// urgent pushes `AppState.persistStatusSnapshot` makes when the status
-    /// changes class. Neither piece of freshness this widget needs depends on
-    /// this cadence — the relative-time first line ticks on its own at zero
-    /// refresh cost (see `RectangularAccessoryView` / `CircularAccessoryView`),
-    /// and a state-class change arrives as a push rather than waiting for it.
-    private static let refreshInterval: TimeInterval = 60 * 60
-
+    /// Hourly baseline refresh (`ConduitStatusSnapshot.timelineRefreshInterval`),
+    /// deliberately well under the ~40-70/day the system budgets: at ~24/day it
+    /// leaves the rest of the allowance for the urgent pushes
+    /// `AppState.persistStatusSnapshot` makes when the status changes class.
+    /// Neither piece of freshness this widget needs depends on this cadence —
+    /// the relative-time first line ticks on its own at zero refresh cost (see
+    /// `RectangularAccessoryView` / `CircularAccessoryView`), and a state-class
+    /// change arrives as a push rather than waiting for it.
     func getTimeline(in context: Context, completion: @escaping (Timeline<ConduitStatusEntry>) -> Void) {
         let now = Date()
         let snapshot = ConduitStatusSnapshot.readFromAppGroup()
         let entries = ConduitStatusSnapshot
             .timelineEntryDates(from: now)
             .map { ConduitStatusEntry(date: $0, snapshot: snapshot) }
-        completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(Self.refreshInterval))))
+        let next = now.addingTimeInterval(ConduitStatusSnapshot.timelineRefreshInterval)
+        completion(Timeline(entries: entries, policy: .after(next)))
     }
 }
 

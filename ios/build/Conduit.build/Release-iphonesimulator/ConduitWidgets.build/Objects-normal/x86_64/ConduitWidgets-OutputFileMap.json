@@ -1,0 +1,26 @@
+{
+  "" : {
+    "const-values" : "/Users/noebrito/.no-mistakes/worktrees/c72d59d6107d/01M35Q45JCZXWWB5BJAMJDY90Y/ios/build/Conduit.build/Release-iphonesimulator/ConduitWidgets.build/Objects-normal/x86_64/ConduitWidgets-primary.swiftconstvalues",
+    "dependencies" : "/Users/noebrito/.no-mistakes/worktrees/c72d59d6107d/01M35Q45JCZXWWB5BJAMJDY90Y/ios/build/Conduit.build/Release-iphonesimulator/ConduitWidgets.build/Objects-normal/x86_64/ConduitWidgets-primary.d",
+    "diagnostics" : "/Users/noebrito/.no-mistakes/worktrees/c72d59d6107d/01M35Q45JCZXWWB5BJAMJDY90Y/ios/build/Conduit.build/Release-iphonesimulator/ConduitWidgets.build/Objects-normal/x86_64/ConduitWidgets-primary.dia",
+    "emit-module-dependencies" : "/Users/noebrito/.no-mistakes/worktrees/c72d59d6107d/01M35Q45JCZXWWB5BJAMJDY90Y/ios/build/Conduit.build/Release-iphonesimulator/ConduitWidgets.build/Objects-normal/x86_64/ConduitWidgets-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/noebrito/.no-mistakes/worktrees/c72d59d6107d/01M35Q45JCZXWWB5BJAMJDY90Y/ios/build/Conduit.build/Release-iphonesimulator/ConduitWidgets.build/Objects-normal/x86_64/ConduitWidgets-primary-emit-module.dia",
+    "pch" : "/Users/noebrito/.no-mistakes/worktrees/c72d59d6107d/01M35Q45JCZXWWB5BJAMJDY90Y/ios/build/Conduit.build/Release-iphonesimulator/ConduitWidgets.build/Objects-normal/x86_64/ConduitWidgets-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/noebrito/.no-mistakes/worktrees/c72d59d6107d/01M35Q45JCZXWWB5BJAMJDY90Y/ios/build/Conduit.build/Release-iphonesimulator/ConduitWidgets.build/Objects-normal/x86_64/ConduitWidgets-primary.swiftdeps"
+  },
+  "/Users/noebrito/.no-mistakes/worktrees/c72d59d6107d/01M35Q45JCZXWWB5BJAMJDY90Y/ios/ConduitShared/ConduitStatusSnapshot.swift" : {
+    "index-unit-output-path" : "/Conduit.build/Release-iphonesimulator/ConduitWidgets.build/Objects-normal/x86_64/ConduitStatusSnapshot.o",
+    "llvm-bc" : "/Users/noebrito/.no-mistakes/worktrees/c72d59d6107d/01M35Q45JCZXWWB5BJAMJDY90Y/ios/build/Conduit.build/Release-iphonesimulator/ConduitWidgets.build/Objects-normal/x86_64/ConduitStatusSnapshot.bc",
+    "object" : "/Users/noebrito/.no-mistakes/worktrees/c72d59d6107d/01M35Q45JCZXWWB5BJAMJDY90Y/ios/build/Conduit.build/Release-iphonesimulator/ConduitWidgets.build/Objects-normal/x86_64/ConduitStatusSnapshot.o"
+  },
+  "/Users/noebrito/.no-mistakes/worktrees/c72d59d6107d/01M35Q45JCZXWWB5BJAMJDY90Y/ios/ConduitWidgets/ConduitStatusWidget.swift" : {
+    "index-unit-output-path" : "/Conduit.build/Release-iphonesimulator/ConduitWidgets.build/Objects-normal/x86_64/ConduitStatusWidget.o",
+    "llvm-bc" : "/Users/noebrito/.no-mistakes/worktrees/c72d59d6107d/01M35Q45JCZXWWB5BJAMJDY90Y/ios/build/Conduit.build/Release-iphonesimulator/ConduitWidgets.build/Objects-normal/x86_64/ConduitStatusWidget.bc",
+    "object" : "/Users/noebrito/.no-mistakes/worktrees/c72d59d6107d/01M35Q45JCZXWWB5BJAMJDY90Y/ios/build/Conduit.build/Release-iphonesimulator/ConduitWidgets.build/Objects-normal/x86_64/ConduitStatusWidget.o"
+  },
+  "/Users/noebrito/.no-mistakes/worktrees/c72d59d6107d/01M35Q45JCZXWWB5BJAMJDY90Y/ios/ConduitWidgets/ConduitWidgetsBundle.swift" : {
+    "index-unit-output-path" : "/Conduit.build/Release-iphonesimulator/ConduitWidgets.build/Objects-normal/x86_64/ConduitWidgetsBundle.o",
+    "llvm-bc" : "/Users/noebrito/.no-mistakes/worktrees/c72d59d6107d/01M35Q45JCZXWWB5BJAMJDY90Y/ios/build/Conduit.build/Release-iphonesimulator/ConduitWidgets.build/Objects-normal/x86_64/ConduitWidgetsBundle.bc",
+    "object" : "/Users/noebrito/.no-mistakes/worktrees/c72d59d6107d/01M35Q45JCZXWWB5BJAMJDY90Y/ios/build/Conduit.build/Release-iphonesimulator/ConduitWidgets.build/Objects-normal/x86_64/ConduitWidgetsBundle.o"
+  }
+}

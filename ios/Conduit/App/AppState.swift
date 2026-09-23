@@ -77,16 +77,32 @@ final class AppState {
     )
     /// What the App Group container already holds, so the reload gate compares
     /// against the snapshot the widget is actually showing rather than against
-    /// "nothing yet". Seeded from the container in
-    /// `startStatusSnapshotObservation`: background launches are the dominant
-    /// case (≥96 `BGAppRefreshTask` wakes/day plus HealthKit observer wakes),
-    /// and each one starts the observation fresh and receives an initial value,
-    /// so a purely in-memory nil would make every wake look like a first-ever
-    /// snapshot and spend a reload the gate exists to withhold.
+    /// "nothing yet". Seeded from the container in `init`: background launches
+    /// are the dominant case (≥96 `BGAppRefreshTask` wakes/day plus HealthKit
+    /// observer wakes), and each one starts the observation fresh and receives
+    /// an initial value, so a purely in-memory nil would make every wake look
+    /// like a first-ever snapshot and spend a reload the gate exists to
+    /// withhold.
     ///
     /// Owned by `statusSnapshotQueue` — never read or written anywhere else.
     @ObservationIgnored
     private var lastPersistedStatusSnapshot: ConduitStatusSnapshot?
+    /// When `lastPersistedStatusSnapshot` was written, so the write gate can
+    /// tell "the container is already current enough" from "it is an hour
+    /// behind". Left `nil` by the container seed above — the first delivery of
+    /// every launch writes, and only then does the interval start counting.
+    ///
+    /// Owned by `statusSnapshotQueue` — never read or written anywhere else.
+    @ObservationIgnored
+    private var lastPersistedStatusSnapshotAt: Date?
+    /// Consecutive observation failures since the last delivered value, which
+    /// is what the restart delay backs off on. Reset on every delivery, so an
+    /// unrelated failure much later starts over at the bottom of the backoff.
+    ///
+    /// Touched only from the observation's own callbacks, which GRDB delivers
+    /// on the main queue.
+    @ObservationIgnored
+    private(set) var statusObservationFailures = 0
 
     init(database: AppDatabase) {
         let store = HKHealthStore()
@@ -97,6 +113,9 @@ final class AppState {
         self.observerCoordinator = ObserverCoordinator(store: store, syncEngine: engine)
         self.importBackground = ImportBackgroundCoordinator(database: database, engine: engine)
         self.isOnboardingComplete = UserDefaults.standard.bool(forKey: "conduit.onboardingComplete")
+        statusSnapshotQueue.async { [weak self] in
+            self?.lastPersistedStatusSnapshot = ConduitStatusSnapshot.readFromAppGroup()
+        }
         startStatusSnapshotObservation()
     }
 
@@ -113,16 +132,15 @@ final class AppState {
             return (home, AppState.importHeadline(for: importRun))
         }
 
-        statusSnapshotQueue.async { [weak self] in
-            self?.lastPersistedStatusSnapshot = ConduitStatusSnapshot.readFromAppGroup()
-        }
         statusSnapshotCancellable = observation.start(
             in: database.dbWriter,
-            onError: { error in
+            onError: { [weak self] error in
                 logger.error("Status snapshot observation error: \(error.localizedDescription, privacy: .public)")
+                self?.scheduleStatusSnapshotObservationRestart()
             },
             onChange: { [weak self] home, importHeadline in
                 guard let self else { return }
+                self.statusObservationFailures = 0
                 self.status = home
                 let snapshot = AppState.widgetSnapshot(from: home, importHeadline: importHeadline)
                 self.statusSnapshotQueue.async { [weak self] in
@@ -130,6 +148,39 @@ final class AppState {
                 }
             }
         )
+    }
+
+    /// Re-arms the observation after a failed fetch, on a doubling backoff.
+    ///
+    /// GRDB cancels a `ValueObservation` the moment it hands an error to
+    /// `onError`, and this is the only observation the app runs over these
+    /// tables — so without a restart one failed fetch kills it for the rest of
+    /// the process: `status` freezes at its last value, Home stops updating,
+    /// and the Lock Screen keeps rendering whatever is already in the
+    /// container. That last part is the worst of it: a stale reading is
+    /// precisely what this widget asks the user to read as "sync is stuck".
+    ///
+    /// Backs off rather than spending a fixed attempt budget. A fetch that
+    /// keeps throwing — an `import_run` row holding an enum case this build
+    /// does not know, say — must not spin the writer queue, but it must also
+    /// still recover whenever the cause clears, which an exhausted budget
+    /// could not.
+    private func scheduleStatusSnapshotObservationRestart() {
+        statusObservationFailures += 1
+        let delay = AppState.statusObservationRetryDelay(consecutiveFailures: statusObservationFailures)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.startStatusSnapshotObservation()
+        }
+    }
+
+    /// Longest gap between restart attempts, so a permanently-failing fetch
+    /// costs at most one re-read of the writer queue per interval.
+    static let statusObservationRetryCeiling: TimeInterval = 5 * 60
+
+    /// Doubling backoff from one second up to `statusObservationRetryCeiling`.
+    static func statusObservationRetryDelay(consecutiveFailures: Int) -> TimeInterval {
+        let exponent = Double(min(max(consecutiveFailures - 1, 0), 16))
+        return min(pow(2, exponent), statusObservationRetryCeiling)
     }
 
     /// Project the app's status onto the widget's transport type.
@@ -196,12 +247,18 @@ final class AppState {
         }
     }
 
-    /// Writes the snapshot to the App Group container, then reloads the
-    /// widget's timelines only on a state-*class* change (an error
+    /// Writes the snapshot to the App Group container — but only when the
+    /// container owes the widget that write (`shouldWriteToAppGroup`) — then
+    /// reloads the widget's timelines only on a state-*class* change (an error
     /// appearing/clearing, the import headline changing, the failed count
     /// crossing zero, or the first sync leaving `.idle`) — never on every
     /// stamp, since Conduit's background cadence would exhaust the widget's
     /// daily reload budget otherwise.
+    ///
+    /// The same state-class rule gates both: a class change is written and
+    /// pushed at once, anything else is written at most once per rebuild
+    /// interval, so the ~10^4 deliveries of a large import no longer each pay
+    /// an encode and an atomic file write nothing will read.
     ///
     /// A failed write leaves the container holding the *previous* snapshot, so
     /// it also leaves `lastPersistedStatusSnapshot` where it is: reloading would
@@ -210,7 +267,13 @@ final class AppState {
     /// suppressing the reload that actually matters.
     ///
     /// Runs on `statusSnapshotQueue`, which owns `lastPersistedStatusSnapshot`.
-    private func persistStatusSnapshot(_ snapshot: ConduitStatusSnapshot) {
+    private func persistStatusSnapshot(_ snapshot: ConduitStatusSnapshot, now: Date = Date()) {
+        guard ConduitStatusSnapshot.shouldWriteToAppGroup(
+            previous: lastPersistedStatusSnapshot,
+            writtenAt: lastPersistedStatusSnapshotAt,
+            next: snapshot,
+            now: now
+        ) else { return }
         do {
             try snapshot.writeToAppGroup()
         } catch {
@@ -221,6 +284,7 @@ final class AppState {
             WidgetCenter.shared.reloadAllTimelines()
         }
         lastPersistedStatusSnapshot = snapshot
+        lastPersistedStatusSnapshotAt = now
     }
 
     /// Start HealthKit data capture for the currently-enabled data types.

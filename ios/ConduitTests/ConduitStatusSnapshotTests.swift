@@ -224,6 +224,75 @@ final class ConduitStatusSnapshotTests: XCTestCase {
         XCTAssertTrue(ConduitStatusSnapshot.shouldReloadTimelines(previous: previous, next: next))
     }
 
+    // MARK: - shouldWriteToAppGroup — the App Group write gate
+
+    /// A fixed clock for the gate's interval arithmetic.
+    private static let writeGateNow = Date(timeIntervalSince1970: 1_700_000_000)
+
+    func test_shouldWrite_nothingWrittenYet_writes() {
+        XCTAssertTrue(ConduitStatusSnapshot.shouldWriteToAppGroup(
+            previous: nil,
+            writtenAt: nil,
+            next: makeSnapshot(),
+            now: Self.writeGateNow
+        ))
+    }
+
+    func test_shouldWrite_unchangedSnapshot_doesNotWrite() {
+        let snapshot = makeSnapshot(pendingCount: 4)
+        XCTAssertFalse(ConduitStatusSnapshot.shouldWriteToAppGroup(
+            previous: snapshot,
+            writtenAt: Self.writeGateNow.addingTimeInterval(-10 * ConduitStatusSnapshot.timelineRefreshInterval),
+            next: snapshot,
+            now: Self.writeGateNow
+        ))
+    }
+
+    /// The case that dominates a large import: ~10^4 deliveries that only move
+    /// a count or a stamp. Nothing reads the container between rebuilds, so
+    /// each of those writes publishes a state no one sees — at the price of an
+    /// encode and an atomic file write apiece, on a path a background-only
+    /// launch pays with no screen to show for it.
+    func test_shouldWrite_countOnlyChangeInsideTheRefreshInterval_doesNotWrite() {
+        let previous = makeSnapshot(pendingCount: 4_000)
+        let next = makeSnapshot(pendingCount: 4_001)
+        XCTAssertFalse(ConduitStatusSnapshot.shouldWriteToAppGroup(
+            previous: previous,
+            writtenAt: Self.writeGateNow.addingTimeInterval(-60),
+            next: next,
+            now: Self.writeGateNow
+        ))
+    }
+
+    /// The other half of that rule: coalescing must not turn into staleness.
+    /// By the time the widget rebuilds, the container owes it the current
+    /// counts.
+    func test_shouldWrite_countOnlyChangeOnceTheRefreshIntervalHasElapsed_writes() {
+        let previous = makeSnapshot(pendingCount: 4_000)
+        let next = makeSnapshot(pendingCount: 4_001)
+        XCTAssertTrue(ConduitStatusSnapshot.shouldWriteToAppGroup(
+            previous: previous,
+            writtenAt: Self.writeGateNow.addingTimeInterval(-ConduitStatusSnapshot.timelineRefreshInterval),
+            next: next,
+            now: Self.writeGateNow
+        ))
+    }
+
+    /// A state-class change is pushed to the widget the instant it is written,
+    /// so it can never wait out the interval — the reload would otherwise
+    /// redraw from a container that still holds the previous state.
+    func test_shouldWrite_stateClassChange_writesImmediatelyRegardlessOfInterval() {
+        let previous = makeSnapshot(failedCount: 0)
+        let next = makeSnapshot(failedCount: 1)
+        XCTAssertTrue(ConduitStatusSnapshot.shouldReloadTimelines(previous: previous, next: next))
+        XCTAssertTrue(ConduitStatusSnapshot.shouldWriteToAppGroup(
+            previous: previous,
+            writtenAt: Self.writeGateNow.addingTimeInterval(-1),
+            next: next,
+            now: Self.writeGateNow
+        ))
+    }
+
     // MARK: - AppState.importHeadline — which runs earn the widget's second line
 
     /// The `import_run` row is a singleton that survives until a brand-new run
@@ -358,6 +427,67 @@ final class ConduitStatusSnapshotTests: XCTestCase {
         XCTAssertEqual(viewModel.syncStatusLabel.hasPrefix("Synced"), true, viewModel.syncStatusLabel)
         XCTAssertEqual(viewModel.pendingCount, 0)
         XCTAssertEqual(viewModel.failedCount, 0)
+    }
+
+    /// GRDB cancels a `ValueObservation` the moment it hands an error to
+    /// `onError`, and this is the only observation the app runs over these
+    /// tables — so a single failed fetch used to freeze `AppState.status`, and
+    /// with it the App Group snapshot the Lock Screen renders, for the rest of
+    /// the process. An `import_run` row carrying a status string this build
+    /// does not know (a rollback past a build that added an enum case, a
+    /// partially-applied migration) is the reachable form of that: it makes
+    /// the observation's `ImportRunState.fetchOne` throw.
+    @MainActor
+    func test_statusObservation_restartsAfterAFailedFetch() async throws {
+        let database = try AppDatabase.makeInMemory()
+        let appState = AppState(database: database)
+        let viewModel = HomeViewModel(appState: appState)
+
+        try ImportProgressDAO(database).beginRun(
+            runId: "r1",
+            rangeId: ImportRange.allTime.rawValue,
+            rangeStart: nil,
+            typesTotal: 1
+        )
+        try await database.dbWriter.write { db in
+            try StagedDailyCountDAO.increment(db, enqueuedAt: Date(), by: 1)
+        }
+        try await Self.waitUntil("the observation is live") { await viewModel.stagedTodayCount == 1 }
+
+        try await database.dbWriter.write { db in
+            try db.execute(sql: "UPDATE import_run SET status = 'a-case-this-build-does-not-know'")
+        }
+        try await Self.waitUntil("the fetch fails and the observation is cancelled") {
+            await appState.statusObservationFailures >= 1
+        }
+
+        try await database.dbWriter.write { db in
+            try db.execute(
+                sql: "UPDATE import_run SET status = ?",
+                arguments: [ImportRunStatus.completed.rawValue]
+            )
+            try StagedDailyCountDAO.increment(db, enqueuedAt: Date(), by: 41)
+        }
+
+        try await Self.waitUntil("the restarted observation delivers again") {
+            await viewModel.stagedTodayCount == 42
+        }
+        XCTAssertEqual(appState.statusObservationFailures, 0,
+                       "a delivered value must put the backoff back at the bottom")
+    }
+
+    /// The bound that keeps a permanently-failing fetch from spinning the
+    /// writer queue. It caps rather than gives up: a cause that clears an hour
+    /// later still gets picked back up, which a spent attempt budget could not
+    /// do.
+    func test_statusObservationRetryDelay_doublesThenCaps() {
+        XCTAssertEqual(AppState.statusObservationRetryDelay(consecutiveFailures: 1), 1)
+        XCTAssertEqual(AppState.statusObservationRetryDelay(consecutiveFailures: 2), 2)
+        XCTAssertEqual(AppState.statusObservationRetryDelay(consecutiveFailures: 5), 16)
+        XCTAssertEqual(
+            AppState.statusObservationRetryDelay(consecutiveFailures: 1_000),
+            AppState.statusObservationRetryCeiling
+        )
     }
 
     /// The observation delivers asynchronously (deliberately — the initial read

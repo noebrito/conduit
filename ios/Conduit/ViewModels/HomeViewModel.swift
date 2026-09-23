@@ -1,9 +1,6 @@
 import Foundation
 import Observation
 import GRDB
-import os
-
-private let logger = Logger(subsystem: "dev.noebrito.Conduit", category: "HomeViewModel")
 
 /// Drives the Home screen status, counts, and Sync Now action.
 @Observable
