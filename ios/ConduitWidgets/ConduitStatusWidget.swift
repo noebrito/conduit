@@ -92,6 +92,7 @@ private struct RectangularAccessoryView: View {
                 Label {
                     if let lastSyncedAt = snapshot.lastSyncedAt {
                         LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date, prefix: "Synced ")
+                            .minimumScaleFactor(0.8)
                     } else {
                         Text("No syncs yet")
                     }
@@ -109,6 +110,8 @@ private struct RectangularAccessoryView: View {
 
 /// One symbol plus a short age. The Lock Screen renders in vibrant
 /// (desaturated) mode, so the symbol carries the state, never a tint color.
+/// The age ("37 minutes ago") wraps to two lines, so it is centered and inset
+/// to stay inside the circular mask, which otherwise clips its left edge.
 private struct CircularAccessoryView: View {
     let snapshot: ConduitStatusSnapshot?
     let date: Date
@@ -121,7 +124,10 @@ private struct CircularAccessoryView: View {
                 if let lastSyncedAt = snapshot.lastSyncedAt {
                     LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date)
                         .font(.system(size: 11))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
                         .minimumScaleFactor(0.6)
+                        .padding(.horizontal, 6)
                 }
             } else {
                 Image(systemName: "clock.badge.exclamationmark")
@@ -143,7 +149,13 @@ private struct InlineAccessoryView: View {
                 if snapshot.failedCount > 0 {
                     Text("Conduit · \(snapshot.failedCount) failed")
                 } else if let lastSyncedAt = snapshot.lastSyncedAt {
-                    LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date, prefix: "Conduit · Synced ")
+                    // The inline slot is one short line, so shed the prefix
+                    // rather than let the system truncate the age itself.
+                    ViewThatFits {
+                        LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date, prefix: "Conduit · Synced ")
+                        LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date, prefix: "Synced ")
+                        LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date)
+                    }
                 } else {
                     Text("Conduit · No syncs yet")
                 }
