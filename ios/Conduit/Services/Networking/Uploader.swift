@@ -35,32 +35,39 @@ final class Uploader: NSObject {
     /// Forwarded by `AppDelegate` after iOS relaunches us for background session events.
     var backgroundCompletionHandler: (() -> Void)?
 
-    /// Awaited after every delivery outcome (`markSent`, `resetToRetry`,
-    /// `markFailed`) commits. The URLSession delegate runs after the wake that
-    /// started the upload has already ended, so nothing else pushes the new
-    /// "last synced" stamp and pending count into the widget's container past
-    /// its write throttle. Wired to `AppState.flushStatusSnapshot` in
-    /// `AppState.init`.
+    /// Awaited after a successful delivery (`markSent`) commits. The URLSession
+    /// delegate runs after the wake that started the upload has already ended,
+    /// so nothing else pushes the new "last synced" stamp and pending count into
+    /// the widget's container past its write throttle. Wired to
+    /// `AppState.flushStatusSnapshot` in `AppState.init`.
     var onDeliveryCommitted: (() async -> Void)?
 
-    /// Tail of the chain of in-flight `onDeliveryCommitted` calls, so
+    /// Tail of the chain of `onDeliveryCommitted` calls, so
     /// `urlSessionDidFinishEvents` can wait for them before telling iOS the
-    /// relaunch's work is done (it suspends the app right after).
-    private let deliveryFlushTail = OSAllocatedUnfairLock<Task<Void, Never>?>(initialState: nil)
+    /// relaunch's work is done (it suspends the app right after). `queued` is
+    /// true while a flush waits to start: that flush reads the database after
+    /// every commit so far, so further commits don't chain another recount.
+    private let deliveryFlush = OSAllocatedUnfairLock<(tail: Task<Void, Never>?, queued: Bool)>(
+        initialState: (tail: nil, queued: false)
+    )
 
     private func deliveryDidCommit() {
-        deliveryFlushTail.withLock { tail in
-            let previous = tail
-            tail = Task { [weak self] in
+        deliveryFlush.withLock { state in
+            guard !state.queued else { return }
+            state.queued = true
+            let previous = state.tail
+            state.tail = Task { [weak self] in
                 await previous?.value
-                await self?.onDeliveryCommitted?()
+                guard let self else { return }
+                self.deliveryFlush.withLock { $0.queued = false }
+                await self.onDeliveryCommitted?()
             }
         }
     }
 
     /// Resolves once every flush queued by a delivery commit so far has finished.
     func awaitDeliveryFlushes() async {
-        await deliveryFlushTail.withLock { $0 }?.value
+        await deliveryFlush.withLock { $0.tail }?.value
     }
 
     /// Accumulates each task's response body (the ingester's `{accepted, deduped}`
@@ -283,7 +290,6 @@ final class Uploader: NSObject {
                     )
                 }
             }
-            deliveryDidCommit()
             logger.info("Batch \(batchID, privacy: .public): scheduled retry (retryAfter=\(retryAfter.map { "\($0)" } ?? "nil", privacy: .public))")
         } catch {
             logger.error("resetToRetry error: \(error.localizedDescription, privacy: .public)")
@@ -313,7 +319,6 @@ final class Uploader: NSObject {
                     arguments: [batchID, Date(), httpStatus, rows.count, error]
                 )
             }
-            deliveryDidCommit()
             logger.warning("Batch \(batchID, privacy: .public): permanently failed with \(httpStatus)")
         } catch {
             logger.error("markFailed error: \(error.localizedDescription, privacy: .public)")

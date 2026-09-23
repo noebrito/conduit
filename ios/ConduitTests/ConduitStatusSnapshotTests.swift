@@ -561,6 +561,7 @@ final class WidgetDeliveryFlushTests: XCTestCase {
     override func tearDown() {
         Uploader.shared.database = nil
         Uploader.shared.backgroundCompletionHandler = nil
+        Uploader.shared.onDeliveryCommitted = nil
         super.tearDown()
     }
 

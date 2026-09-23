@@ -44,14 +44,16 @@ struct ConduitStatusSnapshot: Codable, Equatable {
     /// is an IPC round-trip to containermanagerd, and this is on the path taken
     /// after every committed transaction.
     ///
-    /// Debug builds fall back to a temp directory when the process has no App
-    /// Group entitlement (the unsigned test host, `CODE_SIGNING_ALLOWED=NO`),
-    /// so the container-dependent tests run instead of skipping.
+    /// Inside the XCTest host of a debug build, a process with no App Group
+    /// entitlement (the unsigned test host, `CODE_SIGNING_ALLOWED=NO`) falls
+    /// back to a temp directory so the container-dependent tests run instead of
+    /// skipping. The app and widget never take the fallback.
     private static let containerURL: URL? = {
         if let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) {
             return url
         }
         #if DEBUG
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil else { return nil }
         let fallback = FileManager.default.temporaryDirectory
             .appendingPathComponent("ConduitStatusSnapshotFallbackContainer", isDirectory: true)
         try? FileManager.default.createDirectory(at: fallback, withIntermediateDirectories: true)
