@@ -412,7 +412,10 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
   `shouldWriteToAppGroup`, which writes a class change immediately (the reload would otherwise
   redraw from a container still holding the old state) and everything else at most once per
   `timelineRefreshInterval`, so the ~10^4 deliveries of an all-time import no longer each pay a
-  write nothing will read. Conduit's
+  write nothing will read. That floor only fires on a later delivery, so it is not a freshness
+  guarantee: the scene-phase `.background` hook (`AppState.statusSurfaceDidEnterBackground`)
+  flushes a freshly counted snapshot past it. Off screen, the observation's fetch applies the same
+  gate to the two outbox `COUNT(*)`s, recounting only when the write gate would publish. Conduit's
   background cadence (≥96 `BGAppRefreshTask` wakes/day, plus HealthKit observer wakes) would blow
   the widget's ~40-70/day reload budget otherwise; the relative-time text ticks forward on its own
   between reloads at zero cost, which is what makes this worth doing. The widget's own

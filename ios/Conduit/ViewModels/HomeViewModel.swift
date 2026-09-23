@@ -95,14 +95,25 @@ final class HomeViewModel {
     }
 
     /// The single place these status counts are read from the database.
-    static func fetchStatus(_ db: Database) throws -> StatusSnapshot {
-        let pending = try OutboxRow
-            .filter(Column("state") == OutboxState.pending.rawValue ||
-                    Column("state") == OutboxState.inflight.rawValue)
-            .fetchCount(db)
-        let failed = try OutboxRow
-            .filter(Column("state") == OutboxState.failed.rawValue)
-            .fetchCount(db)
+    ///
+    /// With `cachedCounts`, the two outbox `COUNT(*)`s — the only reads here
+    /// that grow with the queue — are skipped: `pending` is carried over and
+    /// `failed` is only re-checked for crossing zero, which is all a state-class
+    /// comparison needs. Everything else is still read fresh.
+    static func fetchStatus(_ db: Database, reusingCountsFrom cachedCounts: StatusSnapshot? = nil) throws -> StatusSnapshot {
+        let failedRows = OutboxRow.filter(Column("state") == OutboxState.failed.rawValue)
+        let pending: Int
+        let failed: Int
+        if let cachedCounts {
+            pending = cachedCounts.pending
+            failed = try failedRows.isEmpty(db) ? 0 : max(cachedCounts.failed, 1)
+        } else {
+            pending = try OutboxRow
+                .filter(Column("state") == OutboxState.pending.rawValue ||
+                        Column("state") == OutboxState.inflight.rawValue)
+                .fetchCount(db)
+            failed = try failedRows.fetchCount(db)
+        }
         // "Staged today" is the persisted tally, not a live outbox row count,
         // so it keeps rising as the queue drains (delivered rows are deleted).
         let todayStart = StagedDailyCountDAO.day(for: Date())

@@ -104,6 +104,18 @@ final class AppState {
     @ObservationIgnored
     private(set) var statusObservationFailures = 0
 
+    private struct StatusFetchState {
+        /// Whether a screen can be showing `status`; until then the outbox
+        /// counts are only recounted when the write gate would publish them.
+        var isForeground = false
+        var lastFullFetch: (home: HomeViewModel.StatusSnapshot, importHeadline: String?, at: Date)?
+    }
+
+    /// Read by the observation's fetch on GRDB's queue, written from the main
+    /// queue by the scene-phase hooks — hence the lock.
+    @ObservationIgnored
+    private let statusFetchState = OSAllocatedUnfairLock(initialState: StatusFetchState())
+
     init(database: AppDatabase) {
         let store = HKHealthStore()
         self.database = database
@@ -126,10 +138,12 @@ final class AppState {
     /// `HomeViewModel.deriveStatus` and `SettingsViewModel.statusTitle(for:)`
     /// verbatim rather than inventing new wording for the same states.
     private func startStatusSnapshotObservation() {
+        let fetchState = statusFetchState
         let observation = ValueObservation.tracking { db -> (HomeViewModel.StatusSnapshot, String?) in
-            let home = try HomeViewModel.fetchStatus(db)
             let importRun = try ImportRunState.fetchOne(db, key: ImportProgressDAO.singletonID)
-            return (home, AppState.importHeadline(for: importRun))
+            let importHeadline = AppState.importHeadline(for: importRun)
+            let home = try AppState.fetchStatus(db, importHeadline: importHeadline, state: fetchState, now: Date())
+            return (home, importHeadline)
         }
 
         statusSnapshotCancellable = observation.start(
@@ -148,6 +162,70 @@ final class AppState {
                 }
             }
         )
+    }
+
+    /// The observation's status fetch, with the outbox counts gated by the same
+    /// rule as the App Group write.
+    ///
+    /// Off screen, `status` only feeds the widget snapshot, so recounting a
+    /// multi-million-row queue on each of an import's ~10^4 deliveries buys
+    /// nothing `shouldWriteToAppGroup` would publish. The cheap reads run
+    /// first; the counts are recounted only when that probe differs from the
+    /// last full fetch by a state class, or once the refresh interval has
+    /// passed — exactly when the write gate would let the result through.
+    private static func fetchStatus(
+        _ db: Database,
+        importHeadline: String?,
+        state: OSAllocatedUnfairLock<StatusFetchState>,
+        now: Date
+    ) throws -> HomeViewModel.StatusSnapshot {
+        let (isForeground, lastFullFetch) = state.withLock { ($0.isForeground, $0.lastFullFetch) }
+        if !isForeground, let lastFullFetch {
+            let probe = try HomeViewModel.fetchStatus(db, reusingCountsFrom: lastFullFetch.home)
+            let countsAreDue = ConduitStatusSnapshot.shouldWriteToAppGroup(
+                previous: widgetSnapshot(from: lastFullFetch.home, importHeadline: lastFullFetch.importHeadline),
+                writtenAt: lastFullFetch.at,
+                next: widgetSnapshot(from: probe, importHeadline: importHeadline),
+                now: now
+            )
+            if !countsAreDue { return probe }
+        }
+        let home = try HomeViewModel.fetchStatus(db)
+        state.withLock { $0.lastFullFetch = (home, importHeadline, now) }
+        return home
+    }
+
+    /// The app came on screen: recount everything from here on, and restart
+    /// the observation so `status` is not left holding counts carried over
+    /// while it was in the background.
+    func statusSurfaceDidBecomeActive() {
+        statusFetchState.withLock { $0.isForeground = true }
+        startStatusSnapshotObservation()
+    }
+
+    /// The app is leaving the screen: flush a freshly counted snapshot to the
+    /// App Group container past the interval floor.
+    ///
+    /// The observation only writes when a delivery arrives, so without this a
+    /// count change skipped by the floor — a stuck upload queue, say — would
+    /// sit unwritten for as long as no further transaction came along.
+    func statusSurfaceDidEnterBackground() {
+        statusFetchState.withLock { $0.isForeground = false }
+        let database = self.database
+        statusSnapshotQueue.async { [weak self] in
+            do {
+                let snapshot = try database.dbWriter.read { db in
+                    let importRun = try ImportRunState.fetchOne(db, key: ImportProgressDAO.singletonID)
+                    return AppState.widgetSnapshot(
+                        from: try HomeViewModel.fetchStatus(db),
+                        importHeadline: AppState.importHeadline(for: importRun)
+                    )
+                }
+                self?.persistStatusSnapshot(snapshot, ignoringIntervalFloor: true)
+            } catch {
+                logger.error("Failed to flush status snapshot: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     /// Re-arms the observation after a failed fetch, on a doubling backoff.
@@ -259,6 +337,9 @@ final class AppState {
     /// pushed at once, anything else is written at most once per rebuild
     /// interval, so the ~10^4 deliveries of a large import no longer each pay
     /// an encode and an atomic file write nothing will read.
+    /// `ignoringIntervalFloor` writes any change at once; the background flush
+    /// uses it so a skipped change does not wait for a delivery that may never
+    /// come.
     ///
     /// A failed write leaves the container holding the *previous* snapshot, so
     /// it also leaves `lastPersistedStatusSnapshot` where it is: reloading would
@@ -267,13 +348,20 @@ final class AppState {
     /// suppressing the reload that actually matters.
     ///
     /// Runs on `statusSnapshotQueue`, which owns `lastPersistedStatusSnapshot`.
-    private func persistStatusSnapshot(_ snapshot: ConduitStatusSnapshot, now: Date = Date()) {
-        guard ConduitStatusSnapshot.shouldWriteToAppGroup(
-            previous: lastPersistedStatusSnapshot,
-            writtenAt: lastPersistedStatusSnapshotAt,
-            next: snapshot,
-            now: now
-        ) else { return }
+    private func persistStatusSnapshot(
+        _ snapshot: ConduitStatusSnapshot,
+        ignoringIntervalFloor: Bool = false,
+        now: Date = Date()
+    ) {
+        let isDue = ignoringIntervalFloor
+            ? lastPersistedStatusSnapshot != snapshot
+            : ConduitStatusSnapshot.shouldWriteToAppGroup(
+                previous: lastPersistedStatusSnapshot,
+                writtenAt: lastPersistedStatusSnapshotAt,
+                next: snapshot,
+                now: now
+            )
+        guard isDue else { return }
         do {
             try snapshot.writeToAppGroup()
         } catch {

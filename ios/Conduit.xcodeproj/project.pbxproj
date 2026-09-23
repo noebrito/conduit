@@ -82,6 +82,7 @@
 		CD000000000000000000016B /* BackoffPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000016A /* BackoffPolicy.swift */; };
 		CD0000000000000000000171 /* ThrottleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000170 /* ThrottleTests.swift */; };
 		CD0000000000000000000173 /* BatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000172 /* BatcherTests.swift */; };
+		CD00000000000000000009F1 /* HomeStatusFetchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000009F0 /* HomeStatusFetchTests.swift */; };
 		CD0000000000000000000175 /* BackoffPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000174 /* BackoffPolicyTests.swift */; };
 		CD0000000000000000000177 /* UploaderResponseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000176 /* UploaderResponseTests.swift */; };
 		CD0000000000000000000179 /* CrashRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000178 /* CrashRecoveryTests.swift */; };
@@ -195,6 +196,7 @@
 		CD00000000000000000001C6 /* WebhookTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookTestView.swift; sourceTree = "<group>"; };
 		CD0000000000000000000170 /* ThrottleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThrottleTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000172 /* BatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatcherTests.swift; sourceTree = "<group>"; };
+		CD00000000000000000009F0 /* HomeStatusFetchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeStatusFetchTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000174 /* BackoffPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackoffPolicyTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000176 /* UploaderResponseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploaderResponseTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000178 /* CrashRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashRecoveryTests.swift; sourceTree = "<group>"; };
@@ -500,6 +502,7 @@
 				CD000000000000000000F0F3 /* SyncStateTests.swift */,
 				CD0000000000000000000170 /* ThrottleTests.swift */,
 				CD0000000000000000000172 /* BatcherTests.swift */,
+				CD00000000000000000009F0 /* HomeStatusFetchTests.swift */,
 				CD0000000000000000000174 /* BackoffPolicyTests.swift */,
 				CD0000000000000000000176 /* UploaderResponseTests.swift */,
 				CD0000000000000000000178 /* CrashRecoveryTests.swift */,
@@ -728,6 +731,7 @@
 				CD000000000000000000F0F4 /* SyncStateTests.swift in Sources */,
 				CD0000000000000000000171 /* ThrottleTests.swift in Sources */,
 				CD0000000000000000000173 /* BatcherTests.swift in Sources */,
+				CD00000000000000000009F1 /* HomeStatusFetchTests.swift in Sources */,
 				CD0000000000000000000175 /* BackoffPolicyTests.swift in Sources */,
 				CD0000000000000000000177 /* UploaderResponseTests.swift in Sources */,
 				CD0000000000000000000179 /* CrashRecoveryTests.swift in Sources */,

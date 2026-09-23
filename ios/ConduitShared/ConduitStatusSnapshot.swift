@@ -191,8 +191,9 @@ struct ConduitStatusSnapshot: Codable, Equatable {
     /// A state-*class* change is the one thing that cannot wait: it is pushed
     /// to the widget the moment it is written, so the container has to already
     /// hold it. Everything else — a climbing pending count, a fresh sync stamp
-    /// — only has to be there by the next rebuild, which is what the interval
-    /// floor guarantees.
+    /// — is written on the first delivery after the interval has passed. That
+    /// floor is opportunistic, not scheduled: with no further delivery the
+    /// change waits for `AppState`'s flush when the app goes to the background.
     static func shouldWriteToAppGroup(
         previous: ConduitStatusSnapshot?,
         writtenAt: Date?,

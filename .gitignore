@@ -2,6 +2,7 @@
 xcuserdata/
 *.xcuserstate
 DerivedData/
+ios/build/
 
 # App Store Connect API keys — never commit these
 *.p8
