@@ -418,8 +418,8 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
   (`BGAppRefreshTask`, HealthKit observer), since a background-only launch never changes scene
   phase. It recounts only if the observation has fetched since the last flush
   (`hasUnflushedFetch`, set by the fetch itself on the writer, so it is visible before the
-  committing write returns to the wake's completion hook), so a launch's burst of one observer wake per enabled type costs at most
-  one recount. Off screen, the observation's fetch applies the same gate to the two outbox `COUNT(*)`s;
+  committing write returns to the wake's completion hook), so a launch's burst of one observer
+  wake per enabled type costs at most one recount. Off screen, the observation's fetch applies the same gate to the two outbox `COUNT(*)`s;
   a probe result carries its counts over, so it is never written to the container. Conduit's
   background cadence (≥96 `BGAppRefreshTask` wakes/day, plus HealthKit observer wakes) would blow
   the widget's ~40-70/day reload budget otherwise; the relative-time text ticks forward on its own

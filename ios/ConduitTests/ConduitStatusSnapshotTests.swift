@@ -476,6 +476,51 @@ final class ConduitStatusSnapshotTests: XCTestCase {
                        "a delivered value must put the backoff back at the bottom")
     }
 
+    /// A background wake's completion hook calls `flushStatusSnapshot` as soon
+    /// as its last write returns — before GRDB has delivered that write's value
+    /// to `onChange` on the main queue. Off screen that delivery is a probe
+    /// carrying the old counts, so the flush is the only thing that can get the
+    /// new pending count into the container before iOS suspends the app; it
+    /// must not decide "nothing to flush" just because the delivery has not
+    /// landed yet. Runs on the main actor so the delivery genuinely cannot land
+    /// before the flush is enqueued.
+    @MainActor
+    func test_flushStatusSnapshot_recountsAWriteWhoseDeliveryHasNotLandedYet() async throws {
+        let sentinel = makeSnapshot(pendingCount: 999)
+        do {
+            try sentinel.writeToAppGroup()
+        } catch ConduitStatusSnapshotError.appGroupContainerUnavailable {
+            throw XCTSkip("The test host has no App Group container to flush into")
+        }
+
+        let database = try AppDatabase.makeInMemory()
+        var webhook = WebhookConfig.makeDefault(url: "https://example.com", bearerTokenKeychainRef: "test")
+        try WebhookConfigDAO(database).save(&webhook)
+        let webhookID = try XCTUnwrap(webhook.id)
+        let appState = AppState(database: database)
+
+        try await Self.waitUntil("the first full fetch is written") {
+            ConduitStatusSnapshot.readFromAppGroup()?.pendingCount == 0
+        }
+        await appState.flushStatusSnapshot()
+
+        // The synchronous DAO call, so the main actor is never given up
+        // between the committing writes and the flush below.
+        for index in 0..<5 {
+            var sample = Conduit_V1_Sample()
+            sample.uuid = "flush-\(index)"
+            sample.startUnixMs = 1_700_000_000_000
+            sample.endUnixMs = 1_700_000_060_000
+            _ = try OutboxDAO(database).enqueue(
+                sample: sample, hkTypeId: "HKQuantityTypeIdentifierHeartRate", webhookId: webhookID
+            )
+        }
+        await appState.flushStatusSnapshot()
+
+        XCTAssertEqual(ConduitStatusSnapshot.readFromAppGroup()?.pendingCount, 5,
+                       "the wake's flush must recount the write it follows, not wait for its delivery")
+    }
+
     /// The bound that keeps a permanently-failing fetch from spinning the
     /// writer queue. It caps rather than gives up: a cause that clears an hour
     /// later still gets picked back up, which a spent attempt budget could not

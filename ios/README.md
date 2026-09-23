@@ -6,7 +6,7 @@ nothing in the cloud.
 
 This directory contains the full app: onboarding, Home, Settings, Activity Log,
 and the HealthKit permissions detail screen, built on top of the HealthKit
-sync engine and SQLite outbox.
+sync engine and SQLite outbox — plus a sync-status-only Lock Screen widget.
 
 ## Requirements
 
@@ -49,6 +49,9 @@ ios/
 │   │   └── Shared/      MaskedTokenField, WebhookTestView
 │   ├── Assets.xcassets
 │   └── Info.plist
+├── ConduitShared/       ConduitStatusSnapshot (App Group transport type,
+│                        compiled into both Conduit and ConduitWidgets)
+├── ConduitWidgets/      Lock Screen sync-status widget extension
 └── ConduitTests/
 ```
 
@@ -109,6 +112,9 @@ command line. The bundle identifier is `dev.noebrito.Conduit`.
 ## Capabilities
 
 - HealthKit + HealthKit background delivery (`Conduit/App/Conduit.entitlements`)
+- App Groups: `group.dev.noebrito.Conduit`, on both the app and the widget
+  extension (`ConduitWidgets/ConduitWidgets.entitlements`) — carries the
+  sync-status snapshot the Lock Screen widget reads
 - Background Modes: `fetch`, `processing` (`Conduit/Info.plist`)
 - `NSHealthShareUsageDescription` — the shipped reason string; it names the data
   Conduit reads (App Review reads it, so keep it honest and specific)
