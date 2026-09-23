@@ -127,7 +127,7 @@ private struct CircularAccessoryView: View {
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
                         .minimumScaleFactor(0.6)
-                        .padding(.horizontal, 6)
+                        .padding(.horizontal, 8)
                 }
             } else {
                 Image(systemName: "clock.badge.exclamationmark")
