@@ -4,11 +4,19 @@ import SwiftUI
 struct ConduitApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(appState)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active: appState.statusSurfaceDidBecomeActive()
+            case .background: appState.statusSurfaceDidEnterBackground()
+            default: break
+            }
         }
     }
 }

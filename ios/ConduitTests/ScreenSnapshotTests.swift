@@ -64,11 +64,14 @@ final class ScreenSnapshotTests: XCTestCase {
     // 3 — Home (clean/idle state)
     //
     // Home resolves to the stable idle layout: "No syncs yet" with zeroed outbox
-    // counts. Its data-populated variant is driven by an inner `onAppear` load +
-    // a GRDB observation that this static (non-interactive) host does not pump, so
-    // the clean state is the deterministic thing to capture — and it's a real
-    // first-launch state. No fixture is seeded, so nothing here depends on
-    // wall-clock time (a populated status would render a relative "Synced N ago").
+    // counts. Everything it shows comes from `AppState.status`, republished by the
+    // GRDB observation `AppState.init` starts — so `makeSnapshotAppState()` already
+    // has it running before hosting, and `hostForSnapshot`'s run-loop pump is what
+    // lets its first value land before capture. The determinism comes from the
+    // fixture instead: nothing is seeded, so the empty in-memory database resolves
+    // to the same zeroed idle state — a real first-launch state — and nothing here
+    // depends on wall-clock time (a populated status would render a relative
+    // "Synced N ago").
     func testHomeScreen() {
         let appState = makeSnapshotAppState()
         assertScreenSnapshots(

@@ -157,8 +157,10 @@ subsequent Xcode Cloud archive fails with the opaque `Preparing build for App St
 (one error, no annotations, no compiler diagnostic) while **Build - iOS and Test - iOS stay green** —
 the code is fine; only the upload is refused. `ci_scripts/ci_post_clone.sh` only stamps
 `CURRENT_PROJECT_VERSION` from `$CI_BUILD_NUMBER`, so the build number is never the problem;
-`MARKETING_VERSION` is hand-managed in `Conduit.xcodeproj/project.pbxproj` (4 occurrences — app +
-test target, Debug + Release; keep them equal).
+`MARKETING_VERSION` is hand-managed in `Conduit.xcodeproj/project.pbxproj` (6 occurrences — app,
+test, and `ConduitWidgets` extension targets, Debug + Release; keep them all equal). An extension's
+`CFBundleShortVersionString` must match its containing app's or the upload is rejected, so the
+widget extension target is not optional here — it grew the count from 4 to 6 when it was added.
 
 **A manual archive is not an escape hatch** — the refusal comes from App Store Connect, not Xcode
 Cloud, so an Organizer/Transporter upload of the same version is rejected too, just with the reason
@@ -362,6 +364,77 @@ regression signal.
   `onAppear` load the static host doesn't pump), Activity is its empty state (no dated rows),
   Settings is seeded (`SnapshotFixtures.seedSettings`) because it loads in its **outer** `onAppear`.
   `setUp` clears any keychain webhook token so `hasToken` is stable.
+
+## Lock Screen widget (`ConduitWidgets`) — App Group snapshot, not a shared database
+
+`ConduitWidgets` is the project's first extension target (`project.pbxproj` now has 3 hand-maintained
+targets: `Conduit`, `ConduitWidgets`, `ConduitTests`). It shows sync-status only — last-synced
+relative time, pending/failed counts, import status headline — **never a health value**; that is a
+permanent product decision, not a v1 scope cut (`data/conduit-live-activities-scout/report.md`,
+outside this repo).
+
+The extension never opens GRDB or the app's SQLite database — its memory ceiling is tight and
+undocumented by Apple, and two processes writing one SQLite file is its own hazard. Instead:
+- `ConduitShared/ConduitStatusSnapshot.swift` (target membership: `Conduit` **and** `ConduitWidgets`)
+  is a small `Codable` transport type, written atomically to the `group.dev.noebrito.Conduit` App
+  Group container and read back by the widget's `TimelineProvider`.
+- **Only `self.status = home` runs on the main queue.** `ValueObservation` delivers there by
+  default, and the rest of the path — encode, the `.atomic` App Group write, the reload gate and its
+  bookkeeping — is serialized onto `AppState.statusSnapshotQueue` instead, because it runs after
+  every committed transaction touching the observed region (~10^4 times across an all-time import).
+  `ConduitStatusSnapshot.containerURL` is a `static let` for the same reason: resolving it is an IPC
+  round-trip to containermanagerd, not a lookup.
+- `AppState` (not `HomeViewModel`, which only lives while Home is on screen) starts a
+  process-lifetime `ValueObservation` that recomputes the snapshot on every relevant DB change —
+  observer wakes, `BGAppRefreshTask`, foreground sync all go through this one path — and reuses
+  `HomeViewModel.deriveStatus` / `SettingsViewModel.statusTitle(for:)` verbatim rather than
+  inventing new wording for the same states. It is also the **only** observation over these tables:
+  Home renders `AppState.status` rather than opening its own, because both wanted the identical
+  fetch and `HomeViewModel`'s cancellable was never torn down — a second copy would scan the outbox
+  state index twice per committed transaction for the rest of the process lifetime. **It re-arms
+  itself**: GRDB cancels a `ValueObservation` the moment it delivers an error, so `onError`
+  restarts it on a doubling backoff capped at `AppState.statusObservationRetryCeiling` (the counter
+  resets on every delivered value). Without that, one throwing fetch froze `status` — and the Lock
+  Screen snapshot — for the rest of the process, which the widget asks the user to read as "sync is
+  stuck".
+- **`stagedTodayCount` is meaningless without `stagedTodayDay`.** `staged_daily_count` buckets per
+  local day, but a clock crossing midnight is not a database write, so nothing recomputes the
+  snapshot sitting in the container. The widget compares the carried day against the rendering
+  entry's date (`ConduitStatusSnapshot.stagedToday(asOf:)`) and shows 0 once the day has turned;
+  `timelineEntryDates` always puts an entry on the next midnight so that lands on time. It is
+  unconditional on purpose — a refresh policy is a hint WidgetKit may never honour (Low Power Mode
+  suspends refreshes outright), so a timeline that is never rebuilt must still flip the tally.
+  Extra entries within a timeline are free; only rebuilding one is budgeted.
+- **The same state-class rule gates the write and the reload.** `WidgetCenter.reloadAllTimelines()`
+  fires only on a state-*class* change (`ConduitStatusSnapshot.shouldReloadTimelines`) — an error
+  appearing/clearing, the import headline changing, the failed count crossing zero, or the first
+  sync leaving `.idle` — never on every stamp. The encode + `.atomic` App Group write is gated on
+  `shouldWriteToAppGroup`, which writes a class change immediately (the reload would otherwise
+  redraw from a container still holding the old state) and everything else at most once per
+  `timelineRefreshInterval`, so the ~10^4 deliveries of an all-time import no longer each pay a
+  write nothing will read. That floor only fires on a later delivery, so it is not a freshness
+  guarantee: `AppState.flushStatusSnapshot` writes a freshly counted snapshot past it when the app
+  leaves the screen (scene phase `.background`) and at the end of every background wake
+  (`BGAppRefreshTask`, HealthKit observer), since a background-only launch never changes scene
+  phase. It recounts only if the observation has fetched since the last flush
+  (`hasUnflushedFetch`, set by the fetch itself on the writer, so it is visible before the
+  committing write returns to the wake's completion hook), so a launch's burst of one observer
+  wake per enabled type costs at most one recount. Off screen, the observation's fetch applies the same gate to the two outbox `COUNT(*)`s;
+  a probe result carries its counts over, so it is never written to the container. Conduit's
+  background cadence (≥96 `BGAppRefreshTask` wakes/day, plus HealthKit observer wakes) would blow
+  the widget's ~40-70/day reload budget otherwise; the relative-time text ticks forward on its own
+  between reloads at zero cost, which is what makes this worth doing. The widget's own
+  `getTimeline` policy is hourly (~24/day) for the same reason — a shorter self-refresh cadence
+  would hand back everything the gate withholds and then some. **The gate is only as good as
+  what it compares against**: `AppState.lastPersistedStatusSnapshot` is seeded from the App Group
+  container before the observation starts, because a background launch starts the observation fresh
+  and immediately receives an initial value — against an in-memory `nil` every one of those ≥96
+  wakes looks like a first-ever snapshot and spends a reload.
+- The `group.dev.noebrito.Conduit` App Group is registered in the developer portal and enabled on
+  both the `dev.noebrito.Conduit` and `dev.noebrito.Conduit.widgets` App IDs — a manual step CI
+  cannot perform. Any new App Group or extension App ID needs the same; until it exists only
+  **Archive - iOS** fails (a provisioning error, not a code one), and Xcode Cloud reruns only on a
+  new pushed commit.
 
 ## Maintaining this file
 

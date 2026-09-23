@@ -1,9 +1,6 @@
 import Foundation
 import Observation
 import GRDB
-import os
-
-private let logger = Logger(subsystem: "dev.noebrito.Conduit", category: "HomeViewModel")
 
 /// Drives the Home screen status, counts, and Sync Now action.
 @Observable
@@ -18,7 +15,7 @@ final class HomeViewModel {
     /// The transient "a sync is running right now" state is tracked separately by
     /// `isSyncing` so an in-flight completion can update `syncStatus` without the
     /// two fighting.
-    private(set) var syncStatus: SyncStatus = .idle
+    var syncStatus: SyncStatus { appState.status.status }
     /// True only while a manually-triggered "Sync Now" is in progress.
     private(set) var isSyncing: Bool = false
     /// Cumulative number of samples *staged (enqueued) today*, read from the
@@ -31,33 +28,24 @@ final class HomeViewModel {
     /// resets at the local-day boundary (each day is its own bucket). The bucket
     /// key is the enqueue timestamp's local day, NOT the health sample's recorded
     /// date, so the UI labels it "Staged today" rather than "Samples today".
-    private(set) var stagedTodayCount: Int = 0
-    private(set) var pendingCount: Int = 0
-    private(set) var failedCount: Int = 0
+    var stagedTodayCount: Int { appState.status.stagedToday(asOf: Date()) }
+    var pendingCount: Int { appState.status.pending }
+    var failedCount: Int { appState.status.failed }
 
     private let appState: AppState
-    private var observationCancellable: AnyDatabaseCancellable?
 
     init(appState: AppState) {
         self.appState = appState
     }
 
-    func start() {
-        Task { await loadInitialStatus() }
-        observeOutbox()
-    }
-
-    func stop() {}
-
     func syncNow() async {
         isSyncing = true
         defer { isSyncing = false }
+        // Everything this screen shows comes from `AppState.status`, which the
+        // shared observation republishes the moment the flush writes — whether
+        // the stamp lands synchronously (an empty-but-successful sync) or later
+        // on the background URLSession completion.
         await appState.syncEngine.flushNow()
-        // For an empty-but-successful sync the stamp already landed synchronously
-        // inside flushNow, so this reflects it immediately. For a batch upload the
-        // stamp lands later on the background URLSession completion — the outbox
-        // observation picks that up reactively (see `observeOutbox`).
-        await loadInitialStatus()
     }
 
     // MARK: - Private
@@ -83,89 +71,71 @@ final class HomeViewModel {
         return .idle
     }
 
-    /// Load the Home stats **off the main thread**, then publish on the main
-    /// actor. The reads run inside a single `dbWriter.read` block on a background
-    /// executor so a large import's in-flight write transaction can't stall the
-    /// main thread while Home is on screen (the old synchronous main-thread read
-    /// blocked behind bulk import inserts → visible UI hitches). Steady-state
-    /// updates flow reactively through `observeOutbox`; this async load only
-    /// primes the very first frame and refreshes after a manual "Sync Now".
-    private func loadInitialStatus() async {
-        do {
-            let snapshot = try await appState.database.dbWriter.read { db -> StatusSnapshot in
-                let pending = try OutboxRow
-                    .filter(Column("state") == OutboxState.pending.rawValue ||
-                            Column("state") == OutboxState.inflight.rawValue)
-                    .fetchCount(db)
-                let failed = try OutboxRow
-                    .filter(Column("state") == OutboxState.failed.rawValue)
-                    .fetchCount(db)
-                let today = try StagedDailyCountDAO.count(db)
-                let status = Self.deriveStatus(
-                    lastSynced: try SyncStateDAO.lastSyncedAt(db),
-                    latestDelivery: try DeliveryLogEntry
-                        .order(Column("sent_at").desc, Column("id").desc)
-                        .fetchOne(db)
-                )
-                return StatusSnapshot(pending: pending, failed: failed, today: today, status: status)
-            }
-            await MainActor.run {
-                self.pendingCount = snapshot.pending
-                self.failedCount = snapshot.failed
-                self.stagedTodayCount = snapshot.today
-                self.syncStatus = snapshot.status
-            }
-        } catch {
-            logger.error("Failed to load home stats: \(error.localizedDescription, privacy: .public)")
-        }
-    }
-
-    /// Snapshot the observation computes on every relevant DB change.
-    private struct StatusSnapshot {
+    /// Snapshot of the app's sync status, recomputed on every relevant DB change
+    /// by the single observation in `AppState` and consumed both by this screen
+    /// and by the Lock Screen widget's transport type.
+    struct StatusSnapshot {
         let pending: Int
         let failed: Int
         let today: Int
+        /// The local start-of-day `today` was tallied for — `staged_daily_count`
+        /// is bucketed per day, so the count means nothing without it.
+        let todayStart: Date
+        let lastSynced: Date?
         let status: SyncStatus
+
+        /// The staged tally as of `now`, which is 0 once the local day has moved
+        /// on from the one it was counted for. This snapshot is only recomputed
+        /// when a tracked table is written, and a clock crossing midnight is not
+        /// a write — so the reader's own clock, not the fetch's, decides what
+        /// "today" means.
+        func stagedToday(asOf now: Date, calendar: Calendar = .current) -> Int {
+            calendar.isDate(todayStart, inSameDayAs: now) ? today : 0
+        }
     }
 
-    private func observeOutbox() {
-        let observation = ValueObservation.tracking { db -> StatusSnapshot in
-            let pending = try OutboxRow
+    /// The single place these status counts are read from the database.
+    ///
+    /// With `cachedCounts`, the two outbox `COUNT(*)`s — the only reads here
+    /// that grow with the queue — are skipped: `pending` is carried over and
+    /// `failed` is only re-checked for crossing zero, which is all a state-class
+    /// comparison needs. Everything else is still read fresh.
+    static func fetchStatus(_ db: Database, reusingCountsFrom cachedCounts: StatusSnapshot? = nil) throws -> StatusSnapshot {
+        let failedRows = OutboxRow.filter(Column("state") == OutboxState.failed.rawValue)
+        let pending: Int
+        let failed: Int
+        if let cachedCounts {
+            pending = cachedCounts.pending
+            failed = try failedRows.isEmpty(db) ? 0 : max(cachedCounts.failed, 1)
+        } else {
+            pending = try OutboxRow
                 .filter(Column("state") == OutboxState.pending.rawValue ||
                         Column("state") == OutboxState.inflight.rawValue)
                 .fetchCount(db)
-            let failed = try OutboxRow
-                .filter(Column("state") == OutboxState.failed.rawValue)
-                .fetchCount(db)
-            // "Staged today" is the persisted tally, not a live outbox row count,
-            // so it keeps rising as the queue drains (delivered rows are deleted).
-            let today = try StagedDailyCountDAO.count(db)
-            // Track the sync-completion stamp + latest delivery so the "Synced X
-            // ago" label updates reactively the moment a background upload lands
-            // (or an empty flush stamps). The relative-time wording itself is
-            // ticked forward by the HomeView TimelineView, not a DB-reading timer.
-            let status = Self.deriveStatus(
-                lastSynced: try SyncStateDAO.lastSyncedAt(db),
-                latestDelivery: try DeliveryLogEntry
-                    .order(Column("sent_at").desc, Column("id").desc)
-                    .fetchOne(db)
-            )
-            return StatusSnapshot(pending: pending, failed: failed, today: today, status: status)
+            failed = try failedRows.fetchCount(db)
         }
-
-        observationCancellable = observation.start(
-            in: appState.database.dbWriter,
-            onError: { error in
-                logger.error("Outbox observation error: \(error.localizedDescription, privacy: .public)")
-            },
-            onChange: { [weak self] snapshot in
-                Task { @MainActor [weak self] in
-                    self?.pendingCount = snapshot.pending
-                    self?.failedCount = snapshot.failed
-                    self?.stagedTodayCount = snapshot.today
-                    self?.syncStatus = snapshot.status
-                }
-            }
+        // "Staged today" is the persisted tally, not a live outbox row count,
+        // so it keeps rising as the queue drains (delivered rows are deleted).
+        let todayStart = StagedDailyCountDAO.day(for: Date())
+        let today = try StagedDailyCountDAO.count(db, on: todayStart)
+        // Track the sync-completion stamp + latest delivery so the "Synced X
+        // ago" label updates reactively the moment a background upload lands
+        // (or an empty flush stamps). The relative-time wording itself is
+        // ticked forward by the HomeView TimelineView, not a DB-reading timer.
+        let lastSynced = try SyncStateDAO.lastSyncedAt(db)
+        let status = deriveStatus(
+            lastSynced: lastSynced,
+            latestDelivery: try DeliveryLogEntry
+                .order(Column("sent_at").desc, Column("id").desc)
+                .fetchOne(db)
+        )
+        return StatusSnapshot(
+            pending: pending,
+            failed: failed,
+            today: today,
+            todayStart: todayStart,
+            lastSynced: lastSynced,
+            status: status
         )
     }
 

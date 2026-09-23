@@ -82,6 +82,7 @@
 		CD000000000000000000016B /* BackoffPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000016A /* BackoffPolicy.swift */; };
 		CD0000000000000000000171 /* ThrottleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000170 /* ThrottleTests.swift */; };
 		CD0000000000000000000173 /* BatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000172 /* BatcherTests.swift */; };
+		CD00000000000000000009F1 /* HomeStatusFetchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00000000000000000009F0 /* HomeStatusFetchTests.swift */; };
 		CD0000000000000000000175 /* BackoffPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000174 /* BackoffPolicyTests.swift */; };
 		CD0000000000000000000177 /* UploaderResponseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000176 /* UploaderResponseTests.swift */; };
 		CD0000000000000000000179 /* CrashRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000178 /* CrashRecoveryTests.swift */; };
@@ -91,6 +92,12 @@
 		CD0000000000000000000521 /* AppStoreScreenshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000520 /* AppStoreScreenshotTests.swift */; };
 		CD0000000000000000000A11 /* OnboardingSkipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000A10 /* OnboardingSkipTests.swift */; };
 		CD0000000000000000000A21 /* AnchoredReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000A20 /* AnchoredReaderTests.swift */; };
+		CD000000000000000000B010 /* ConduitWidgetsBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000B002 /* ConduitWidgetsBundle.swift */; };
+		CD000000000000000000B011 /* ConduitStatusWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000B003 /* ConduitStatusWidget.swift */; };
+		CD000000000000000000B012 /* ConduitStatusSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000B006 /* ConduitStatusSnapshot.swift */; };
+		CD000000000000000000B013 /* ConduitStatusSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000B006 /* ConduitStatusSnapshot.swift */; };
+		CD000000000000000000B014 /* ConduitStatusSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000B007 /* ConduitStatusSnapshotTests.swift */; };
+		CD000000000000000000B015 /* ConduitWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CD000000000000000000B001 /* ConduitWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeaderOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -101,7 +108,28 @@
 			remoteGlobalIDString = CD0000000000000000000010;
 			remoteInfo = Conduit;
 		};
+		CD000000000000000000B050 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CD0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CD000000000000000000B030;
+			remoteInfo = ConduitWidgets;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		CD000000000000000000B043 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				CD000000000000000000B015 /* ConduitWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		CD0000000000000000000050 /* Conduit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Conduit.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -168,6 +196,7 @@
 		CD00000000000000000001C6 /* WebhookTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebhookTestView.swift; sourceTree = "<group>"; };
 		CD0000000000000000000170 /* ThrottleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThrottleTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000172 /* BatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatcherTests.swift; sourceTree = "<group>"; };
+		CD00000000000000000009F0 /* HomeStatusFetchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeStatusFetchTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000174 /* BackoffPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackoffPolicyTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000176 /* UploaderResponseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploaderResponseTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000178 /* CrashRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashRecoveryTests.swift; sourceTree = "<group>"; };
@@ -187,6 +216,13 @@
 		CD0000000000000000000520 /* AppStoreScreenshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStoreScreenshotTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000A10 /* OnboardingSkipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingSkipTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000A20 /* AnchoredReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnchoredReaderTests.swift; sourceTree = "<group>"; };
+		CD000000000000000000B001 /* ConduitWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ConduitWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		CD000000000000000000B002 /* ConduitWidgetsBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConduitWidgetsBundle.swift; sourceTree = "<group>"; };
+		CD000000000000000000B003 /* ConduitStatusWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConduitStatusWidget.swift; sourceTree = "<group>"; };
+		CD000000000000000000B004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		CD000000000000000000B005 /* ConduitWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ConduitWidgets.entitlements; sourceTree = "<group>"; };
+		CD000000000000000000B006 /* ConduitStatusSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConduitStatusSnapshot.swift; sourceTree = "<group>"; };
+		CD000000000000000000B007 /* ConduitStatusSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConduitStatusSnapshotTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -209,6 +245,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CD000000000000000000B040 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -216,6 +259,8 @@
 			isa = PBXGroup;
 			children = (
 				CD0000000000000000000004 /* Conduit */,
+				CD000000000000000000B020 /* ConduitWidgets */,
+				CD000000000000000000B021 /* ConduitShared */,
 				CD000000000000000000000C /* ConduitTests */,
 				CD0000000000000000000003 /* Products */,
 			);
@@ -226,8 +271,28 @@
 			children = (
 				CD0000000000000000000050 /* Conduit.app */,
 				CD0000000000000000000051 /* ConduitTests.xctest */,
+				CD000000000000000000B001 /* ConduitWidgets.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		CD000000000000000000B020 /* ConduitWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				CD000000000000000000B002 /* ConduitWidgetsBundle.swift */,
+				CD000000000000000000B003 /* ConduitStatusWidget.swift */,
+				CD000000000000000000B004 /* Info.plist */,
+				CD000000000000000000B005 /* ConduitWidgets.entitlements */,
+			);
+			path = ConduitWidgets;
+			sourceTree = "<group>";
+		};
+		CD000000000000000000B021 /* ConduitShared */ = {
+			isa = PBXGroup;
+			children = (
+				CD000000000000000000B006 /* ConduitStatusSnapshot.swift */,
+			);
+			path = ConduitShared;
 			sourceTree = "<group>";
 		};
 		CD0000000000000000000004 /* Conduit */ = {
@@ -437,6 +502,7 @@
 				CD000000000000000000F0F3 /* SyncStateTests.swift */,
 				CD0000000000000000000170 /* ThrottleTests.swift */,
 				CD0000000000000000000172 /* BatcherTests.swift */,
+				CD00000000000000000009F0 /* HomeStatusFetchTests.swift */,
 				CD0000000000000000000174 /* BackoffPolicyTests.swift */,
 				CD0000000000000000000176 /* UploaderResponseTests.swift */,
 				CD0000000000000000000178 /* CrashRecoveryTests.swift */,
@@ -449,6 +515,7 @@
 				CD0000000000000000000A32 /* AthleteMetricsEvidenceTests.swift */,
 				CD0000000000000000000A40 /* WorkoutEnrichmentEvidenceTests.swift */,
 				CD0000000000000000000A50 /* EvidenceArtifacts.swift */,
+				CD000000000000000000B007 /* ConduitStatusSnapshotTests.swift */,
 			);
 			path = ConduitTests;
 			sourceTree = "<group>";
@@ -463,10 +530,12 @@
 				CD0000000000000000000040 /* Sources */,
 				CD0000000000000000000041 /* Frameworks */,
 				CD0000000000000000000042 /* Resources */,
+				CD000000000000000000B043 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				CD000000000000000000B051 /* PBXTargetDependency */,
 			);
 			name = Conduit;
 			packageProductDependencies = (
@@ -499,6 +568,25 @@
 			productReference = CD0000000000000000000051 /* ConduitTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		CD000000000000000000B030 /* ConduitWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CD000000000000000000B062 /* Build configuration list for PBXNativeTarget "ConduitWidgets" */;
+			buildPhases = (
+				CD000000000000000000B042 /* Sources */,
+				CD000000000000000000B040 /* Frameworks */,
+				CD000000000000000000B041 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ConduitWidgets;
+			packageProductDependencies = (
+			);
+			productName = ConduitWidgets;
+			productReference = CD000000000000000000B001 /* ConduitWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -515,6 +603,9 @@
 					CD0000000000000000000011 = {
 						CreatedOnToolsVersion = 15.0;
 						TestTargetID = CD0000000000000000000010;
+					};
+					CD000000000000000000B030 = {
+						CreatedOnToolsVersion = 15.0;
 					};
 				};
 			};
@@ -537,6 +628,7 @@
 			projectRoot = "";
 			targets = (
 				CD0000000000000000000010 /* Conduit */,
+				CD000000000000000000B030 /* ConduitWidgets */,
 				CD0000000000000000000011 /* ConduitTests */,
 			);
 		};
@@ -548,6 +640,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				CD000000000000000000010D /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CD000000000000000000B041 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -607,6 +706,7 @@
 				CD00000000000000000001C3 /* ActivityBatchDetailView.swift in Sources */,
 				CD00000000000000000001C5 /* MaskedTokenField.swift in Sources */,
 				CD00000000000000000001C7 /* WebhookTestView.swift in Sources */,
+				CD000000000000000000B013 /* ConduitStatusSnapshot.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -631,6 +731,7 @@
 				CD000000000000000000F0F4 /* SyncStateTests.swift in Sources */,
 				CD0000000000000000000171 /* ThrottleTests.swift in Sources */,
 				CD0000000000000000000173 /* BatcherTests.swift in Sources */,
+				CD00000000000000000009F1 /* HomeStatusFetchTests.swift in Sources */,
 				CD0000000000000000000175 /* BackoffPolicyTests.swift in Sources */,
 				CD0000000000000000000177 /* UploaderResponseTests.swift in Sources */,
 				CD0000000000000000000179 /* CrashRecoveryTests.swift in Sources */,
@@ -643,6 +744,17 @@
 				CD0000000000000000000A33 /* AthleteMetricsEvidenceTests.swift in Sources */,
 				CD0000000000000000000A41 /* WorkoutEnrichmentEvidenceTests.swift in Sources */,
 				CD0000000000000000000A51 /* EvidenceArtifacts.swift in Sources */,
+				CD000000000000000000B014 /* ConduitStatusSnapshotTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CD000000000000000000B042 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CD000000000000000000B010 /* ConduitWidgetsBundle.swift in Sources */,
+				CD000000000000000000B011 /* ConduitStatusWidget.swift in Sources */,
+				CD000000000000000000B012 /* ConduitStatusSnapshot.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -653,6 +765,11 @@
 			isa = PBXTargetDependency;
 			target = CD0000000000000000000010 /* Conduit */;
 			targetProxy = CD0000000000000000000061 /* PBXContainerItemProxy */;
+		};
+		CD000000000000000000B051 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CD000000000000000000B030 /* ConduitWidgets */;
+			targetProxy = CD000000000000000000B050 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -797,7 +914,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.6;
+				MARKETING_VERSION = 1.7;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.Conduit;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -823,7 +940,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.6;
+				MARKETING_VERSION = 1.7;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.Conduit;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -841,7 +958,7 @@
 				DEVELOPMENT_TEAM = 3K72BT899D;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.6;
+				MARKETING_VERSION = 1.7;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.ConduitTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -860,13 +977,63 @@
 				DEVELOPMENT_TEAM = 3K72BT899D;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.6;
+				MARKETING_VERSION = 1.7;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.ConduitTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Conduit.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Conduit";
+			};
+			name = Release;
+		};
+		CD000000000000000000B060 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ConduitWidgets/ConduitWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3K72BT899D;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ConduitWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.7;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.Conduit.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		CD000000000000000000B061 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ConduitWidgets/ConduitWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3K72BT899D;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ConduitWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.7;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.noebrito.Conduit.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -896,6 +1063,15 @@
 			buildConfigurations = (
 				CD0000000000000000000034 /* Debug */,
 				CD0000000000000000000035 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CD000000000000000000B062 /* Build configuration list for PBXNativeTarget "ConduitWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CD000000000000000000B060 /* Debug */,
+				CD000000000000000000B061 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

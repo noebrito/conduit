@@ -100,12 +100,6 @@ private struct HomeContent: View {
             }
         }
         .listStyle(.insetGrouped)
-        .onAppear {
-            viewModel.start()
-        }
-        .onDisappear {
-            viewModel.stop()
-        }
     }
 
     private var statusIcon: some View {
