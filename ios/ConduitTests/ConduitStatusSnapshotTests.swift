@@ -112,6 +112,16 @@ final class ConduitStatusSnapshotTests: XCTestCase {
         )
     }
 
+    // MARK: - coarseAge — never finer than a minute
+
+    func test_coarseAge_neverReportsSeconds() {
+        let t = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertEqual(ConduitStatusSnapshot.coarseAge(from: t, to: t.addingTimeInterval(45)), "less than a minute")
+        XCTAssertEqual(ConduitStatusSnapshot.coarseAge(from: t, to: t.addingTimeInterval(125)), "2 min")
+        XCTAssertEqual(ConduitStatusSnapshot.coarseAge(from: t, to: t.addingTimeInterval(3 * 3600 + 500)), "3 hr")
+        XCTAssertEqual(ConduitStatusSnapshot.coarseAge(from: t, to: t.addingTimeInterval(-30)), "less than a minute")
+    }
+
     // MARK: - timelineEntryDates — the midnight boundary entry
 
     /// A timeline holding one entry renders that entry's date until the next

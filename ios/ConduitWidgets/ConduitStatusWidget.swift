@@ -45,11 +45,29 @@ struct ConduitStatusWidgetEntryView: View {
     var body: some View {
         switch family {
         case .accessoryCircular:
-            CircularAccessoryView(snapshot: entry.snapshot)
+            CircularAccessoryView(snapshot: entry.snapshot, date: entry.date)
         case .accessoryInline:
-            InlineAccessoryView(snapshot: entry.snapshot)
+            InlineAccessoryView(snapshot: entry.snapshot, date: entry.date)
         default:
             RectangularAccessoryView(snapshot: entry.snapshot, date: entry.date)
+        }
+    }
+}
+
+/// The "last synced" age, never finer than a minute — a ticking seconds
+/// counter on the Lock Screen is distracting. iOS 18+ uses the system's live
+/// reference-date format restricted to hour/minute fields, so it still updates
+/// itself at zero refresh cost. iOS 17 has no such format, so it renders static
+/// text from the timeline entry date, which is as fresh as the (hourly) timeline.
+private struct LastSyncedAge: View {
+    let lastSyncedAt: Date
+    let now: Date
+
+    var body: some View {
+        if #available(iOS 18, *) {
+            Text(.currentDate, format: .reference(to: lastSyncedAt, allowedFields: [.hour, .minute]))
+        } else {
+            Text(ConduitStatusSnapshot.coarseAge(from: lastSyncedAt, to: now))
         }
     }
 }
@@ -69,7 +87,7 @@ private struct RectangularAccessoryView: View {
             if let snapshot {
                 Label {
                     if let lastSyncedAt = snapshot.lastSyncedAt {
-                        Text("Synced \(Text(lastSyncedAt, style: .relative)) ago")
+                        Text("Synced \(LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date)) ago")
                     } else {
                         Text("No syncs yet")
                     }
@@ -89,6 +107,7 @@ private struct RectangularAccessoryView: View {
 /// (desaturated) mode, so the symbol carries the state, never a tint color.
 private struct CircularAccessoryView: View {
     let snapshot: ConduitStatusSnapshot?
+    let date: Date
 
     var body: some View {
         VStack(spacing: 2) {
@@ -96,7 +115,7 @@ private struct CircularAccessoryView: View {
                 Image(systemName: ConduitStatusSnapshot.symbolName(for: snapshot))
                     .font(.title3)
                 if let lastSyncedAt = snapshot.lastSyncedAt {
-                    Text(lastSyncedAt, style: .relative)
+                    LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date)
                         .font(.system(size: 11))
                         .minimumScaleFactor(0.6)
                 }
@@ -112,6 +131,7 @@ private struct CircularAccessoryView: View {
 /// One line above the clock.
 private struct InlineAccessoryView: View {
     let snapshot: ConduitStatusSnapshot?
+    let date: Date
 
     var body: some View {
         if let snapshot {
@@ -119,7 +139,7 @@ private struct InlineAccessoryView: View {
                 if snapshot.failedCount > 0 {
                     Text("Conduit · \(snapshot.failedCount) failed")
                 } else if let lastSyncedAt = snapshot.lastSyncedAt {
-                    Text("Conduit · Synced \(Text(lastSyncedAt, style: .relative)) ago")
+                    Text("Conduit · Synced \(LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date)) ago")
                 } else {
                     Text("Conduit · No syncs yet")
                 }

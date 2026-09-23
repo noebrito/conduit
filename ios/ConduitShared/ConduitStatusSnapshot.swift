@@ -127,6 +127,15 @@ struct ConduitStatusSnapshot: Codable, Equatable {
         return "Staged today \(snapshot.stagedToday(asOf: now, calendar: calendar))"
     }
 
+    /// Age text with minute granularity at best, for the pre-iOS 18 fallback:
+    /// "less than a minute", "5 min", "3 hr".
+    static func coarseAge(from date: Date, to now: Date) -> String {
+        let minutes = Int(max(0, now.timeIntervalSince(date)) / 60)
+        if minutes < 1 { return "less than a minute" }
+        if minutes < 60 { return "\(minutes) min" }
+        return "\(minutes / 60) hr"
+    }
+
     /// Entry dates for one timeline: `now`, plus the next local midnight.
     ///
     /// The midnight entry is what makes `stagedToday(asOf:)` land on time. A
