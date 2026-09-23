@@ -422,8 +422,9 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
   wake per enabled type costs at most one recount. Off screen, the observation's fetch applies the same gate to the two outbox `COUNT(*)`s;
   a probe result carries its counts over, so it is never written to the container. Conduit's
   background cadence (≥96 `BGAppRefreshTask` wakes/day, plus HealthKit observer wakes) would blow
-  the widget's ~40-70/day reload budget otherwise; the relative-time text ticks forward on its own
-  between reloads at zero cost, which is what makes this worth doing. The widget's own
+  the widget's ~40-70/day reload budget otherwise; on iOS 18+ the relative-time text ticks forward
+  on its own between reloads at zero cost, which is what makes this worth doing (iOS 17 renders a
+  fixed age from the timeline entry date, so there it is only as fresh as the last reload). The widget's own
   `getTimeline` policy is hourly (~24/day) for the same reason — a shorter self-refresh cadence
   would hand back everything the gate withholds and then some. **The gate is only as good as
   what it compares against**: `AppState.lastPersistedStatusSnapshot` is seeded from the App Group
