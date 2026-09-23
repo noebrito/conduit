@@ -95,6 +95,15 @@ final class AppState {
     /// Owned by `statusSnapshotQueue` — never read or written anywhere else.
     @ObservationIgnored
     private var lastPersistedStatusSnapshotAt: Date?
+    /// Whether the observation has held back a state the container does not
+    /// hold yet — a probe result, or a change the write gate deferred — so
+    /// `flushStatusSnapshot` only recounts when there is something to flush.
+    /// A burst of observer wakes, one per enabled type, then pays for one
+    /// recount rather than one each.
+    ///
+    /// Owned by `statusSnapshotQueue` — never read or written anywhere else.
+    @ObservationIgnored
+    private var hasUnflushedStatus = false
     /// Consecutive observation failures since the last delivered value, which
     /// is what the restart delay backs off on. Reset on every delivery, so an
     /// unrelated failure much later starts over at the bottom of the backoff.
@@ -165,7 +174,12 @@ final class AppState {
                 let (home, importHeadline, countsAreFresh) = value
                 self.statusObservationFailures = 0
                 self.status = home
-                guard countsAreFresh else { return }
+                guard countsAreFresh else {
+                    self.statusSnapshotQueue.async { [weak self] in
+                        self?.hasUnflushedStatus = true
+                    }
+                    return
+                }
                 let snapshot = AppState.widgetSnapshot(from: home, importHeadline: importHeadline)
                 self.statusSnapshotQueue.async { [weak self] in
                     self?.persistStatusSnapshot(snapshot)
@@ -223,7 +237,8 @@ final class AppState {
     }
 
     /// Writes a freshly counted snapshot to the App Group container past the
-    /// interval floor, returning once it has landed.
+    /// interval floor, returning once it has landed. A no-op when nothing has
+    /// been held back since the last write.
     ///
     /// The observation only writes when a delivery arrives, so without this a
     /// count change skipped by the floor — a stuck upload queue, say — would
@@ -236,6 +251,7 @@ final class AppState {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             statusSnapshotQueue.async { [weak self] in
                 defer { continuation.resume() }
+                guard self?.hasUnflushedStatus == true else { return }
                 do {
                     let snapshot = try database.dbWriter.read { db in
                         let importRun = try ImportRunState.fetchOne(db, key: ImportProgressDAO.singletonID)
@@ -385,13 +401,18 @@ final class AppState {
                 next: snapshot,
                 now: now
             )
-        guard isDue else { return }
+        guard isDue else {
+            hasUnflushedStatus = lastPersistedStatusSnapshot != snapshot
+            return
+        }
         do {
             try snapshot.writeToAppGroup()
         } catch {
             logger.error("Failed to write status snapshot: \(error.localizedDescription, privacy: .public)")
+            hasUnflushedStatus = true
             return
         }
+        hasUnflushedStatus = false
         if ConduitStatusSnapshot.shouldReloadTimelines(previous: lastPersistedStatusSnapshot, next: snapshot) {
             WidgetCenter.shared.reloadAllTimelines()
         }
