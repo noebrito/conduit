@@ -24,9 +24,10 @@ struct ConduitStatusProvider: TimelineProvider {
     /// leaves the rest of the allowance for the urgent pushes
     /// `AppState.persistStatusSnapshot` makes when the status changes class.
     /// Neither piece of freshness this widget needs depends on this cadence —
-    /// the relative-time first line ticks on its own at zero refresh cost (see
-    /// `RectangularAccessoryView` / `CircularAccessoryView`), and a state-class
-    /// change arrives as a push rather than waiting for it.
+    /// on iOS 18+ the relative-time first line ticks on its own at zero refresh
+    /// cost (see `LastSyncedAge`), and a state-class change arrives as a push
+    /// rather than waiting for it. iOS 17 renders a fixed age from the entry
+    /// date, so there it is only as fresh as this cadence.
     func getTimeline(in context: Context, completion: @escaping (Timeline<ConduitStatusEntry>) -> Void) {
         let now = Date()
         let snapshot = ConduitStatusSnapshot.readFromAppGroup()
@@ -75,8 +76,8 @@ private struct LastSyncedAge: View {
     }
 }
 
-/// Primary family: a relative-time line (system-ticked, zero refresh cost)
-/// plus one conditional second line. See `ConduitStatusSnapshot.secondLine`.
+/// Primary family: a relative-time line (see `LastSyncedAge`) plus one
+/// conditional second line. See `ConduitStatusSnapshot.secondLine`.
 /// A snapshot that has never synced still renders its state symbol and second
 /// line — only the relative-time wording falls back to "No syncs yet" — since a
 /// fresh install whose very first sync is failing is exactly what this surface
