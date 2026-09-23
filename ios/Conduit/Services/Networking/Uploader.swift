@@ -35,6 +35,34 @@ final class Uploader: NSObject {
     /// Forwarded by `AppDelegate` after iOS relaunches us for background session events.
     var backgroundCompletionHandler: (() -> Void)?
 
+    /// Awaited after every delivery outcome (`markSent`, `resetToRetry`,
+    /// `markFailed`) commits. The URLSession delegate runs after the wake that
+    /// started the upload has already ended, so nothing else pushes the new
+    /// "last synced" stamp and pending count into the widget's container past
+    /// its write throttle. Wired to `AppState.flushStatusSnapshot` in
+    /// `AppState.init`.
+    var onDeliveryCommitted: (() async -> Void)?
+
+    /// Tail of the chain of in-flight `onDeliveryCommitted` calls, so
+    /// `urlSessionDidFinishEvents` can wait for them before telling iOS the
+    /// relaunch's work is done (it suspends the app right after).
+    private let deliveryFlushTail = OSAllocatedUnfairLock<Task<Void, Never>?>(initialState: nil)
+
+    private func deliveryDidCommit() {
+        deliveryFlushTail.withLock { tail in
+            let previous = tail
+            tail = Task { [weak self] in
+                await previous?.value
+                await self?.onDeliveryCommitted?()
+            }
+        }
+    }
+
+    /// Resolves once every flush queued by a delivery commit so far has finished.
+    func awaitDeliveryFlushes() async {
+        await deliveryFlushTail.withLock { $0 }?.value
+    }
+
     /// Accumulates each task's response body (the ingester's `{accepted, deduped}`
     /// JSON) keyed by `URLSessionTask.taskIdentifier`, so `didCompleteWithError`
     /// can parse the write outcome. Only touched from the session's serial
@@ -132,7 +160,7 @@ final class Uploader: NSObject {
 
     // MARK: - State transitions (internal)
 
-    private func markSent(batchID: String, httpStatus: Int, accepted: Int?, deduped: Int?) {
+    func markSent(batchID: String, httpStatus: Int, accepted: Int?, deduped: Int?) {
         guard let db = database else { return }
         do {
             try db.dbWriter.write { grdb in
@@ -144,6 +172,7 @@ final class Uploader: NSObject {
                     deduped: deduped
                 )
             }
+            deliveryDidCommit()
             logger.info("Batch \(batchID, privacy: .public): delivered \(httpStatus), accepted=\(accepted ?? -1), deduped=\(deduped ?? -1), rows purged")
             if accepted == 0, (deduped ?? 0) > 0 {
                 // Every sample was already indexed. A 200 that wrote nothing used
@@ -254,6 +283,7 @@ final class Uploader: NSObject {
                     )
                 }
             }
+            deliveryDidCommit()
             logger.info("Batch \(batchID, privacy: .public): scheduled retry (retryAfter=\(retryAfter.map { "\($0)" } ?? "nil", privacy: .public))")
         } catch {
             logger.error("resetToRetry error: \(error.localizedDescription, privacy: .public)")
@@ -283,6 +313,7 @@ final class Uploader: NSObject {
                     arguments: [batchID, Date(), httpStatus, rows.count, error]
                 )
             }
+            deliveryDidCommit()
             logger.warning("Batch \(batchID, privacy: .public): permanently failed with \(httpStatus)")
         } catch {
             logger.error("markFailed error: \(error.localizedDescription, privacy: .public)")
@@ -294,9 +325,14 @@ final class Uploader: NSObject {
 
 extension Uploader: URLSessionDelegate {
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
-        DispatchQueue.main.async { [weak self] in
-            self?.backgroundCompletionHandler?()
-            self?.backgroundCompletionHandler = nil
+        // The delegate's task callbacks (and their flushes) have all been issued
+        // by now; let the last flush land before iOS is told we are done.
+        Task { [weak self] in
+            await self?.awaitDeliveryFlushes()
+            await MainActor.run {
+                self?.backgroundCompletionHandler?()
+                self?.backgroundCompletionHandler = nil
+            }
         }
     }
 }

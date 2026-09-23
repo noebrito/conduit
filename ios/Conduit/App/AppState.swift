@@ -140,6 +140,9 @@ final class AppState {
         observerCoordinator.onWakeHandled = { [weak self] in
             await self?.flushStatusSnapshot()
         }
+        Uploader.shared.onDeliveryCommitted = { [weak self] in
+            await self?.flushStatusSnapshot()
+        }
         startStatusSnapshotObservation()
     }
 

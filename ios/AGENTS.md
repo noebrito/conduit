@@ -430,6 +430,14 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
   container before the observation starts, because a background launch starts the observation fresh
   and immediately receives an initial value — against an in-memory `nil` every one of those ≥96
   wakes looks like a first-ever snapshot and spends a reload.
+- **Delivery completion flushes too.** `Uploader.markSent`/`resetToRetry`/`markFailed` run on the
+  URLSession delegate after the wake that started the upload has ended, so each calls
+  `Uploader.onDeliveryCommitted` (wired to `flushStatusSnapshot` in `AppState.init`), and
+  `urlSessionDidFinishEvents` awaits those flushes before calling the system completion handler.
+  Regression: `WidgetDeliveryFlushTests` — it must seed an OLD `last_synced_at`; a never-synced
+  start passes without the fix. In DEBUG builds `ConduitStatusSnapshot.containerURL` falls back to a
+  temp dir when the unsigned test host (`CODE_SIGNING_ALLOWED=NO`) has no App Group, so the
+  container tests run rather than `XCTSkip`.
 - The `group.dev.noebrito.Conduit` App Group is registered in the developer portal and enabled on
   both the `dev.noebrito.Conduit` and `dev.noebrito.Conduit.widgets` App IDs — a manual step CI
   cannot perform. Any new App Group or extension App ID needs the same; until it exists only
