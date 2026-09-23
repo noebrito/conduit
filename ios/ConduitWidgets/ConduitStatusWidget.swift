@@ -62,12 +62,15 @@ struct ConduitStatusWidgetEntryView: View {
 private struct LastSyncedAge: View {
     let lastSyncedAt: Date
     let now: Date
+    var prefix = ""
 
+    /// The system format already reads "5 minutes ago", so callers must not
+    /// append their own "ago".
     var body: some View {
         if #available(iOS 18, *) {
-            Text(.currentDate, format: .reference(to: lastSyncedAt, allowedFields: [.hour, .minute]))
+            Text("\(prefix)\(Text(.currentDate, format: .reference(to: lastSyncedAt, allowedFields: [.hour, .minute])))")
         } else {
-            Text(ConduitStatusSnapshot.coarseAge(from: lastSyncedAt, to: now))
+            Text("\(prefix)\(ConduitStatusSnapshot.coarseAge(from: lastSyncedAt, to: now)) ago")
         }
     }
 }
@@ -87,7 +90,7 @@ private struct RectangularAccessoryView: View {
             if let snapshot {
                 Label {
                     if let lastSyncedAt = snapshot.lastSyncedAt {
-                        Text("Synced \(LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date)) ago")
+                        LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date, prefix: "Synced ")
                     } else {
                         Text("No syncs yet")
                     }
@@ -139,7 +142,7 @@ private struct InlineAccessoryView: View {
                 if snapshot.failedCount > 0 {
                     Text("Conduit · \(snapshot.failedCount) failed")
                 } else if let lastSyncedAt = snapshot.lastSyncedAt {
-                    Text("Conduit · Synced \(LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date)) ago")
+                    LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date, prefix: "Conduit · Synced ")
                 } else {
                     Text("Conduit · No syncs yet")
                 }
