@@ -445,11 +445,11 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
   *first* `Text` of a stack (an `HStack("Synced ", age)` showed "Conduit · Synced" with no age), so
   inline shows the live age alone; and a prefix beside the live text in `accessoryRectangular`
   squeezed the age into a truncated column (with `lineLimit(1)` + scaling: a full-size "Synced"
-  beside a shrunken, still-truncated age), so "Synced" sits on its own line above it. Whether it actually ticks on a device
-  is unverified — the iOS 27 simulator ticks no live text in widgets at all — so the widget keeps
-  its hourly self-refresh until it is checked on a phone. iOS 17 renders a static age against the
-  entry date; `timelineEntryDates` spaces entries 5 minutes apart through the refresh interval
-  (plus the midnight entry) so it advances between rebuilds.
+  beside a shrunken, still-truncated age), so "Synced" sits on its own line above it. Whether it
+  actually ticks on a device is unverified — the iOS 27 simulator ticks no live text in widgets at
+  all — so the widget keeps its hourly self-refresh until it is checked on a phone. iOS 17 renders
+  a static age against the entry date; `timelineEntryDates` spaces entries 5 minutes apart through
+  the refresh interval (plus the midnight entry) so it advances between rebuilds.
 - **Delivery completion flushes too.** `Uploader.markSent` runs on the URLSession delegate after the
   wake that started the upload has ended, so it calls `Uploader.onDeliveryCommitted` (wired to
   `flushStatusSnapshot` in `AppState.init`); commits landing while a flush is still queued coalesce

@@ -322,14 +322,16 @@ struct ConduitStatusSnapshot: Codable, Equatable {
     /// committed transaction touching the outbox/staged/sync tables — on the
     /// order of 10^4 times across an all-time import — while the container is
     /// read at most once per `timelineRefreshInterval`, plus the reloads
-    /// `reloadDecision` grants (whose paths write regardless of this gate). Writing every delivery therefore spends
-    /// thousands of encodes and file writes publishing states nothing reads,
-    /// on a path a background-only launch pays with no screen to show for it.
+    /// `reloadDecision` grants (whose paths write regardless of this gate).
+    /// Writing every delivery therefore spends thousands of encodes and file
+    /// writes publishing states nothing reads, on a path a background-only
+    /// launch pays with no screen to show for it.
     ///
-    /// A state-*class* change is the one thing that cannot wait: it is pushed
-    /// to the widget the moment it is written, so the container has to already
-    /// hold it. Everything else — a climbing pending count, a fresh sync stamp
-    /// — is written on the first delivery after the interval has passed. That
+    /// A state-*class* change is the one thing this gate never holds: it is
+    /// pushed to the widget the moment it is written, so the container has to
+    /// already hold it. Everything else — a climbing pending count, a fresh
+    /// sync stamp `reloadDecision` did not grant a reload — is written on the
+    /// first delivery after the interval has passed. That
     /// floor is opportunistic, not scheduled: with no further delivery the
     /// change waits for `AppState.flushStatusSnapshot`, run when the app leaves
     /// the screen and at the end of every background wake.
