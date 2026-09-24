@@ -368,9 +368,9 @@ struct WidgetReloadRecord: Codable, Equatable {
         guard let url = ConduitStatusSnapshot.appGroupFileURL(Self.fileName) else {
             throw ConduitStatusSnapshotError.appGroupContainerUnavailable
         }
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .secondsSince1970
-        try encoder.encode(self).write(to: url, options: .atomic)
+        // Default date strategy: `requestedAt` must read back exactly, since
+        // the floor is measured against it; `.secondsSince1970` shifts it off.
+        try JSONEncoder().encode(self).write(to: url, options: .atomic)
     }
 
     static func readFromAppGroup() -> WidgetReloadRecord? {
@@ -378,9 +378,7 @@ struct WidgetReloadRecord: Codable, Equatable {
               let data = try? Data(contentsOf: url) else {
             return nil
         }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .secondsSince1970
-        return try? decoder.decode(WidgetReloadRecord.self, from: data)
+        return try? JSONDecoder().decode(WidgetReloadRecord.self, from: data)
     }
 
     #if DEBUG

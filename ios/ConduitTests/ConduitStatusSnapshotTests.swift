@@ -1109,6 +1109,15 @@ final class WidgetReloadOnSyncTests: XCTestCase {
         assertSameStamp(nextSpy.rebuilds.last??.lastSyncedAt, wakeStamp)
     }
 
+    /// The floor is measured against the persisted request time, so it must
+    /// read back exactly: a record that came back a fraction of a microsecond
+    /// late pushed floor expiry past `requestedAt + widgetReloadFloor`.
+    func test_reloadRecord_readsBackTheExactRequestTime() throws {
+        let requestedAt = Date(timeIntervalSinceReferenceDate: 780_000_000.123)
+        try WidgetReloadRecord(requestedAt: requestedAt, lastSyncedAt: oldStamp).writeToAppGroup()
+        XCTAssertEqual(WidgetReloadRecord.readFromAppGroup()?.requestedAt, requestedAt)
+    }
+
     /// The case the floor alone leaves open: a background stamp lands inside
     /// the floor window and nothing wakes the app again. The stamp is in the
     /// container (the wake's flush wrote it) but no reload asks for it — so
