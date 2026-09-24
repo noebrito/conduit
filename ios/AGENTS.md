@@ -417,7 +417,11 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
   `.inactive` applies the foreground rule once. The last request and its stamp are persisted in
   the App Group (`WidgetReloadRecord`), because background launches are fresh processes and the
   container snapshot tracks writes, not rebuilds; the flush re-evaluates the reload even with
-  nothing to recount, so a stamp the floor withheld is reloaded at the first wake past it.
+  nothing to recount, so a stamp the floor withheld is reloaded at the first wake past it; and
+  because there may be no such wake, a timeline built inside the floor window asks to be rebuilt
+  at its expiry (`timelineRefreshDate`, read by the widget from the record — which is written
+  *before* the reload request so that rebuild sees it). One follow-up per app reload, then hourly;
+  budget cost is up to ~2 rebuilds per background reload.
   `AppState` takes `reloadTimelines` and `now` seams; `WidgetReloadOnSyncTests` pin all of this.
 - **The write gate is separate.** `shouldWriteToAppGroup` writes a class change (or anything the
   reload rule is about to reload) immediately and everything else at most once per
@@ -439,7 +443,8 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
   SDK). Two sharp edges seen on the simulator Lock Screen: `accessoryInline` renders only the
   *first* `Text` of a stack (an `HStack("Synced ", age)` showed "Conduit · Synced" with no age), so
   inline shows the live age alone; and a prefix beside the live text in `accessoryRectangular`
-  squeezed the age into a truncated column, so "Synced" sits on its own line above it. Whether it actually ticks on a device
+  squeezed the age into a truncated column (with `lineLimit(1)` + scaling: a full-size "Synced"
+  beside a shrunken, still-truncated age), so "Synced" sits on its own line above it. Whether it actually ticks on a device
   is unverified — the iOS 27 simulator ticks no live text in widgets at all — so the widget keeps
   its hourly self-refresh until it is checked on a phone. iOS 17 renders a static age against the
   entry date; `timelineEntryDates` spaces entries 5 minutes apart through the refresh interval

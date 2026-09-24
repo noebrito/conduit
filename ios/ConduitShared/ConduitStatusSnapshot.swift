@@ -290,6 +290,28 @@ struct ConduitStatusSnapshot: Codable, Equatable {
     /// cannot drift apart.
     static let timelineRefreshInterval: TimeInterval = 60 * 60
 
+    /// When the widget should rebuild next, given the app's last reload
+    /// request (`WidgetReloadRecord.requestedAt`).
+    ///
+    /// The background floor withholds a stamp that lands within
+    /// `widgetReloadFloor` of the last reload; the flush that follows still
+    /// writes it to the container, but with no further delivery or wake
+    /// nothing would request its reload, leaving it off the Lock Screen until
+    /// the hourly rebuild. So a timeline built within that window asks to be
+    /// rebuilt the moment the window closes: that rebuild reads whatever the
+    /// window withheld straight from the container. Each app reload buys at
+    /// most one such follow-up — the follow-up itself is built outside the
+    /// window, so it falls back to the hourly baseline — and quiet periods
+    /// stay hourly. A request dated more than a second after `now` (a clock
+    /// set back) is not trusted and gets the baseline; the second absorbs the
+    /// App Group JSON round-trip, which can move the date by an ulp.
+    static func timelineRefreshDate(from now: Date, lastReloadRequestAt: Date?) -> Date {
+        let baseline = now.addingTimeInterval(timelineRefreshInterval)
+        guard let lastReloadRequestAt, lastReloadRequestAt.timeIntervalSince(now) <= 1 else { return baseline }
+        let floorExpiry = lastReloadRequestAt.addingTimeInterval(widgetReloadFloor)
+        return floorExpiry > now ? min(floorExpiry, baseline) : baseline
+    }
+
     /// Whether `next` earns the encode plus `.atomic` App Group write, given
     /// what the container already holds (`previous`) and when that landed.
     ///
@@ -328,8 +350,9 @@ struct ConduitStatusSnapshot: Codable, Equatable {
 /// launches — the common case — are fresh processes: without it every one
 /// would either reload every time or never. The container snapshot is no
 /// substitute: it tracks what was *written*, and a stamp the background floor
-/// withheld is written without being reloaded. Written and read only by the
-/// app (`AppState`); the widget never touches it.
+/// withheld is written without being reloaded. Written only by the app
+/// (`AppState`), before it requests the reload; the widget reads it to
+/// schedule the follow-up rebuild (`timelineRefreshDate`).
 struct WidgetReloadRecord: Codable, Equatable {
     var requestedAt: Date
     var lastSyncedAt: Date?

@@ -28,14 +28,20 @@ struct ConduitStatusProvider: TimelineProvider {
     /// well under the ~40-70/day the system budgets, leaving the rest of the
     /// allowance for the app's background reloads. Kept until the iOS 18+ live
     /// age text is verified to tick on a device: if it does not, this cadence
-    /// is what bounds how stale a static render can get.
+    /// is what bounds how stale a static render can get. A rebuild within the
+    /// app's background reload floor refreshes again when the floor expires
+    /// instead (`timelineRefreshDate`), so a stamp the floor withheld still
+    /// reaches the Lock Screen without waiting for the next wake.
     func getTimeline(in context: Context, completion: @escaping (Timeline<ConduitStatusEntry>) -> Void) {
         let now = Date()
         let snapshot = ConduitStatusSnapshot.readFromAppGroup()
         let entries = ConduitStatusSnapshot
             .timelineEntryDates(from: now)
             .map { ConduitStatusEntry(date: $0, snapshot: snapshot) }
-        let next = now.addingTimeInterval(ConduitStatusSnapshot.timelineRefreshInterval)
+        let next = ConduitStatusSnapshot.timelineRefreshDate(
+            from: now,
+            lastReloadRequestAt: WidgetReloadRecord.readFromAppGroup()?.requestedAt
+        )
         completion(Timeline(entries: entries, policy: .after(next)))
     }
 }

@@ -482,16 +482,20 @@ final class AppState {
             lastPersistedStatusSnapshotAt = now
         }
         if shouldReload && lastPersistedStatusSnapshot == snapshot {
-            reloadTimelines()
+            // The record lands before the request, so the rebuild it triggers
+            // already sees it and schedules the follow-up past the floor
+            // (`ConduitStatusSnapshot.timelineRefreshDate`).
             let record = WidgetReloadRecord(requestedAt: now, lastSyncedAt: snapshot.lastSyncedAt)
             lastWidgetReload = record
             do {
                 try record.writeToAppGroup()
             } catch {
-                // The reload itself was requested; only the next process's
-                // floor is lost, which costs at most one extra reload.
+                // Reload anyway; only the next process's floor and the
+                // widget's follow-up are lost, which costs at most one extra
+                // reload or an hourly wait.
                 logger.error("Failed to write widget reload record: \(error.localizedDescription, privacy: .public)")
             }
+            reloadTimelines()
         }
         return lastPersistedStatusSnapshot == snapshot
     }
