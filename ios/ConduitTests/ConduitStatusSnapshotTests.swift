@@ -316,9 +316,9 @@ final class ConduitStatusSnapshotTests: XCTestCase {
     }
 
     /// In the background every reload is budgeted, and a stamp can land on
-    /// every wake, so they coalesce behind the 15-minute floor.
+    /// every wake, so they coalesce behind the 30-minute floor.
     func test_reloadDecision_stampChangeInTheBackgroundInsideTheFloor_doesNotReload() {
-        XCTAssertEqual(ConduitStatusSnapshot.widgetReloadFloor, 15 * 60)
+        XCTAssertEqual(ConduitStatusSnapshot.widgetReloadFloor, 30 * 60)
         XCTAssertFalse(reloadDecision(
             next: makeSnapshot(lastSyncedAt: Self.newStamp),
             lastReloadAgo: ConduitStatusSnapshot.widgetReloadFloor - 1,

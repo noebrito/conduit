@@ -413,7 +413,7 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
   (`shouldReloadTimelines` — error, failed count crossing zero, import headline, leaving `.idle`)
   always reloads; otherwise a stamp different from the one the last reload carried reloads
   unconditionally in the foreground (budget-exempt, WidgetKit logs "budget exempt reason:
-  containerApp") and in the background at most once per `widgetReloadFloor` (15 min). Scene phase
+  containerApp") and in the background at most once per `widgetReloadFloor` (30 min). Scene phase
   `.inactive` applies the foreground rule once. The last request and its stamp are persisted in
   the App Group (`WidgetReloadRecord`), because background launches are fresh processes and the
   container snapshot tracks writes, not rebuilds; the flush re-evaluates the reload even with
@@ -421,7 +421,8 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
   because there may be no such wake, a timeline built inside the floor window asks to be rebuilt
   at its expiry (`timelineRefreshDate`, read by the widget from the record — which is written
   *before* the reload request so that rebuild sees it). One follow-up per app reload, then hourly;
-  budget cost is up to ~2 rebuilds per background reload.
+  budget cost is up to ~2 rebuilds per background reload, so the worst case is about 96 budgeted
+  rebuilds a day (48 background reloads plus 48 follow-ups).
   `AppState` takes `reloadTimelines` and `now` seams; `WidgetReloadOnSyncTests` pin all of this.
 - **The write gate is separate.** `shouldWriteToAppGroup` writes a class change (or anything the
   reload rule is about to reload) immediately and everything else at most once per

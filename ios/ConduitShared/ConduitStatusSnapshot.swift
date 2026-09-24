@@ -228,11 +228,14 @@ struct ConduitStatusSnapshot: Codable, Equatable {
     }
 
     /// The shortest gap between two reloads a *background* stamp change may
-    /// request: `SyncEngine.bgRefreshInterval`, so a stamp landing every
-    /// background wake costs at most 96 reloads a day against WidgetKit's
-    /// ~40-70/day budget, and realistic days far fewer. If WidgetKit throttles
-    /// anyway, the failure mode is a delayed reload, not a lost one.
-    static let widgetReloadFloor: TimeInterval = 15 * 60
+    /// request: twice `SyncEngine.bgRefreshInterval`, because each background
+    /// reload can buy one follow-up rebuild at floor expiry
+    /// (`timelineRefreshDate`). A stamp landing every background wake costs at
+    /// worst about 96 budgeted rebuilds a day — 48 reloads plus 48 follow-ups
+    /// — against WidgetKit's ~40-70/day budget, and realistic days far fewer.
+    /// If WidgetKit throttles anyway, the failure mode is a delayed reload, not
+    /// a lost one.
+    static let widgetReloadFloor: TimeInterval = 30 * 60
 
     /// Whether writing `next` should also ask WidgetKit to rebuild the widget's
     /// timeline — the one reload rule, for every path that writes the
