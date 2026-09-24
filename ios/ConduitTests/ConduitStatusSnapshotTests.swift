@@ -1,5 +1,6 @@
 import GRDB
 import os
+import SwiftUI
 import XCTest
 @testable import Conduit
 
@@ -122,16 +123,59 @@ final class ConduitStatusSnapshotTests: XCTestCase {
         XCTAssertEqual(ConduitStatusSnapshot.coarseAge(from: t, to: t.addingTimeInterval(-30)), "less than a minute")
     }
 
-    // MARK: - timelineEntryDates — the midnight boundary entry
+    // MARK: - timelineEntryDates — 5-minute entries plus the midnight boundary
 
-    /// A timeline holding one entry renders that entry's date until the next
-    /// rebuild, so without a boundary entry the widget keeps yesterday's tally
-    /// on screen past midnight.
+    /// The spacing invariant WidgetKit asks for: consecutive entries at least
+    /// 5 minutes apart, except `now` itself when midnight is closer than that.
+    private func assertEntrySpacing(_ dates: [Date], from now: Date, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(dates, dates.sorted(), "entries must be in order", file: file, line: line)
+        for (earlier, later) in zip(dates, dates.dropFirst()) where earlier != now {
+            XCTAssertGreaterThanOrEqual(
+                later.timeIntervalSince(earlier), ConduitStatusSnapshot.timelineEntrySpacing,
+                "\(earlier) → \(later)", file: file, line: line
+            )
+        }
+    }
+
+    /// iOS 17 renders a static age against the entry date, so a timeline of
+    /// `[now, midnight]` froze the age at the rebuild for the rest of the hour
+    /// — under-reporting staleness on a reliability surface. The regular
+    /// entries must cover the whole refresh interval, 5 minutes apart.
+    func test_timelineEntryDates_coverTheRefreshIntervalInFiveMinuteSteps() {
+        let now = Self.noon
+        let dates = ConduitStatusSnapshot.timelineEntryDates(from: now)
+
+        XCTAssertEqual(ConduitStatusSnapshot.timelineEntrySpacing, 5 * 60)
+        let regular = dates.filter { $0 <= now.addingTimeInterval(ConduitStatusSnapshot.timelineRefreshInterval) }
+        XCTAssertEqual(regular, (0...12).map { now.addingTimeInterval(Double($0) * 5 * 60) })
+        assertEntrySpacing(dates, from: now)
+    }
+
+    /// What the 5-minute entries buy on iOS 17: the static age rendered
+    /// against each entry advances between rebuilds instead of freezing.
+    func test_timelineEntryDates_advanceTheIOS17StaticAgeBetweenRebuilds() {
+        let lastSyncedAt = Self.noon.addingTimeInterval(-60)
+        let ages = ConduitStatusSnapshot.timelineEntryDates(from: Self.noon)
+            .prefix(4)
+            .map { ConduitStatusSnapshot.coarseAge(from: lastSyncedAt, to: $0) }
+
+        XCTAssertEqual(ages, ["1 min", "6 min", "11 min", "16 min"])
+    }
+
+    /// A timeline renders its last entry until the next rebuild, so without a
+    /// boundary entry the widget keeps yesterday's tally on screen past
+    /// midnight. When midnight falls inside the window it must be an entry of
+    /// its own, still at least 5 minutes from its neighbours.
     func test_timelineEntryDates_carriesTheMidnightBoundaryWhenItIsImminent() {
         let midnight = Calendar.current.startOfDay(for: Self.nextDayNoon)
-        let now = midnight.addingTimeInterval(-10 * 60)
+        for minutesToMidnight in [2.0, 7.0, 10.0, 33.5] {
+            let now = midnight.addingTimeInterval(-minutesToMidnight * 60)
+            let dates = ConduitStatusSnapshot.timelineEntryDates(from: now)
 
-        XCTAssertEqual(ConduitStatusSnapshot.timelineEntryDates(from: now), [now, midnight])
+            XCTAssertEqual(dates.first, now, "\(minutesToMidnight) min to midnight")
+            XCTAssertEqual(dates.filter { $0 == midnight }.count, 1, "\(minutesToMidnight) min to midnight")
+            assertEntrySpacing(dates, from: now)
+        }
     }
 
     /// The boundary cannot be conditional on midnight falling inside one
@@ -142,8 +186,11 @@ final class ConduitStatusSnapshotTests: XCTestCase {
     func test_timelineEntryDates_carriesTheMidnightBoundaryEvenWhenItIsHoursAway() {
         let now = Self.noon
         let midnight = Calendar.current.startOfDay(for: Self.nextDayNoon)
+        let dates = ConduitStatusSnapshot.timelineEntryDates(from: now)
 
-        XCTAssertEqual(ConduitStatusSnapshot.timelineEntryDates(from: now), [now, midnight])
+        XCTAssertEqual(dates.last, midnight)
+        XCTAssertEqual(dates.filter { $0 == midnight }.count, 1)
+        assertEntrySpacing(dates, from: now)
     }
 
     /// The entry only pays off if rendering against it actually zeroes the
@@ -210,10 +257,9 @@ final class ConduitStatusSnapshotTests: XCTestCase {
         XCTAssertTrue(ConduitStatusSnapshot.shouldReloadTimelines(previous: previous, next: next))
     }
 
-    /// The masking case this whole gate exists to prevent: a bare timestamp or
-    /// staged-count change (the common case, ≥96 background wakes/day) must
-    /// NOT spend a reload, or the widget would blow its daily budget.
-    func test_shouldReload_timestampOrStagedCountOnlyChange_doesNotReload() {
+    /// A bare stamp or staged-count change is not a state *class* change —
+    /// whether a new stamp earns a reload is `reloadDecision`'s rule, below.
+    func test_shouldReload_timestampOrStagedCountOnlyChange_isNotAClassChange() {
         let previous = makeSnapshot(lastSyncedAt: Date(timeIntervalSince1970: 1_000), stagedTodayCount: 10)
         let next = makeSnapshot(lastSyncedAt: Date(timeIntervalSince1970: 5_000), stagedTodayCount: 11)
         XCTAssertFalse(ConduitStatusSnapshot.shouldReloadTimelines(previous: previous, next: next))
@@ -234,6 +280,197 @@ final class ConduitStatusSnapshotTests: XCTestCase {
         let previous = makeSnapshot(syncStatus: .idle, lastSyncedAt: nil)
         let next = makeSnapshot(syncStatus: .synced, lastSyncedAt: Date(timeIntervalSince1970: 5_000))
         XCTAssertTrue(ConduitStatusSnapshot.shouldReloadTimelines(previous: previous, next: next))
+    }
+
+    // MARK: - reloadDecision — the one reload rule
+
+    private static let reloadNow = Date(timeIntervalSince1970: 1_700_000_000)
+    private static let reloadedStamp = Date(timeIntervalSince1970: 1_699_990_000)
+    private static let newStamp = Date(timeIntervalSince1970: 1_699_999_000)
+
+    private func reloadDecision(
+        previous: ConduitStatusSnapshot? = nil,
+        next: ConduitStatusSnapshot,
+        lastReloadAgo: TimeInterval?,
+        lastReloadedStamp: Date? = ConduitStatusSnapshotTests.reloadedStamp,
+        isForeground: Bool
+    ) -> Bool {
+        ConduitStatusSnapshot.reloadDecision(
+            previous: previous ?? makeSnapshot(lastSyncedAt: Self.reloadedStamp),
+            next: next,
+            lastReloadAt: lastReloadAgo.map { Self.reloadNow.addingTimeInterval(-$0) },
+            lastReloadedStamp: lastReloadedStamp,
+            isForeground: isForeground,
+            now: Self.reloadNow
+        )
+    }
+
+    /// The captain's bug: the widget's age is anchored to the stamp its
+    /// timeline was built with, and a stamp-only change never asked for a
+    /// rebuild — so the Lock Screen kept counting from the previous sync.
+    /// In the foreground a reload is budget-exempt, so every new stamp gets
+    /// one, however recently the last was requested.
+    func test_reloadDecision_stampChangeInTheForeground_alwaysReloads() {
+        XCTAssertTrue(reloadDecision(next: makeSnapshot(lastSyncedAt: Self.newStamp), lastReloadAgo: 1, isForeground: true))
+        XCTAssertTrue(reloadDecision(next: makeSnapshot(lastSyncedAt: Self.newStamp), lastReloadAgo: nil, isForeground: true))
+    }
+
+    /// In the background every reload is budgeted, and a stamp can land on
+    /// every wake, so they coalesce behind the 30-minute floor.
+    func test_reloadDecision_stampChangeInTheBackgroundInsideTheFloor_doesNotReload() {
+        XCTAssertEqual(ConduitStatusSnapshot.widgetReloadFloor, 30 * 60)
+        XCTAssertFalse(reloadDecision(
+            next: makeSnapshot(lastSyncedAt: Self.newStamp),
+            lastReloadAgo: ConduitStatusSnapshot.widgetReloadFloor - 1,
+            isForeground: false
+        ))
+    }
+
+    func test_reloadDecision_stampChangeInTheBackgroundPastTheFloor_reloads() {
+        XCTAssertTrue(reloadDecision(
+            next: makeSnapshot(lastSyncedAt: Self.newStamp),
+            lastReloadAgo: ConduitStatusSnapshot.widgetReloadFloor,
+            isForeground: false
+        ))
+    }
+
+    /// No record of an earlier reload (a fresh install, or the first launch
+    /// of this build) is not a reason to withhold one.
+    func test_reloadDecision_stampChangeInTheBackgroundWithNoRecord_reloads() {
+        XCTAssertTrue(reloadDecision(
+            next: makeSnapshot(lastSyncedAt: Self.newStamp),
+            lastReloadAgo: nil,
+            lastReloadedStamp: nil,
+            isForeground: false
+        ))
+    }
+
+    /// A stamp the floor withheld is already in the container, so `previous`
+    /// equals `next` by the next wake. It is compared against the stamp the
+    /// last reload carried, or it would never be reloaded at all.
+    func test_reloadDecision_stampTheFloorWithheld_reloadsOncePastTheFloorEvenThoughTheContainerHoldsIt() {
+        let withheld = makeSnapshot(lastSyncedAt: Self.newStamp)
+        XCTAssertFalse(reloadDecision(previous: withheld, next: withheld, lastReloadAgo: 60, isForeground: false))
+        XCTAssertTrue(reloadDecision(
+            previous: withheld, next: withheld,
+            lastReloadAgo: ConduitStatusSnapshot.widgetReloadFloor + 60,
+            isForeground: false
+        ))
+    }
+
+    /// The stamp the last reload carried comes back from the App Group's JSON,
+    /// which can move it by an ulp from what `sync_state` reads. That is the
+    /// same stamp, not a new one worth a reload.
+    func test_reloadDecision_sameStampAfterAJSONRoundTrip_doesNotReload() throws {
+        let stamp = Date(timeIntervalSince1970: 1_758_724_429.123)
+        let roundTripped = try XCTUnwrap(
+            try ConduitStatusSnapshot.decoded(from: makeSnapshot(lastSyncedAt: stamp).encoded()).lastSyncedAt
+        )
+        for drift in [0, 1e-7, -1e-7] {
+            XCTAssertFalse(reloadDecision(
+                previous: makeSnapshot(lastSyncedAt: stamp),
+                next: makeSnapshot(lastSyncedAt: stamp),
+                lastReloadAgo: 10 * 3_600,
+                lastReloadedStamp: roundTripped.addingTimeInterval(drift),
+                isForeground: true
+            ), "drift \(drift)")
+        }
+        XCTAssertTrue(reloadDecision(
+            next: makeSnapshot(lastSyncedAt: stamp.addingTimeInterval(0.001)),
+            lastReloadAgo: 10 * 3_600,
+            lastReloadedStamp: roundTripped,
+            isForeground: true
+        ), "a stamp one millisecond later is a new sync")
+    }
+
+    /// A clock set back before the last request must not freeze the widget
+    /// until the clock catches up again.
+    func test_reloadDecision_clockSetBackBeforeTheLastReload_reloads() {
+        XCTAssertTrue(reloadDecision(next: makeSnapshot(lastSyncedAt: Self.newStamp), lastReloadAgo: -3_600, isForeground: false))
+    }
+
+    /// A state-class change is pushed at once wherever it lands, even for the
+    /// stamp the widget already has and inside the floor.
+    func test_reloadDecision_classChange_alwaysReloads() {
+        let previous = makeSnapshot(lastSyncedAt: Self.reloadedStamp, failedCount: 0)
+        let next = makeSnapshot(lastSyncedAt: Self.reloadedStamp, failedCount: 1)
+        XCTAssertTrue(reloadDecision(previous: previous, next: next, lastReloadAgo: 1, isForeground: false))
+        XCTAssertTrue(reloadDecision(previous: previous, next: next, lastReloadAgo: 1, isForeground: true))
+        XCTAssertTrue(ConduitStatusSnapshot.reloadDecision(
+            previous: nil, next: next, lastReloadAt: Self.reloadNow, lastReloadedStamp: Self.reloadedStamp,
+            isForeground: false, now: Self.reloadNow
+        ), "a first-ever snapshot always reloads")
+    }
+
+    /// Nothing the widget shows has changed: never a reload, in any phase.
+    func test_reloadDecision_unchangedSnapshot_neverReloads() {
+        let snapshot = makeSnapshot(lastSyncedAt: Self.reloadedStamp, pendingCount: 3)
+        for isForeground in [true, false] {
+            XCTAssertFalse(
+                reloadDecision(previous: snapshot, next: snapshot, lastReloadAgo: 10 * 3_600, isForeground: isForeground),
+                "isForeground \(isForeground)"
+            )
+        }
+    }
+
+    /// A count moving under the same stamp is left to the hourly self-refresh,
+    /// in the foreground too — the ~10^4 deliveries of an import must not each
+    /// spend a reload when only the pending count moved.
+    func test_reloadDecision_countOnlyChange_doesNotReload() {
+        let previous = makeSnapshot(lastSyncedAt: Self.reloadedStamp, pendingCount: 4_000)
+        let next = makeSnapshot(lastSyncedAt: Self.reloadedStamp, pendingCount: 4_001)
+        for isForeground in [true, false] {
+            XCTAssertFalse(
+                reloadDecision(previous: previous, next: next, lastReloadAgo: 10 * 3_600, isForeground: isForeground),
+                "isForeground \(isForeground)"
+            )
+        }
+    }
+
+    // MARK: - timelineRefreshDate — the follow-up rebuild at floor expiry
+
+    /// Quiet periods keep the hourly baseline.
+    func test_timelineRefreshDate_noRecentReload_isHourly() {
+        let now = Self.reloadNow
+        let hourly = now.addingTimeInterval(ConduitStatusSnapshot.timelineRefreshInterval)
+        XCTAssertEqual(ConduitStatusSnapshot.timelineRefreshDate(from: now, lastReloadRequestAt: nil), hourly)
+        XCTAssertEqual(ConduitStatusSnapshot.timelineRefreshDate(
+            from: now, lastReloadRequestAt: now.addingTimeInterval(-ConduitStatusSnapshot.widgetReloadFloor)
+        ), hourly, "a rebuild at (or after) floor expiry is the follow-up itself, and gets no other")
+        XCTAssertEqual(ConduitStatusSnapshot.timelineRefreshDate(
+            from: now, lastReloadRequestAt: now.addingTimeInterval(-2 * 3_600)
+        ), hourly)
+    }
+
+    /// A timeline built inside the background floor's window rebuilds when
+    /// the window closes, so a stamp the floor withheld in it is picked up
+    /// even if no further wake ever requests it.
+    func test_timelineRefreshDate_insideTheFloorWindow_rebuildsAtFloorExpiry() {
+        let requestedAt = Self.reloadNow
+        for elapsed: TimeInterval in [0, 1, 5 * 60, ConduitStatusSnapshot.widgetReloadFloor - 1] {
+            XCTAssertEqual(
+                ConduitStatusSnapshot.timelineRefreshDate(
+                    from: requestedAt.addingTimeInterval(elapsed), lastReloadRequestAt: requestedAt
+                ),
+                requestedAt.addingTimeInterval(ConduitStatusSnapshot.widgetReloadFloor),
+                "\(elapsed) s after the request"
+            )
+        }
+    }
+
+    /// A request dated after `now` (a clock set back) is not trusted to
+    /// schedule anything — beyond the ulp a JSON round-trip can add.
+    func test_timelineRefreshDate_requestInTheFuture_isHourly() {
+        let now = Self.reloadNow
+        XCTAssertEqual(
+            ConduitStatusSnapshot.timelineRefreshDate(from: now, lastReloadRequestAt: now.addingTimeInterval(1e-6)),
+            now.addingTimeInterval(1e-6 + ConduitStatusSnapshot.widgetReloadFloor),
+            "an ulp of round-trip drift is still the request that was just made"
+        )
+        XCTAssertEqual(
+            ConduitStatusSnapshot.timelineRefreshDate(from: now, lastReloadRequestAt: now.addingTimeInterval(600)),
+            now.addingTimeInterval(ConduitStatusSnapshot.timelineRefreshInterval)
+        )
     }
 
     // MARK: - shouldWriteToAppGroup — the App Group write gate
@@ -655,5 +892,315 @@ final class WidgetDeliveryFlushTests: XCTestCase {
         Uploader.shared.markSent(batchID: "none", httpStatus: 200, accepted: 0, deduped: 0)
         Uploader.shared.urlSessionDidFinishEvents(forBackgroundURLSession: URLSession.shared)
         await fulfillment(of: [handlerSawFlush], timeout: 5)
+    }
+}
+
+/// The Lock Screen's "last synced" age is anchored to the stamp its timeline
+/// was built with, and the widget re-reads the App Group container only when
+/// WidgetKit rebuilds that timeline. These drive the real `AppState` — its
+/// observation, flushes and `Uploader` delivery hook — with the reload seam
+/// injected, and stand in for WidgetKit by reading the container at the
+/// moment a reload is requested, exactly as `getTimeline` would.
+///
+/// Every fixture starts from a two-hour-old stamp that the container and the
+/// reload record already agree on (steady state), so the only reload a test
+/// can see is the one its own stamp change earns.
+final class WidgetReloadOnSyncTests: XCTestCase {
+    private let oldStamp = WidgetReloadOnSyncTests.wholeSecond(Date().addingTimeInterval(-2 * 3600))
+
+    /// `sync_state` stores dates to the millisecond, so a stamp a test writes
+    /// and later compares against what the observation read back is whole.
+    private static func wholeSecond(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.down))
+    }
+
+    /// The rebuilds WidgetKit would have run: the container as each one read
+    /// it, and when that timeline asked to be rebuilt next — both exactly as
+    /// `ConduitStatusProvider.getTimeline` computes them.
+    private final class ReloadSpy: @unchecked Sendable {
+        private let reads = OSAllocatedUnfairLock<[(snapshot: ConduitStatusSnapshot?, refreshAt: Date)]>(initialState: [])
+        var rebuilds: [ConduitStatusSnapshot?] { reads.withLock { $0.map(\.snapshot) } }
+        var refreshDates: [Date] { reads.withLock { $0.map(\.refreshAt) } }
+        var count: Int { rebuilds.count }
+        func reload(at now: Date) {
+            let rebuild = WidgetReloadOnSyncTests.rebuild(at: now)
+            reads.withLock { $0.append(rebuild) }
+        }
+    }
+
+    /// One `getTimeline` run: the container it reads and its refresh date.
+    private static func rebuild(at now: Date) -> (snapshot: ConduitStatusSnapshot?, refreshAt: Date) {
+        (
+            ConduitStatusSnapshot.readFromAppGroup(),
+            ConduitStatusSnapshot.timelineRefreshDate(
+                from: now, lastReloadRequestAt: WidgetReloadRecord.readFromAppGroup()?.requestedAt
+            )
+        )
+    }
+
+    /// A clock the test can move forward: the reload floor is measured on it.
+    private final class Clock: @unchecked Sendable {
+        private let current = OSAllocatedUnfairLock(initialState: Date())
+        var now: Date { current.withLock { $0 } }
+        func advance(by interval: TimeInterval) { current.withLock { $0 = $0.addingTimeInterval(interval) } }
+    }
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        // The container-dependent assertions below must run, not skip: the
+        // unsigned test host falls back to a temp container (DEBUG + XCTest).
+        _ = try XCTUnwrap(ConduitStatusSnapshot.appGroupFileURL("probe"), "no App Group container, not even the test fallback")
+        WidgetReloadRecord.removeFromAppGroup()
+    }
+
+    override func tearDown() {
+        WidgetReloadRecord.removeFromAppGroup()
+        Uploader.shared.database = nil
+        Uploader.shared.backgroundCompletionHandler = nil
+        Uploader.shared.onDeliveryCommitted = nil
+        super.tearDown()
+    }
+
+    /// A database two hours past its last sync, and a container plus reload
+    /// record that already reflect it: what a real device looks like between
+    /// syncs, and what a fresh background process seeds itself from.
+    private func makeFixture(clock: Clock, lastReloadAgo: TimeInterval = 2 * 3600) throws -> (AppDatabase, Int64) {
+        let database = try AppDatabase.makeInMemory()
+        var webhook = WebhookConfig.makeDefault(url: "https://example.com", bearerTokenKeychainRef: "test")
+        try WebhookConfigDAO(database).save(&webhook)
+        let stamp = oldStamp
+        try database.dbWriter.write { try SyncStateDAO.setLastSyncedAt($0, stamp) }
+        let snapshot = try database.dbWriter.read { db in
+            AppState.widgetSnapshot(from: try HomeViewModel.fetchStatus(db), importHeadline: nil)
+        }
+        assertSameStamp(snapshot.lastSyncedAt, stamp)
+        try snapshot.writeToAppGroup()
+        try WidgetReloadRecord(requestedAt: clock.now.addingTimeInterval(-lastReloadAgo), lastSyncedAt: stamp)
+            .writeToAppGroup()
+        return (database, try XCTUnwrap(webhook.id))
+    }
+
+    private func stage(_ count: Int, database: AppDatabase, webhookID: Int64) throws {
+        for index in 0..<count {
+            var sample = Conduit_V1_Sample()
+            sample.uuid = "reload-\(index)"
+            sample.startUnixMs = 1_700_000_000_000
+            sample.endUnixMs = 1_700_000_060_000
+            _ = try OutboxDAO(database).enqueue(
+                sample: sample, hkTypeId: "HKQuantityTypeIdentifierHeartRate", webhookId: webhookID
+            )
+        }
+    }
+
+    private func makeAppState(_ database: AppDatabase, spy: ReloadSpy, clock: Clock) -> AppState {
+        AppState(database: database, reloadTimelines: { spy.reload(at: clock.now) }, now: { clock.now })
+    }
+
+    /// Waits for the observation's first value to be published and handed to
+    /// the snapshot queue, then drains that queue with a flush.
+    @MainActor
+    private func settle(_ appState: AppState, stamp: Date) async throws {
+        try await waitUntil("the observation publishes the stamp") { await appState.status.lastSynced == stamp }
+        await appState.flushStatusSnapshot()
+    }
+
+    /// Stamps compared the way `reloadDecision` compares them: a JSON
+    /// round-trip through the container can move one by an ulp.
+    private func assertSameStamp(_ lhs: Date?, _ rhs: Date?, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(ConduitStatusSnapshot.isSameStamp(lhs, rhs), "\(String(describing: lhs)) vs \(String(describing: rhs)) \(message)", file: file, line: line)
+    }
+
+    private func lastSyncedAt(in database: AppDatabase) throws -> Date? {
+        try database.dbWriter.read { try SyncStateDAO.lastSyncedAt($0) }
+    }
+
+    private func waitUntil(_ what: String, _ condition: @Sendable () async -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if await condition() { return }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTFail("Timed out waiting for: \(what)")
+    }
+
+    @available(iOS 18, *)
+    private func ageText(for stamp: Date, at now: Date) -> String {
+        String(ConduitStatusSnapshot.liveAgeFormat(for: stamp).locale(Locale(identifier: "en_US")).format(now).characters)
+    }
+
+    /// The captain's report, end to end: a background delivery commits on the
+    /// URLSession delegate's queue after its wake ended. PR 7 already got the
+    /// new stamp into the container; the widget kept showing the old one
+    /// because nothing asked WidgetKit to rebuild. Now the delivery's flush
+    /// requests a reload (past the floor), the rebuild reads this delivery's
+    /// stamp, and the age reads "1 minute ago" a minute later instead of
+    /// counting from the previous sync.
+    ///
+    /// Then a second process a minute later — a background launch starts
+    /// fresh — must not spend another budgeted reload on the same stamp; that
+    /// needs the reload bookkeeping persisted, not held in memory.
+    @MainActor
+    func test_backgroundDelivery_reloadsWithItsStamp_andTheNextProcessDoesNotReloadItAgain() async throws {
+        let clock = Clock()
+        let (database, webhookID) = try makeFixture(clock: clock)
+        let spy = ReloadSpy()
+        var appState: AppState? = makeAppState(database, spy: spy, clock: clock)   // not foreground: a background launch
+        Uploader.shared.database = database
+        try await settle(try XCTUnwrap(appState), stamp: oldStamp)
+        XCTAssertEqual(spy.count, 0, "the steady state the widget already shows earns no reload")
+
+        try stage(5, database: database, webhookID: webhookID)
+        let batch = try XCTUnwrap(Batcher(database: database).buildBatch(webhookID: webhookID, limit: 500, deviceID: "dev"))
+        await appState?.flushStatusSnapshot()
+        XCTAssertEqual(spy.count, 0, "a pending count under the same stamp waits for the hourly self-refresh")
+
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .utility).async {
+                Uploader.shared.markSent(batchID: batch.batchID, httpStatus: 200, accepted: 5, deduped: 0)
+                done.resume()
+            }
+        }
+        await Uploader.shared.awaitDeliveryFlushes()
+
+        let deliveredStamp = try XCTUnwrap(try lastSyncedAt(in: database))
+        XCTAssertGreaterThan(deliveredStamp, oldStamp.addingTimeInterval(60))
+        let container = try XCTUnwrap(ConduitStatusSnapshot.readFromAppGroup())
+        assertSameStamp(container.lastSyncedAt, deliveredStamp)
+        XCTAssertEqual(spy.count, 1, "the delivery's stamp must reach the widget with a rebuild")
+        let rebuild = try XCTUnwrap(spy.rebuilds.last ?? nil, "the rebuild must find a snapshot in the container")
+        assertSameStamp(rebuild.lastSyncedAt, deliveredStamp, "the rebuild must read this delivery's stamp, not the previous one's")
+        XCTAssertEqual(rebuild.pendingCount, 0)
+        assertSameStamp(WidgetReloadRecord.readFromAppGroup()?.lastSyncedAt, deliveredStamp)
+
+        // What the widget renders from that rebuild, one minute later.
+        let entryStamp = try XCTUnwrap(rebuild.lastSyncedAt)
+        let oneMinuteLater = entryStamp.addingTimeInterval(60)
+        if #available(iOS 18, *) {
+            XCTAssertEqual(ageText(for: entryStamp, at: oneMinuteLater), "1 minute ago")
+            XCTAssertEqual(ageText(for: oldStamp, at: oneMinuteLater), "2 hours ago",
+                           "the pre-fix widget, anchored to the previous stamp")
+        }
+        XCTAssertEqual(ConduitStatusSnapshot.coarseAge(from: entryStamp, to: oneMinuteLater), "1 min",
+                       "the iOS 17 static age from the same rebuild")
+
+        // A fresh process one minute later, for the same stamp.
+        appState = nil
+        clock.advance(by: 60)
+        let nextSpy = ReloadSpy()
+        let nextProcess = makeAppState(database, spy: nextSpy, clock: clock)
+        Uploader.shared.database = database
+        try await settle(nextProcess, stamp: deliveredStamp)
+        await nextProcess.flushStatusSnapshot()
+        XCTAssertEqual(nextSpy.count, 0, "the stamp the last process already reloaded must not be reloaded again")
+
+        // A new stamp inside the floor (an observer wake that drained nothing)
+        // is written but withheld...
+        let wakeStamp = Self.wholeSecond(deliveredStamp).addingTimeInterval(60)
+        try await database.dbWriter.write { try SyncStateDAO.setLastSyncedAt($0, wakeStamp) }
+        try await settle(nextProcess, stamp: wakeStamp)
+        assertSameStamp(ConduitStatusSnapshot.readFromAppGroup()?.lastSyncedAt, wakeStamp)
+        XCTAssertEqual(nextSpy.count, 0, "inside the floor a background stamp waits")
+
+        // ...and must not be left without a rebuild once the floor has passed,
+        // even though no new fetch comes along to carry it.
+        clock.advance(by: ConduitStatusSnapshot.widgetReloadFloor)
+        await nextProcess.flushStatusSnapshot()
+        XCTAssertEqual(nextSpy.count, 1)
+        assertSameStamp(nextSpy.rebuilds.last??.lastSyncedAt, wakeStamp)
+    }
+
+    /// The floor is measured against the persisted request time, so it must
+    /// read back exactly: a record that came back a fraction of a microsecond
+    /// late pushed floor expiry past `requestedAt + widgetReloadFloor`.
+    func test_reloadRecord_readsBackTheExactRequestTime() throws {
+        let requestedAt = Date(timeIntervalSinceReferenceDate: 780_000_000.123)
+        try WidgetReloadRecord(requestedAt: requestedAt, lastSyncedAt: oldStamp).writeToAppGroup()
+        XCTAssertEqual(WidgetReloadRecord.readFromAppGroup()?.requestedAt, requestedAt)
+    }
+
+    /// The case the floor alone leaves open: a background stamp lands inside
+    /// the floor window and nothing wakes the app again. The stamp is in the
+    /// container (the wake's flush wrote it) but no reload asks for it — so
+    /// the rebuild the last reload triggered must itself have scheduled the
+    /// follow-up for floor expiry, and that follow-up reads the stamp. It
+    /// buys no further one: quiet periods go back to hourly.
+    @MainActor
+    func test_stampWithheldByTheFloor_isCoveredByAFollowUpRebuildAtFloorExpiry_withNoFurtherWake() async throws {
+        let clock = Clock()
+        let (database, _) = try makeFixture(clock: clock)
+        let spy = ReloadSpy()
+        let appState = makeAppState(database, spy: spy, clock: clock)
+        try await settle(appState, stamp: oldStamp)
+
+        let reloaded = Self.wholeSecond(Date())
+        try await database.dbWriter.write { try SyncStateDAO.setLastSyncedAt($0, reloaded) }
+        try await settle(appState, stamp: reloaded)
+        XCTAssertEqual(spy.count, 1, "past the floor, the first background stamp is reloaded")
+        let reloadAt = clock.now
+        let followUpAt = try XCTUnwrap(spy.refreshDates.last)
+        XCTAssertLessThanOrEqual(followUpAt, reloadAt.addingTimeInterval(ConduitStatusSnapshot.widgetReloadFloor),
+                                 "the rebuild must ask to be rebuilt no later than floor expiry")
+
+        clock.advance(by: 5 * 60)
+        let withheld = reloaded.addingTimeInterval(5 * 60)
+        try await database.dbWriter.write { try SyncStateDAO.setLastSyncedAt($0, withheld) }
+        try await settle(appState, stamp: withheld)
+        XCTAssertEqual(spy.count, 1, "inside the floor a background stamp waits")
+        assertSameStamp(ConduitStatusSnapshot.readFromAppGroup()?.lastSyncedAt, withheld,
+                        "the wake's flush must still leave it in the container")
+
+        // No further delivery or wake. WidgetKit runs the follow-up it was asked for.
+        XCTAssertGreaterThan(followUpAt, clock.now, "the follow-up is still ahead")
+        let followUp = Self.rebuild(at: followUpAt)
+        assertSameStamp(followUp.snapshot?.lastSyncedAt, withheld, "the follow-up must show the withheld stamp")
+        XCTAssertEqual(followUp.refreshAt, followUpAt.addingTimeInterval(ConduitStatusSnapshot.timelineRefreshInterval),
+                       "one follow-up per reload, then hourly")
+    }
+
+    /// Sync Now in the foreground stamps through `SyncEngine.flush`'s drained
+    /// branch. A foreground reload is budget-exempt, so it is requested at
+    /// once — even a minute after the last one, and even though the hourly
+    /// write floor alone would not have written the stamp yet.
+    @MainActor
+    func test_foregroundStamp_reloadsImmediately_insideTheFloor() async throws {
+        let clock = Clock()
+        let (database, _) = try makeFixture(clock: clock, lastReloadAgo: 60)
+        let spy = ReloadSpy()
+        let appState = makeAppState(database, spy: spy, clock: clock)
+        appState.statusSurfaceDidBecomeActive()
+        try await settle(appState, stamp: oldStamp)
+        XCTAssertEqual(spy.count, 0)
+
+        let syncNowStamp = Self.wholeSecond(Date())
+        try await database.dbWriter.write { try SyncStateDAO.setLastSyncedAt($0, syncNowStamp) }
+        try await waitUntil("the foreground stamp is reloaded") { spy.count == 1 }
+
+        assertSameStamp(spy.rebuilds.last??.lastSyncedAt, syncNowStamp, "the rebuild must read the new stamp")
+        assertSameStamp(ConduitStatusSnapshot.readFromAppGroup()?.lastSyncedAt, syncNowStamp)
+        await appState.flushStatusSnapshot()
+        XCTAssertEqual(spy.count, 1, "one stamp, one reload")
+    }
+
+    /// Scene phase `.inactive` reloads once when the stamp differs from the
+    /// last reloaded one — here a background stamp the floor withheld — and
+    /// not again for the same stamp.
+    @MainActor
+    func test_inactive_reloadsAStampTheFloorWithheld_once() async throws {
+        let clock = Clock()
+        let (database, _) = try makeFixture(clock: clock, lastReloadAgo: 60)
+        let spy = ReloadSpy()
+        let appState = makeAppState(database, spy: spy, clock: clock)
+        try await settle(appState, stamp: oldStamp)
+
+        let withheld = Self.wholeSecond(Date())
+        try await database.dbWriter.write { try SyncStateDAO.setLastSyncedAt($0, withheld) }
+        try await settle(appState, stamp: withheld)
+        XCTAssertEqual(spy.count, 0, "inside the floor a background stamp waits")
+
+        await appState.flushStatusSnapshot(reloadingAnyNewStamp: true)
+        XCTAssertEqual(spy.count, 1)
+        assertSameStamp(spy.rebuilds.last??.lastSyncedAt, withheld)
+        await appState.flushStatusSnapshot(reloadingAnyNewStamp: true)
+        XCTAssertEqual(spy.count, 1, "the same stamp is reloaded once")
     }
 }
