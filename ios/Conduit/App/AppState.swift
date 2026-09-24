@@ -95,6 +95,24 @@ final class AppState {
     /// Owned by `statusSnapshotQueue` — never read or written anywhere else.
     @ObservationIgnored
     private var lastPersistedStatusSnapshotAt: Date?
+    /// The last widget reload this app requested and the stamp it carried,
+    /// seeded from the App Group container in `init` for the same reason as
+    /// `lastPersistedStatusSnapshot`: background launches are fresh processes,
+    /// and `reloadDecision`'s background floor means nothing if every one of
+    /// them forgets the reload the previous one spent.
+    ///
+    /// Owned by `statusSnapshotQueue` — never read or written anywhere else.
+    @ObservationIgnored
+    private var lastWidgetReload: WidgetReloadRecord?
+    /// Asks WidgetKit to rebuild the widget's timelines. A seam so tests can
+    /// count reloads (and read the container the way a rebuild would) without
+    /// a WidgetKit host.
+    @ObservationIgnored
+    private let reloadTimelines: @Sendable () -> Void
+    /// The clock the reload floor is measured against. A seam so a test can
+    /// launch a second process "a minute later" without sleeping.
+    @ObservationIgnored
+    private let now: @Sendable () -> Date
     /// Consecutive observation failures since the last delivered value, which
     /// is what the restart delay backs off on. Reset on every delivery, so an
     /// unrelated failure much later starts over at the bottom of the backoff.
@@ -125,9 +143,15 @@ final class AppState {
     @ObservationIgnored
     private let statusFetchState = OSAllocatedUnfairLock(initialState: StatusFetchState())
 
-    init(database: AppDatabase) {
+    init(
+        database: AppDatabase,
+        reloadTimelines: @escaping @Sendable () -> Void = { WidgetCenter.shared.reloadAllTimelines() },
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
         let store = HKHealthStore()
         self.database = database
+        self.reloadTimelines = reloadTimelines
+        self.now = now
         self.healthStore = store
         let engine = SyncEngine(database: database, store: store)
         self.syncEngine = engine
@@ -136,6 +160,7 @@ final class AppState {
         self.isOnboardingComplete = UserDefaults.standard.bool(forKey: "conduit.onboardingComplete")
         statusSnapshotQueue.async { [weak self] in
             self?.lastPersistedStatusSnapshot = ConduitStatusSnapshot.readFromAppGroup()
+            self?.lastWidgetReload = WidgetReloadRecord.readFromAppGroup()
         }
         observerCoordinator.onWakeHandled = { [weak self] in
             await self?.flushStatusSnapshot()
@@ -179,8 +204,9 @@ final class AppState {
                 self.status = home
                 guard countsAreFresh else { return }
                 let snapshot = AppState.widgetSnapshot(from: home, importHeadline: importHeadline)
+                let isForeground = self.statusFetchState.withLock { $0.isForeground }
                 self.statusSnapshotQueue.async { [weak self] in
-                    self?.persistStatusSnapshot(snapshot)
+                    self?.persistStatusSnapshot(snapshot, isForeground: isForeground)
                 }
             }
         )
@@ -230,6 +256,14 @@ final class AppState {
         startStatusSnapshotObservation()
     }
 
+    /// The scene went inactive — typically on its way off screen, when the
+    /// user is about to look at the Lock Screen. Reload once if the stamp
+    /// differs from the one the widget was last reloaded with, whichever side
+    /// of the foreground this instant counts as.
+    func statusSurfaceDidBecomeInactive() {
+        Task { await flushStatusSnapshot(reloadingAnyNewStamp: true) }
+    }
+
     /// The app is leaving the screen: stop recounting on every delivery and
     /// flush the current state to the widget.
     func statusSurfaceDidEnterBackground() {
@@ -238,26 +272,42 @@ final class AppState {
     }
 
     /// Writes a freshly counted snapshot to the App Group container past the
-    /// interval floor, returning once it has landed. A no-op when the
-    /// observation has not fetched since the last flush.
+    /// interval floor, and requests the reload `reloadDecision` grants,
+    /// returning once both have landed.
     ///
     /// The observation only writes when a delivery arrives, so without this a
     /// count change skipped by the floor — a stuck upload queue, say — would
     /// sit unwritten for as long as no further transaction came along. Called
     /// wherever the app is about to stop running: leaving the screen, and the
-    /// end of each background wake (`BGAppRefreshTask`, HealthKit observer),
-    /// since a background-only launch never passes through a scene phase.
-    func flushStatusSnapshot() async {
+    /// end of each background wake (`BGAppRefreshTask`, HealthKit observer,
+    /// a background delivery commit), since a background-only launch never
+    /// passes through a scene phase.
+    ///
+    /// Recounts only when the observation has fetched since the last flush. It
+    /// still re-evaluates the reload without one, against the snapshot the
+    /// container already holds: a stamp an earlier wake wrote inside the
+    /// background floor gets its reload at the first flush past it.
+    ///
+    /// `reloadingAnyNewStamp` applies the foreground rule whatever the scene
+    /// phase (`statusSurfaceDidBecomeInactive`).
+    func flushStatusSnapshot(reloadingAnyNewStamp: Bool = false) async {
         let database = self.database
         let fetchState = statusFetchState
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             statusSnapshotQueue.async { [weak self] in
                 defer { continuation.resume() }
-                let isDue = fetchState.withLock { state in
+                let (isDue, isForeground) = fetchState.withLock { state in
                     defer { state.hasUnflushedFetch = false }
-                    return state.hasUnflushedFetch
+                    return (state.hasUnflushedFetch, state.isForeground)
                 }
-                guard isDue, let self else { return }
+                guard let self else { return }
+                let isForegroundRule = isForeground || reloadingAnyNewStamp
+                guard isDue else {
+                    if let snapshot = self.lastPersistedStatusSnapshot {
+                        self.persistStatusSnapshot(snapshot, ignoringIntervalFloor: true, isForeground: isForegroundRule)
+                    }
+                    return
+                }
                 do {
                     let snapshot = try database.dbWriter.read { db in
                         let importRun = try ImportRunState.fetchOne(db, key: ImportProgressDAO.singletonID)
@@ -266,7 +316,7 @@ final class AppState {
                             importHeadline: AppState.importHeadline(for: importRun)
                         )
                     }
-                    if !self.persistStatusSnapshot(snapshot, ignoringIntervalFloor: true) {
+                    if !self.persistStatusSnapshot(snapshot, ignoringIntervalFloor: true, isForeground: isForegroundRule) {
                         fetchState.withLock { $0.hasUnflushedFetch = true }
                     }
                 } catch {
@@ -374,56 +424,76 @@ final class AppState {
         }
     }
 
-    /// Writes the snapshot to the App Group container — but only when the
-    /// container owes the widget that write (`shouldWriteToAppGroup`) — then
-    /// reloads the widget's timelines only on a state-*class* change (an error
-    /// appearing/clearing, the import headline changing, the failed count
-    /// crossing zero, or the first sync leaving `.idle`) — never on every
-    /// stamp, since Conduit's background cadence would exhaust the widget's
-    /// daily reload budget otherwise.
+    /// Writes the snapshot to the App Group container when the container owes
+    /// the widget that write, then requests a timeline reload when
+    /// `ConduitStatusSnapshot.reloadDecision` grants one: a state-*class*
+    /// change always; a new stamp unconditionally in the foreground, and in
+    /// the background at most once per `widgetReloadFloor`. The widget reads
+    /// the container only when its timeline is rebuilt, so a stamp written
+    /// without a reload stays invisible until the hourly self-refresh.
     ///
-    /// The same state-class rule gates both: a class change is written and
-    /// pushed at once, anything else is written at most once per rebuild
-    /// interval, so the ~10^4 deliveries of a large import no longer each pay
+    /// The write is due when the reload is (a rebuild must read the new
+    /// state, not the old one), and otherwise per `shouldWriteToAppGroup`,
+    /// which holds count/stamp-only changes to one write per rebuild interval
+    /// so the ~10^4 deliveries of a large background import do not each pay
     /// an encode and an atomic file write nothing will read.
-    /// `ignoringIntervalFloor` writes any change at once; the background flush
-    /// uses it so a skipped change does not wait for a delivery that may never
-    /// come.
+    /// `ignoringIntervalFloor` writes any change at once; the flush uses it so
+    /// a skipped change does not wait for a delivery that may never come.
     ///
     /// A failed write leaves the container holding the *previous* snapshot, so
-    /// it also leaves `lastPersistedStatusSnapshot` where it is: reloading would
-    /// only redraw stale content, and advancing the bookkeeping would make the
-    /// next successful write of the same state class look like no change at all,
-    /// suppressing the reload that actually matters.
+    /// it also leaves `lastPersistedStatusSnapshot` and the reload record where
+    /// they are: reloading would only redraw stale content, and advancing the
+    /// bookkeeping would make the next successful write look like no change at
+    /// all, suppressing the reload that actually matters.
     ///
-    /// Runs on `statusSnapshotQueue`, which owns `lastPersistedStatusSnapshot`.
+    /// Runs on `statusSnapshotQueue`, which owns `lastPersistedStatusSnapshot`
+    /// and `lastWidgetReload`.
     @discardableResult
     private func persistStatusSnapshot(
         _ snapshot: ConduitStatusSnapshot,
         ignoringIntervalFloor: Bool = false,
-        now: Date = Date()
+        isForeground: Bool
     ) -> Bool {
-        let isDue = ignoringIntervalFloor
-            ? lastPersistedStatusSnapshot != snapshot
-            : ConduitStatusSnapshot.shouldWriteToAppGroup(
+        let now = self.now()
+        let shouldReload = ConduitStatusSnapshot.reloadDecision(
+            previous: lastPersistedStatusSnapshot,
+            next: snapshot,
+            lastReloadAt: lastWidgetReload?.requestedAt,
+            lastReloadedStamp: lastWidgetReload?.lastSyncedAt,
+            isForeground: isForeground,
+            now: now
+        )
+        let isChanged = lastPersistedStatusSnapshot != snapshot
+        let isWriteDue = isChanged && (shouldReload || ignoringIntervalFloor
+            || ConduitStatusSnapshot.shouldWriteToAppGroup(
                 previous: lastPersistedStatusSnapshot,
                 writtenAt: lastPersistedStatusSnapshotAt,
                 next: snapshot,
                 now: now
-            )
-        guard isDue else { return lastPersistedStatusSnapshot == snapshot }
-        do {
-            try snapshot.writeToAppGroup()
-        } catch {
-            logger.error("Failed to write status snapshot: \(error.localizedDescription, privacy: .public)")
-            return false
+            ))
+        if isWriteDue {
+            do {
+                try snapshot.writeToAppGroup()
+            } catch {
+                logger.error("Failed to write status snapshot: \(error.localizedDescription, privacy: .public)")
+                return false
+            }
+            lastPersistedStatusSnapshot = snapshot
+            lastPersistedStatusSnapshotAt = now
         }
-        if ConduitStatusSnapshot.shouldReloadTimelines(previous: lastPersistedStatusSnapshot, next: snapshot) {
-            WidgetCenter.shared.reloadAllTimelines()
+        if shouldReload && lastPersistedStatusSnapshot == snapshot {
+            reloadTimelines()
+            let record = WidgetReloadRecord(requestedAt: now, lastSyncedAt: snapshot.lastSyncedAt)
+            lastWidgetReload = record
+            do {
+                try record.writeToAppGroup()
+            } catch {
+                // The reload itself was requested; only the next process's
+                // floor is lost, which costs at most one extra reload.
+                logger.error("Failed to write widget reload record: \(error.localizedDescription, privacy: .public)")
+            }
         }
-        lastPersistedStatusSnapshot = snapshot
-        lastPersistedStatusSnapshotAt = now
-        return true
+        return lastPersistedStatusSnapshot == snapshot
     }
 
     /// Start HealthKit data capture for the currently-enabled data types.

@@ -405,32 +405,45 @@ undocumented by Apple, and two processes writing one SQLite file is its own haza
   unconditional on purpose — a refresh policy is a hint WidgetKit may never honour (Low Power Mode
   suspends refreshes outright), so a timeline that is never rebuilt must still flip the tally.
   Extra entries within a timeline are free; only rebuilding one is budgeted.
-- **The same state-class rule gates the write and the reload.** `WidgetCenter.reloadAllTimelines()`
-  fires only on a state-*class* change (`ConduitStatusSnapshot.shouldReloadTimelines`) — an error
-  appearing/clearing, the import headline changing, the failed count crossing zero, or the first
-  sync leaving `.idle` — never on every stamp. The encode + `.atomic` App Group write is gated on
-  `shouldWriteToAppGroup`, which writes a class change immediately (the reload would otherwise
-  redraw from a container still holding the old state) and everything else at most once per
-  `timelineRefreshInterval`, so the ~10^4 deliveries of an all-time import no longer each pay a
-  write nothing will read. That floor only fires on a later delivery, so it is not a freshness
-  guarantee: `AppState.flushStatusSnapshot` writes a freshly counted snapshot past it when the app
-  leaves the screen (scene phase `.background`) and at the end of every background wake
-  (`BGAppRefreshTask`, HealthKit observer), since a background-only launch never changes scene
-  phase. It recounts only if the observation has fetched since the last flush
+- **The widget's age is anchored to the stamp its timeline was built with** — the container is
+  re-read only when WidgetKit rebuilds, so a new stamp nobody reloads for leaves the Lock Screen
+  counting from the previous sync until the hourly self-refresh (the "14 minutes ago one minute
+  after a sync" bug). Self-ticking text cannot learn about a new sync. So every container write
+  goes through one reload rule, `ConduitStatusSnapshot.reloadDecision`: a state-*class* change
+  (`shouldReloadTimelines` — error, failed count crossing zero, import headline, leaving `.idle`)
+  always reloads; otherwise a stamp different from the one the last reload carried reloads
+  unconditionally in the foreground (budget-exempt, WidgetKit logs "budget exempt reason:
+  containerApp") and in the background at most once per `widgetReloadFloor` (15 min). Scene phase
+  `.inactive` applies the foreground rule once. The last request and its stamp are persisted in
+  the App Group (`WidgetReloadRecord`), because background launches are fresh processes and the
+  container snapshot tracks writes, not rebuilds; the flush re-evaluates the reload even with
+  nothing to recount, so a stamp the floor withheld is reloaded at the first wake past it.
+  `AppState` takes `reloadTimelines` and `now` seams; `WidgetReloadOnSyncTests` pin all of this.
+- **The write gate is separate.** `shouldWriteToAppGroup` writes a class change (or anything the
+  reload rule is about to reload) immediately and everything else at most once per
+  `timelineRefreshInterval`, so the ~10^4 background deliveries of an all-time import no longer
+  each pay a write nothing will read. That floor only fires on a later delivery, so
+  `AppState.flushStatusSnapshot` writes a freshly counted snapshot past it when the app leaves
+  the screen (scene phase `.background`) and at the end of every background wake
+  (`BGAppRefreshTask`, HealthKit observer, delivery commit), since a background-only launch never
+  changes scene phase. It recounts only if the observation has fetched since the last flush
   (`hasUnflushedFetch`, set by the fetch itself on the writer, so it is visible before the
-  committing write returns to the wake's completion hook), so a launch's burst of one observer
-  wake per enabled type costs at most one recount. Off screen, the observation's fetch applies the same gate to the two outbox `COUNT(*)`s;
-  a probe result carries its counts over, so it is never written to the container. Conduit's
-  background cadence (≥96 `BGAppRefreshTask` wakes/day, plus HealthKit observer wakes) would blow
-  the widget's ~40-70/day reload budget otherwise; on iOS 18+ the relative-time text ticks forward
-  on its own between reloads at zero cost, which is what makes this worth doing (iOS 17 renders a
-  fixed age from the timeline entry date, so there it is only as fresh as the last reload). The widget's own
-  `getTimeline` policy is hourly (~24/day) for the same reason — a shorter self-refresh cadence
-  would hand back everything the gate withholds and then some. **The gate is only as good as
-  what it compares against**: `AppState.lastPersistedStatusSnapshot` is seeded from the App Group
-  container before the observation starts, because a background launch starts the observation fresh
-  and immediately receives an initial value — against an in-memory `nil` every one of those ≥96
-  wakes looks like a first-ever snapshot and spends a reload.
+  committing write returns to the wake's completion hook). Off screen, the observation's fetch
+  applies the same gate to the two outbox `COUNT(*)`s; a probe result carries its counts over, so
+  it is never written to the container. **The gates are only as good as what they compare
+  against**: `lastPersistedStatusSnapshot` and the reload record are seeded from the App Group
+  before the observation starts, or every one of the ≥96 background wakes a day would look like a
+  first-ever snapshot and spend a reload.
+- **Age text.** iOS 18+ renders `Text(.currentDate, format: ConduitStatusSnapshot.liveAgeFormat(...))`
+  as its own view, never interpolated into another `Text` (`Text + Text` is deprecated in the iOS 26
+  SDK). Two sharp edges seen on the simulator Lock Screen: `accessoryInline` renders only the
+  *first* `Text` of a stack (an `HStack("Synced ", age)` showed "Conduit · Synced" with no age), so
+  inline shows the live age alone; and a prefix beside the live text in `accessoryRectangular`
+  squeezed the age into a truncated column, so "Synced" sits on its own line above it. Whether it actually ticks on a device
+  is unverified — the iOS 27 simulator ticks no live text in widgets at all — so the widget keeps
+  its hourly self-refresh until it is checked on a phone. iOS 17 renders a static age against the
+  entry date; `timelineEntryDates` spaces entries 5 minutes apart through the refresh interval
+  (plus the midnight entry) so it advances between rebuilds.
 - **Delivery completion flushes too.** `Uploader.markSent` runs on the URLSession delegate after the
   wake that started the upload has ended, so it calls `Uploader.onDeliveryCommitted` (wired to
   `flushStatusSnapshot` in `AppState.init`); commits landing while a flush is still queued coalesce

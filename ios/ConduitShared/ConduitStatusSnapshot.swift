@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Snapshot of Conduit's sync status, written to the shared App Group container
 /// by the app and read by the Lock Screen widget extension.
@@ -89,6 +90,11 @@ struct ConduitStatusSnapshot: Codable, Equatable {
         try data.write(to: containerURL.appendingPathComponent(Self.fileName), options: .atomic)
     }
 
+    /// A file in the App Group container, or `nil` when there is none.
+    static func appGroupFileURL(_ name: String) -> URL? {
+        containerURL?.appendingPathComponent(name)
+    }
+
     static func readFromAppGroup() -> ConduitStatusSnapshot? {
         guard let containerURL,
               let data = try? Data(contentsOf: containerURL.appendingPathComponent(fileName)) else {
@@ -136,25 +142,51 @@ struct ConduitStatusSnapshot: Codable, Equatable {
         return "\(minutes / 60) hr"
     }
 
-    /// Entry dates for one timeline: `now`, plus the next local midnight.
+    /// Spacing of the timeline's regular entries: WidgetKit's stated minimum
+    /// between entries, and the step the iOS 17 static age advances in.
+    static let timelineEntrySpacing: TimeInterval = 5 * 60
+
+    /// Entry dates for one timeline: `now`, then every `timelineEntrySpacing`
+    /// through one `timelineRefreshInterval`, plus the next local midnight.
+    ///
+    /// The regular entries are what make the iOS 17 age advance between
+    /// rebuilds: that branch renders a static age against the entry date
+    /// (`coarseAge`), so a timeline holding only `now` would show the age as of
+    /// the rebuild for the rest of the hour, under-reporting staleness. iOS 18+
+    /// ignores the entry date for the age, so there they only re-render the same
+    /// view.
     ///
     /// The midnight entry is what makes `stagedToday(asOf:)` land on time. A
-    /// timeline holding one entry renders that entry's date until the next
-    /// rebuild, and a rebuild is something WidgetKit treats as a hint rather
-    /// than a promise — Low Power Mode suspends refreshes outright, and a
-    /// rarely-surfaced widget gets throttled — so the boundary is carried
-    /// unconditionally rather than only when it happens to fall inside one
-    /// refresh interval. Extra entries inside a timeline are free; only
-    /// rebuilding one is budgeted.
+    /// timeline renders its last entry until the next rebuild, and a rebuild is
+    /// something WidgetKit treats as a hint rather than a promise — Low Power
+    /// Mode suspends refreshes outright, and a rarely-surfaced widget gets
+    /// throttled — so the boundary is carried unconditionally rather than only
+    /// when it happens to fall inside one refresh interval. Extra entries inside
+    /// a timeline are free; only rebuilding one is budgeted.
+    ///
+    /// A regular entry closer than one spacing to midnight is dropped in its
+    /// favor, so entries stay at least `timelineEntrySpacing` apart — except
+    /// `now` itself, when midnight is closer than that.
     static func timelineEntryDates(from now: Date, calendar: Calendar = .current) -> [Date] {
+        let steps = Int(timelineRefreshInterval / timelineEntrySpacing)
+        let regular = (0...steps).map { now.addingTimeInterval(Double($0) * timelineEntrySpacing) }
         guard let midnight = calendar.nextDate(
             after: now,
             matching: DateComponents(hour: 0, minute: 0, second: 0),
             matchingPolicy: .nextTime
         ) else {
-            return [now]
+            return regular
         }
-        return [now, midnight]
+        let kept = regular.filter { $0 == now || abs($0.timeIntervalSince(midnight)) >= timelineEntrySpacing }
+        return (kept + [midnight]).sorted()
+    }
+
+    /// The live "last synced" age for iOS 18+: the system's reference-date
+    /// format restricted to hour/minute fields ("5 minutes ago"), never
+    /// seconds. Shared so the widget and the tests render the same wording.
+    @available(iOS 18, *)
+    static func liveAgeFormat(for lastSyncedAt: Date) -> SystemFormatStyle.DateReference {
+        .reference(to: lastSyncedAt, allowedFields: [.hour, .minute])
     }
 
     /// Symbol for `accessoryCircular`. The Lock Screen renders widgets in
@@ -170,14 +202,12 @@ struct ConduitStatusSnapshot: Codable, Equatable {
         return "checkmark.circle"
     }
 
-    /// Whether moving from `previous` to `next` is a state-*class* change that
-    /// justifies spending a `WidgetCenter.reloadAllTimelines()` call: an error
-    /// appearing/clearing, the import headline changing, the failed count
-    /// crossing zero, or the very first sync leaving `.idle`. Deliberately NOT
-    /// true for a timestamp/count-only change — Conduit's background cadence
-    /// (≥96 `BGAppRefreshTask` wakes/day, plus HealthKit observer wakes) would
-    /// exhaust the widget's daily reload budget if every `sync_state` stamp
-    /// triggered a reload.
+    /// Whether moving from `previous` to `next` is a state-*class* change: an
+    /// error appearing/clearing, the import headline changing, the failed count
+    /// crossing zero, or the very first sync leaving `.idle`. A class change is
+    /// written and reloaded at once, wherever it lands. A stamp or count change
+    /// alone is not a class change; whether a new stamp earns a reload is
+    /// `reloadDecision`'s call, not this one's.
     ///
     /// The `.idle` transition is on the list because it changes both the symbol
     /// and the first line ("No syncs yet" → "Synced N ago") and costs nothing
@@ -197,6 +227,63 @@ struct ConduitStatusSnapshot: Codable, Equatable {
             || previous.importStatusHeadline != next.importStatusHeadline
     }
 
+    /// The shortest gap between two reloads a *background* stamp change may
+    /// request: `SyncEngine.bgRefreshInterval`, so a stamp landing every
+    /// background wake costs at most 96 reloads a day against WidgetKit's
+    /// ~40-70/day budget, and realistic days far fewer. If WidgetKit throttles
+    /// anyway, the failure mode is a delayed reload, not a lost one.
+    static let widgetReloadFloor: TimeInterval = 15 * 60
+
+    /// Whether writing `next` should also ask WidgetKit to rebuild the widget's
+    /// timeline — the one reload rule, for every path that writes the
+    /// container.
+    ///
+    /// The widget's age is anchored to the `lastSyncedAt` its timeline was
+    /// built with; the container is only re-read at a rebuild. So a new stamp
+    /// that is never followed by a reload leaves the Lock Screen counting from
+    /// the previous one — off by up to the hourly self-refresh, and snapping
+    /// back at each rebuild. Hence:
+    ///
+    /// - A state-class change (`shouldReloadTimelines`) always reloads.
+    /// - Otherwise only a stamp different from the one the last reload carried
+    ///   (`lastReloadedStamp`) can reload. It is compared against that, not
+    ///   against `previous`: a stamp the floor withheld is already in the
+    ///   container, and must still be reloaded once the floor has passed.
+    /// - In the foreground it reloads unconditionally — WidgetKit exempts
+    ///   reloads from the containing app in the foreground from the budget.
+    /// - In the background it reloads once `widgetReloadFloor` has passed since
+    ///   the last request (`lastReloadAt`), or when there is no record of one. A
+    ///   clock set back before the last request counts as past the floor, so a
+    ///   manual clock change cannot freeze the widget.
+    static func reloadDecision(
+        previous: ConduitStatusSnapshot?,
+        next: ConduitStatusSnapshot,
+        lastReloadAt: Date?,
+        lastReloadedStamp: Date?,
+        isForeground: Bool,
+        now: Date
+    ) -> Bool {
+        if shouldReloadTimelines(previous: previous, next: next) { return true }
+        guard !isSameStamp(next.lastSyncedAt, lastReloadedStamp) else { return false }
+        if isForeground { return true }
+        guard let lastReloadAt else { return true }
+        let elapsed = now.timeIntervalSince(lastReloadAt)
+        return elapsed >= widgetReloadFloor || elapsed < 0
+    }
+
+    /// Whether two sync stamps are the same `sync_state` value. `sync_state`
+    /// keeps milliseconds, and a stamp that has been through the App Group's
+    /// `secondsSince1970` JSON can come back an ulp away from the one GRDB
+    /// reads, so exact equality would make every fresh process see a "new"
+    /// stamp and spend a reload on it.
+    static func isSameStamp(_ lhs: Date?, _ rhs: Date?) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil): return true
+        case let (lhs?, rhs?): return abs(lhs.timeIntervalSince(rhs)) < 0.000_5
+        default: return false
+        }
+    }
+
     /// The widget's baseline timeline-rebuild cadence, and therefore the
     /// freshness the container actually owes it. Lives here rather than in the
     /// widget target so the writer's coalescing and the reader's refresh policy
@@ -210,7 +297,7 @@ struct ConduitStatusSnapshot: Codable, Equatable {
     /// committed transaction touching the outbox/staged/sync tables — on the
     /// order of 10^4 times across an all-time import — while the container is
     /// read at most once per `timelineRefreshInterval`, plus the reloads
-    /// `shouldReloadTimelines` grants. Writing every delivery therefore spends
+    /// `reloadDecision` grants (whose paths write regardless of this gate). Writing every delivery therefore spends
     /// thousands of encodes and file writes publishing states nothing reads,
     /// on a path a background-only launch pays with no screen to show for it.
     ///
@@ -232,6 +319,49 @@ struct ConduitStatusSnapshot: Codable, Equatable {
         if shouldReloadTimelines(previous: previous, next: next) { return true }
         return now.timeIntervalSince(writtenAt) >= timelineRefreshInterval
     }
+}
+
+/// The last `WidgetCenter.reloadAllTimelines()` the app requested, and the
+/// sync stamp that reload carried — what `reloadDecision` compares against.
+///
+/// Persisted in the App Group rather than in memory because background
+/// launches — the common case — are fresh processes: without it every one
+/// would either reload every time or never. The container snapshot is no
+/// substitute: it tracks what was *written*, and a stamp the background floor
+/// withheld is written without being reloaded. Written and read only by the
+/// app (`AppState`); the widget never touches it.
+struct WidgetReloadRecord: Codable, Equatable {
+    var requestedAt: Date
+    var lastSyncedAt: Date?
+
+    private static let fileName = "conduit_widget_reload_record.json"
+
+    func writeToAppGroup() throws {
+        guard let url = ConduitStatusSnapshot.appGroupFileURL(Self.fileName) else {
+            throw ConduitStatusSnapshotError.appGroupContainerUnavailable
+        }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        try encoder.encode(self).write(to: url, options: .atomic)
+    }
+
+    static func readFromAppGroup() -> WidgetReloadRecord? {
+        guard let url = ConduitStatusSnapshot.appGroupFileURL(fileName),
+              let data = try? Data(contentsOf: url) else {
+            return nil
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        return try? decoder.decode(WidgetReloadRecord.self, from: data)
+    }
+
+    #if DEBUG
+    /// Tests only: forget every earlier reload, as on a fresh install.
+    static func removeFromAppGroup() {
+        guard let url = ConduitStatusSnapshot.appGroupFileURL(fileName) else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+    #endif
 }
 
 enum ConduitStatusSnapshotError: Error {

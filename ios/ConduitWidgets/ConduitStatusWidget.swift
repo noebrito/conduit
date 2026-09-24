@@ -19,15 +19,16 @@ struct ConduitStatusProvider: TimelineProvider {
         completion(ConduitStatusEntry(date: Date(), snapshot: ConduitStatusSnapshot.readFromAppGroup()))
     }
 
+    /// Reads the container once, so every entry carries the stamp as of this
+    /// rebuild: the app's reloads (`ConduitStatusSnapshot.reloadDecision`) are
+    /// what bring a new stamp to the Lock Screen. The entries are 5 minutes
+    /// apart so the iOS 17 static age advances between rebuilds.
+    ///
     /// Hourly baseline refresh (`ConduitStatusSnapshot.timelineRefreshInterval`),
-    /// deliberately well under the ~40-70/day the system budgets: at ~24/day it
-    /// leaves the rest of the allowance for the urgent pushes
-    /// `AppState.persistStatusSnapshot` makes when the status changes class.
-    /// Neither piece of freshness this widget needs depends on this cadence —
-    /// on iOS 18+ the relative-time first line ticks on its own at zero refresh
-    /// cost (see `LastSyncedAge`), and a state-class change arrives as a push
-    /// rather than waiting for it. iOS 17 renders a fixed age from the entry
-    /// date, so there it is only as fresh as this cadence.
+    /// well under the ~40-70/day the system budgets, leaving the rest of the
+    /// allowance for the app's background reloads. Kept until the iOS 18+ live
+    /// age text is verified to tick on a device: if it does not, this cadence
+    /// is what bounds how stale a static render can get.
     func getTimeline(in context: Context, completion: @escaping (Timeline<ConduitStatusEntry>) -> Void) {
         let now = Date()
         let snapshot = ConduitStatusSnapshot.readFromAppGroup()
@@ -57,9 +58,21 @@ struct ConduitStatusWidgetEntryView: View {
 
 /// The "last synced" age, never finer than a minute — a ticking seconds
 /// counter on the Lock Screen is distracting. iOS 18+ uses the system's live
-/// reference-date format restricted to hour/minute fields, so it still updates
-/// itself at zero refresh cost. iOS 17 has no such format, so it renders static
-/// text from the timeline entry date, which is as fresh as the (hourly) timeline.
+/// reference-date format restricted to hour/minute fields
+/// (`ConduitStatusSnapshot.liveAgeFormat`). It is anchored to the stamp this
+/// timeline was built with, so it can only advance the age of that stamp; a
+/// newer sync arrives with the app's reload. iOS 17 has no such format, so it
+/// renders static text against the entry date, which the 5-minute entries
+/// advance.
+///
+/// The live `Text` is its own view, never interpolated into another `Text`:
+/// whether an embedded live segment stays live in WidgetKit's archived render
+/// is undocumented, and whether this text ticks on a device at all is still
+/// to be verified. Any prefix is a separate `Text` on the line above the age:
+/// two `Text`s in a row cannot wrap into each other, so a single row squeezed
+/// the age into a truncated column of its own ("Synced 44 / minute…"); on
+/// the simulator Lock Screen a one-line layout was never chosen even for
+/// "now".
 private struct LastSyncedAge: View {
     let lastSyncedAt: Date
     let now: Date
@@ -69,10 +82,23 @@ private struct LastSyncedAge: View {
     /// append their own "ago".
     var body: some View {
         if #available(iOS 18, *) {
-            Text("\(prefix)\(Text(.currentDate, format: .reference(to: lastSyncedAt, allowedFields: [.hour, .minute])))")
+            if prefix.isEmpty {
+                liveAge
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(prefix.trimmingCharacters(in: .whitespaces))
+                    liveAge
+                }
+                .lineLimit(1)
+            }
         } else {
             Text("\(prefix)\(ConduitStatusSnapshot.coarseAge(from: lastSyncedAt, to: now)) ago")
         }
+    }
+
+    @available(iOS 18, *)
+    private var liveAge: Text {
+        Text(.currentDate, format: ConduitStatusSnapshot.liveAgeFormat(for: lastSyncedAt))
     }
 }
 
@@ -149,12 +175,20 @@ private struct InlineAccessoryView: View {
                 if snapshot.failedCount > 0 {
                     Text("Conduit · \(snapshot.failedCount) failed")
                 } else if let lastSyncedAt = snapshot.lastSyncedAt {
-                    // The inline slot is one short line, so shed the prefix
-                    // rather than let the system truncate the age itself.
-                    ViewThatFits {
-                        LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date, prefix: "Conduit · Synced ")
-                        LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date, prefix: "Synced ")
+                    if #available(iOS 18, *) {
+                        // The inline slot renders only the first `Text` it
+                        // finds, so a separate prefix would be all it showed
+                        // ("Conduit · Synced", no age). The live age stands
+                        // alone, beside the state symbol.
                         LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date)
+                    } else {
+                        // The inline slot is one short line, so shed the prefix
+                        // rather than let the system truncate the age itself.
+                        ViewThatFits {
+                            LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date, prefix: "Conduit · Synced ")
+                            LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date, prefix: "Synced ")
+                            LastSyncedAge(lastSyncedAt: lastSyncedAt, now: date)
+                        }
                     }
                 } else {
                     Text("Conduit · No syncs yet")

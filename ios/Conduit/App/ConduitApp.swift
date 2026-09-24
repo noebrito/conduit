@@ -14,6 +14,7 @@ struct ConduitApp: App {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active: appState.statusSurfaceDidBecomeActive()
+            case .inactive: appState.statusSurfaceDidBecomeInactive()
             case .background: appState.statusSurfaceDidEnterBackground()
             default: break
             }
