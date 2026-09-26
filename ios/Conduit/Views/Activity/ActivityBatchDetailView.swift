@@ -5,6 +5,7 @@ import SwiftUI
 /// Shows per-type sample counts, batch ID, HTTP status, error message,
 /// and a Retry button for failed batches.
 struct ActivityBatchDetailView: View {
+    @Environment(AppState.self) private var appState
     let entry: DeliveryLogEntry
     let viewModel: ActivityLogViewModel
 
@@ -148,6 +149,7 @@ struct ActivityBatchDetailView: View {
                 }
             }
         }
+        .onAppear { if !entry.isSuccess { appState.reviewPrompt.suppressSession() } }
         .navigationTitle("Batch Detail")
         .navigationBarTitleDisplayMode(.inline)
         .listStyle(.insetGrouped)

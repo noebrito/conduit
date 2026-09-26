@@ -1,7 +1,10 @@
 import SwiftUI
+import StoreKit
 
 /// Home screen: sync status, sample counts, Sync Now button.
 struct HomeView: View {
+    var isSelected = true
+    @Environment(\.requestReview) private var requestReview
     @Environment(AppState.self) private var appState
     @State private var viewModel: HomeViewModel?
 
@@ -20,6 +23,43 @@ struct HomeView: View {
             .navigationTitle("Conduit")
             .navigationBarTitleDisplayMode(.large)
         }
+        .background(ReviewPresentationAnchor { view in
+            appState.reviewPrompt.setPresentation(request: { requestReview() }, canPresent: { [weak view] in
+                guard let window = view?.window,
+                      window.windowScene?.activationState == .foregroundActive,
+                      let root = window.rootViewController,
+                      !ReviewPresentationAnchor.hasPresentation(root) else { return false }
+                return !ReviewPresentationAnchor.isInteracting(window)
+            })
+        })
+        .onAppear { appState.reviewPrompt.setHomeVisible(isSelected && viewModel != nil) }
+        .onChange(of: isSelected && viewModel != nil, initial: true) { _, visible in
+            appState.reviewPrompt.setHomeVisible(visible)
+        }
+        .onDisappear { appState.reviewPrompt.setHomeVisible(false) }
+        .simultaneousGesture(DragGesture(minimumDistance: 0)
+            .onChanged { _ in appState.reviewPrompt.invalidate() }
+            .onEnded { _ in appState.reviewPrompt.invalidate() })
+    }
+}
+
+/// Ties presentation to this Home's actual window, including modal/scroll activity.
+private struct ReviewPresentationAnchor: UIViewRepresentable {
+    let attach: (UIView) -> Void
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        attach(view)
+        return view
+    }
+    func updateUIView(_ uiView: UIView, context: Context) { attach(uiView) }
+    static func hasPresentation(_ controller: UIViewController) -> Bool {
+        controller.presentedViewController != nil || controller.children.contains(where: hasPresentation)
+    }
+    static func isInteracting(_ view: UIView) -> Bool {
+        if let scroll = view as? UIScrollView,
+           scroll.isTracking || scroll.isDragging || scroll.isDecelerating { return true }
+        return view.subviews.contains(where: isInteracting)
     }
 }
 

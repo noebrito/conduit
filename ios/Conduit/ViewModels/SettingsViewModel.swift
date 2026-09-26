@@ -218,7 +218,9 @@ final class SettingsViewModel {
         importProgressText = isCancellingImport ? Self.cancellingText : Self.statusText(for: run)
     }
 
+    @MainActor
     func save() throws {
+        appState.reviewPrompt.suppressSession()
         let webhookDAO = WebhookConfigDAO(appState.database)
         if var existing = try webhookDAO.first() {
             existing.url = webhookURL
@@ -269,7 +271,9 @@ final class SettingsViewModel {
         }
     }
 
+    @MainActor
     func toggleType(_ typeID: String) {
+        appState.reviewPrompt.suppressSession()
         if enabledTypeIDs.contains(typeID) {
             enabledTypeIDs.remove(typeID)
         } else {
@@ -277,7 +281,10 @@ final class SettingsViewModel {
         }
     }
 
+    @MainActor
     func testConnection() async {
+        appState.reviewPrompt.beginSensitiveActivity()
+        defer { appState.reviewPrompt.endSensitiveActivity() }
         let token: String
         if !tokenInput.isEmpty {
             token = tokenInput
@@ -293,7 +300,9 @@ final class SettingsViewModel {
         isTesting = false
     }
 
+    @MainActor
     func buildExportJSON() {
+        appState.reviewPrompt.suppressSession()
         do {
             let webhookDAO = WebhookConfigDAO(appState.database)
             let typeDAO = DataTypeConfigDAO(appState.database)
@@ -442,6 +451,7 @@ final class SettingsViewModel {
     /// anchors.
     @MainActor
     func startImport() {
+        appState.reviewPrompt.suppressSession()
         guard !isImportBlocked else { return }
         importTask = Task { await self.runImport(resuming: false) }
     }
@@ -450,6 +460,7 @@ final class SettingsViewModel {
     /// instead of re-reading the range from the newest end.
     @MainActor
     func resumeImport() {
+        appState.reviewPrompt.suppressSession()
         guard canResumeImport else { return }
         importTask = Task { await self.runImport(resuming: true) }
     }
@@ -457,6 +468,7 @@ final class SettingsViewModel {
     /// Discard the persisted run so the next import starts fresh.
     @MainActor
     func discardImportRun() {
+        appState.reviewPrompt.suppressSession()
         guard !isImportBlocked else { return }
         importRunner.clear()
         importRun = nil
@@ -476,6 +488,7 @@ final class SettingsViewModel {
     /// `Task.cancel()` alone can't reach onboarding's detached import.
     @MainActor
     func cancelImport() {
+        appState.reviewPrompt.suppressSession()
         guard !isCancellingImport else { return }
         isCancellingImport = true
         importProgressText = Self.cancellingText
@@ -485,6 +498,7 @@ final class SettingsViewModel {
 
     @MainActor
     func runImport(resuming: Bool = false) async {
+        appState.reviewPrompt.suppressSession()
         guard !isImportBlocked else { return }
         isImporting = true
         isCancellingImport = false

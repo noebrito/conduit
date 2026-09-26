@@ -5,6 +5,7 @@ import SwiftUI
 /// iOS does not expose whether a user granted read access for a specific type;
 /// this screen is honest about that and provides actionable guidance.
 struct HKPermissionsDetailView: View {
+    @Environment(AppState.self) private var appState
     let viewModel: SettingsViewModel
     @Environment(\.openURL) private var openURL
 
@@ -84,6 +85,7 @@ struct HKPermissionsDetailView: View {
                 }
             }
         }
+        .onAppear { appState.reviewPrompt.suppressSession() }
         .navigationTitle("Health Permissions")
         .listStyle(.insetGrouped)
     }

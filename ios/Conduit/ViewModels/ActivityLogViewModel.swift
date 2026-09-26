@@ -15,13 +15,19 @@ final class ActivityLogViewModel {
     }
 
     private(set) var entries: [DeliveryLogEntry] = []
-    var filter: Filter = .all
+    private(set) var filter: Filter = .all
     private var observation: AnyDatabaseCancellable?
 
     private let appState: AppState
 
     init(appState: AppState) {
         self.appState = appState
+    }
+
+    @MainActor
+    func selectFilter(_ selected: Filter) {
+        filter = selected
+        if selected == .failed { appState.reviewPrompt.suppressSession() }
     }
 
     func start() {
@@ -52,7 +58,9 @@ final class ActivityLogViewModel {
         }
     }
 
+    @MainActor
     func retryBatch(_ entry: DeliveryLogEntry) async {
+        appState.reviewPrompt.suppressSession()
         do {
             try DeliveryLogDAO(appState.database).retryBatch(batchId: entry.batchId)
             await appState.syncEngine.flushNow()

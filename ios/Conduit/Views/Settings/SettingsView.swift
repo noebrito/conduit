@@ -208,6 +208,8 @@ private struct SettingsContent: View {
                 }
                 .accessibilityLabel("Open privacy policy in browser")
 
+                ReviewHelpLinks(onHelp: { appState.reviewPrompt.suppressSession() })
+
                 NavigationLink("Open Source Licenses") {
                     LicensesView()
                 }
@@ -222,13 +224,13 @@ private struct SettingsContent: View {
                 .accessibilityLabel("Export configuration as JSON")
                 .accessibilityHint("Share your Conduit configuration for backup or transfer")
 
-                Button(role: .destructive, action: { showResetSyncAlert = true }) {
+                Button(role: .destructive, action: { appState.reviewPrompt.suppressSession(); showResetSyncAlert = true }) {
                     Label("Reset Sync & Clear Queue", systemImage: "trash.circle")
                 }
                 .accessibilityLabel("Reset sync and clear pending queue")
                 .accessibilityHint("Deletes all pending uploads and resumes capturing only new data going forward")
 
-                Button(role: .destructive, action: { showResetAlert = true }) {
+                Button(role: .destructive, action: { appState.reviewPrompt.suppressSession(); showResetAlert = true }) {
                     Label("Reset & Re-run Onboarding", systemImage: "arrow.counterclockwise")
                 }
                 .accessibilityLabel("Reset onboarding")
@@ -236,6 +238,37 @@ private struct SettingsContent: View {
             }
         }
         .listStyle(.insetGrouped)
+        .onChange(of: [viewModel.webhookURL, viewModel.tokenInput,
+                       String(viewModel.minIntervalSeconds), String(viewModel.batchMaxSize),
+                       String(viewModel.forceFlushThreshold), String(viewModel.outboxCap)]) { _, _ in
+            appState.reviewPrompt.suppressSession()
+        }
+    }
+}
+
+/// Explicit destinations; manual review never calls discretionary requestReview.
+struct ReviewHelpLinks: View {
+    static let reviewURL = URL(string: "https://apps.apple.com/app/id6786544769?action=write-review")!
+    static let helpURL = URL(string: "https://github.com/noebrito/conduit/issues")!
+    @Environment(\.openURL) private var openURL
+    var onHelp: () -> Void
+
+    var body: some View {
+        Link(destination: Self.reviewURL) {
+            Label("Write an App Store Review", systemImage: "star")
+        }
+        Button {
+            onHelp()
+            openURL(Self.helpURL)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Help & Feedback", systemImage: "questionmark.circle")
+                Text("Opens public GitHub issues")
+                    .font(.caption)
+                    .foregroundStyle(Color.secondary)
+            }
+        }
+        .accessibilityHint("Opens the public Conduit issue tracker on GitHub. No data is attached.")
     }
 }
 
@@ -272,6 +305,7 @@ private struct DataTypesCategoryView: View {
 /// is paged and outbox-cap-bounded (see `SyncEngine.importHistory`) and never
 /// touches the live forward-capture anchors, so ongoing capture is unaffected.
 private struct ImportHistoryView: View {
+    @Environment(AppState.self) private var appState
     @Bindable var viewModel: SettingsViewModel
     @State private var showConfirm = false
     @Environment(\.scenePhase) private var scenePhase
@@ -382,6 +416,7 @@ private struct ImportHistoryView: View {
         // Status is read back out of the database, so an import interrupted by a
         // force-quit still reports "interrupted / resumable" after a relaunch.
         .onAppear {
+            appState.reviewPrompt.suppressSession()
             viewModel.loadImportState()
             viewModel.observeImportState()
             Task { await viewModel.loadHistoryAccessFloors() }

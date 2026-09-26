@@ -125,6 +125,7 @@ final class OnboardingViewModel {
 
     // MARK: - Completion
 
+    @MainActor
     func finishOnboarding() throws {
         // Save enabled types to data_type_config
         let typeDAO = DataTypeConfigDAO(appState.database)

@@ -35,6 +35,14 @@ final class ImportRunCoordinator: @unchecked Sendable {
     private let lock = NSLock()
     private var activeRunId: String?
     private var stopReason: ImportStopReason?
+    private var reviewRevision: UInt64 = 0
+
+    /// Detect even an import that started and ended between Home readiness reads.
+    var reviewActivity: (running: Bool, revision: UInt64) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (activeRunId != nil, reviewRevision)
+    }
 
     /// The run id a task in this process is currently driving, if any.
     var activeRun: String? {
@@ -65,6 +73,7 @@ final class ImportRunCoordinator: @unchecked Sendable {
         defer { lock.unlock() }
         guard activeRunId == nil else { return false }
         activeRunId = runId
+        reviewRevision &+= 1
         stopReason = nil
         return true
     }

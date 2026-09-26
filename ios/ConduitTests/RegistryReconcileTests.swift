@@ -111,6 +111,7 @@ final class RegistryReconcileTests: XCTestCase {
         var authorizeCalls = 0
         var lastRequested: [HealthDataType] = []
         let authorize: (_ types: [HealthDataType]) async throws -> Void = { types in
+            XCTAssertTrue(appState.reviewPrompt.sessionSuppressed, "Suppress before the upgrade permission request")
             authorizeCalls += 1
             lastRequested = types
         }

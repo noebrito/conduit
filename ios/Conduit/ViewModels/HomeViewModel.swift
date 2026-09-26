@@ -38,9 +38,14 @@ final class HomeViewModel {
         self.appState = appState
     }
 
+    @MainActor
     func syncNow() async {
+        appState.reviewPrompt.setManualSyncActive(true)
         isSyncing = true
-        defer { isSyncing = false }
+        defer {
+            isSyncing = false
+            appState.reviewPrompt.setManualSyncActive(false)
+        }
         // Everything this screen shows comes from `AppState.status`, which the
         // shared observation republishes the moment the flush writes — whether
         // the stamp lands synchronously (an empty-but-successful sync) or later
