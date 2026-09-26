@@ -37,7 +37,7 @@ private struct ActivityLogContent: View {
                         FilterChip(
                             label: f.rawValue,
                             isSelected: viewModel.filter == f,
-                            onTap: { viewModel.filter = f }
+                            onTap: { viewModel.selectFilter(f) }
                         )
                     }
                 }

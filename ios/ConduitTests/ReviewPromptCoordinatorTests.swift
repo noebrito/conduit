@@ -131,6 +131,26 @@ final class ReviewPromptCoordinatorTests: XCTestCase {
         XCTAssertEqual(h.requests, 1)
     }
 
+    func testFailedActivityFilterSuppressesReviewForForegroundSession() async throws {
+        let h = Harness()
+        let app = AppState(database: try AppDatabase.makeInMemory(), reloadTimelines: {})
+        app.reviewPrompt = h.coordinator
+        let activity = ActivityLogViewModel(appState: app)
+
+        h.show()
+        await h.coordinator.tick()
+        h.coordinator.setHomeVisible(false)
+        activity.selectFilter(.failed)
+        activity.selectFilter(.all)
+        h.coordinator.setHomeVisible(true)
+        h.advance(32)
+        await h.coordinator.tick()
+
+        XCTAssertTrue(h.coordinator.sessionSuppressed)
+        XCTAssertEqual(h.requests, 0)
+        XCTAssertNil(h.stored.lastAttemptAt)
+    }
+
     func testInactiveCancelsAndRequiresNewThirtySeconds() async {
         let h = Harness(); await h.startQuietPause()
         h.coordinator.sceneChanged(.inactive); h.coordinator.sceneChanged(.active)

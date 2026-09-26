@@ -15,13 +15,19 @@ final class ActivityLogViewModel {
     }
 
     private(set) var entries: [DeliveryLogEntry] = []
-    var filter: Filter = .all
+    private(set) var filter: Filter = .all
     private var observation: AnyDatabaseCancellable?
 
     private let appState: AppState
 
     init(appState: AppState) {
         self.appState = appState
+    }
+
+    @MainActor
+    func selectFilter(_ selected: Filter) {
+        filter = selected
+        if selected == .failed { appState.reviewPrompt.suppressSession() }
     }
 
     func start() {
