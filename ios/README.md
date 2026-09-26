@@ -133,8 +133,9 @@ number.
 Automatic reviews use SwiftUI's native `requestReview` on iOS 17+, owned by a
 single `AppState.reviewPrompt` coordinator. Eligibility starts prospectively at
 the first 10-second uninterrupted visit to settled, visible Home with a recent
-nonempty successful delivery. It requires three local Gregorian days (at least
-20 elapsed hours apart) and 14 elapsed days of tenure. After 30 continuous
+nonempty successful delivery. Each counted visit needs a delivery newer than the
+previous counted delivery. It requires three local Gregorian days (at least 20
+elapsed hours apart) and 14 elapsed days of tenure. After 30 continuous
 foreground seconds, a cancellable two-second pause and a fresh readiness read
 precede the request. Setup, permission, configuration, import and troubleshooting
 sessions are suppressed until a true background/foreground transition. These
@@ -161,4 +162,5 @@ and `ReviewLinkTests` exercise the policy, persistence, injected lifecycle and
 transactional evidence. `ReviewSettingsEvidenceTests` captures Settings from an
 empty fixture in a real simulator window when `TEST_RUNNER_CONDUIT_EVIDENCE_DIR`
 is passed to `xcodebuild test`; point it outside the repository. This is a rendering
-check, not an App Store submission or physical-device HealthKit check.
+check; physical-device StoreKit presentation and end-to-end link opening remain
+unverified.
