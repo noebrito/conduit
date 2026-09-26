@@ -23,6 +23,22 @@ final class AppState {
         }
     }()
 
+    @ObservationIgnored
+    @MainActor lazy var reviewPrompt: ReviewPromptCoordinator = {
+        let store = ReviewPreferencesStore(defaults: .standard)
+        let database = self.database
+        return ReviewPromptCoordinator(load: store.load, save: store.save,
+            importActivity: { ImportRunCoordinator.shared.reviewActivity },
+            read: {
+                try await Task.detached(priority: .utility) {
+                    let hasToken = !(KeychainStore.shared.webhookBearerToken ?? "").isEmpty
+                    return try database.dbWriter.read { db in
+                        try ReviewReadiness.fetch(db, now: Date(), hasToken: hasToken)
+                    }
+                }.value
+            })
+    }()
+
     let database: AppDatabase
     let keychain: KeychainStore = .shared
     /// Shared HealthKit handle used by both the sync engine (reads) and the
@@ -195,6 +211,7 @@ final class AppState {
             in: database.dbWriter,
             onError: { [weak self] error in
                 logger.error("Status snapshot observation error: \(error.localizedDescription, privacy: .public)")
+                MainActor.assumeIsolated { self?.reviewPrompt.invalidate() }
                 self?.scheduleStatusSnapshotObservationRestart()
             },
             onChange: { [weak self] value in
@@ -202,6 +219,7 @@ final class AppState {
                 let (home, importHeadline, countsAreFresh) = value
                 self.statusObservationFailures = 0
                 self.status = home
+                MainActor.assumeIsolated { self.reviewPrompt.invalidate() }
                 guard countsAreFresh else { return }
                 let snapshot = AppState.widgetSnapshot(from: home, importHeadline: importHeadline)
                 let isForeground = self.statusFetchState.withLock { $0.isForeground }
@@ -606,6 +624,8 @@ final class AppState {
         }
         guard !enabledTypes.isEmpty else { return }
 
+        reviewPrompt.beginSensitiveActivity()
+        defer { reviewPrompt.endSensitiveActivity() }
         do {
             try await authorize(enabledTypes)
             // Persist only after a successful request so a failure retries next launch.
@@ -632,12 +652,16 @@ final class AppState {
         }
     }
 
+    @MainActor
     func completeOnboarding() {
+        reviewPrompt.suppressSession()
         UserDefaults.standard.set(true, forKey: "conduit.onboardingComplete")
         isOnboardingComplete = true
     }
 
+    @MainActor
     func resetOnboarding() {
+        reviewPrompt.suppressSession()
         stopDataCapture()
         UserDefaults.standard.set(false, forKey: "conduit.onboardingComplete")
         isOnboardingComplete = false
@@ -657,7 +681,9 @@ final class AppState {
     /// 3. Purge the outbox and clear all anchors + capture floors (off the main
     ///    thread — an affected device has millions of rows to delete).
     /// 4. Restart capture — anchors are nil, so each type re-seeds to "now".
+    @MainActor
     func resetSyncQueue() {
+        reviewPrompt.suppressSession()
         stopDataCapture()
         // Reset any inflight rows whose background task is gone; deleteAll below
         // removes every row regardless, but this keeps the session consistent.

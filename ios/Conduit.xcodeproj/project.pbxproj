@@ -98,6 +98,13 @@
 		CD000000000000000000B013 /* ConduitStatusSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000B006 /* ConduitStatusSnapshot.swift */; };
 		CD000000000000000000B014 /* ConduitStatusSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000B007 /* ConduitStatusSnapshotTests.swift */; };
 		CD000000000000000000B015 /* ConduitWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CD000000000000000000B001 /* ConduitWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeaderOnCopy, ); }; };
+		CE0000000000000000000B001 /* ReviewEligibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000B000 /* ReviewEligibility.swift */; };
+		CE0000000000000000000B011 /* ReviewReadiness.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000B010 /* ReviewReadiness.swift */; };
+		CE0000000000000000000B021 /* ReviewPromptCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000B020 /* ReviewPromptCoordinator.swift */; };
+		CE0000000000000000000B031 /* ReviewEligibilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000B030 /* ReviewEligibilityTests.swift */; };
+		CE0000000000000000000B041 /* ReviewPromptCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000B040 /* ReviewPromptCoordinatorTests.swift */; };
+		CE0000000000000000000B051 /* ReviewReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000B050 /* ReviewReadinessTests.swift */; };
+		CE0000000000000000000B061 /* ReviewSettingsEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000B060 /* ReviewSettingsEvidenceTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -223,6 +230,13 @@
 		CD000000000000000000B005 /* ConduitWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ConduitWidgets.entitlements; sourceTree = "<group>"; };
 		CD000000000000000000B006 /* ConduitStatusSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConduitStatusSnapshot.swift; sourceTree = "<group>"; };
 		CD000000000000000000B007 /* ConduitStatusSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConduitStatusSnapshotTests.swift; sourceTree = "<group>"; };
+		CE0000000000000000000B000 /* ReviewEligibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewEligibility.swift; sourceTree = "<group>"; };
+		CE0000000000000000000B010 /* ReviewReadiness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewReadiness.swift; sourceTree = "<group>"; };
+		CE0000000000000000000B020 /* ReviewPromptCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewPromptCoordinator.swift; sourceTree = "<group>"; };
+		CE0000000000000000000B030 /* ReviewEligibilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ReviewEligibilityTests.swift"; sourceTree = "<group>"; };
+		CE0000000000000000000B040 /* ReviewPromptCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ReviewPromptCoordinatorTests.swift"; sourceTree = "<group>"; };
+		CE0000000000000000000B050 /* ReviewReadinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ReviewReadinessTests.swift"; sourceTree = "<group>"; };
+		CE0000000000000000000B060 /* ReviewSettingsEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSettingsEvidenceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -360,6 +374,7 @@
 				CD0000000000000000000009 /* Security */,
 				CD0000000000000000000180 /* Sync */,
 				CD0000000000000000000181 /* Networking */,
+				CE0000000000000000000B100 /* Review */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -486,6 +501,10 @@
 			isa = PBXGroup;
 			children = (
 				CD000000000000000000010E /* ConduitTests.swift */,
+				CE0000000000000000000B060 /* ReviewSettingsEvidenceTests.swift */,
+				CE0000000000000000000B050 /* ReviewReadinessTests.swift */,
+				CE0000000000000000000B040 /* ReviewPromptCoordinatorTests.swift */,
+				CE0000000000000000000B030 /* ReviewEligibilityTests.swift */,
 				CD0000000000000000000150 /* HealthTypeRegistryTests.swift */,
 				CD00000000000000000001E0 /* HealthKitAuthorizerTests.swift */,
 				CD0000000000000000000152 /* DatabaseMigrationTests.swift */,
@@ -518,6 +537,16 @@
 				CD000000000000000000B007 /* ConduitStatusSnapshotTests.swift */,
 			);
 			path = ConduitTests;
+			sourceTree = "<group>";
+		};
+		CE0000000000000000000B100 /* Review */ = {
+			isa = PBXGroup;
+			children = (
+				CE0000000000000000000B000 /* ReviewEligibility.swift */,
+				CE0000000000000000000B010 /* ReviewReadiness.swift */,
+				CE0000000000000000000B020 /* ReviewPromptCoordinator.swift */,
+			);
+			path = Review;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -658,6 +687,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				CD0000000000000000000101 /* ConduitApp.swift in Sources */,
+				CE0000000000000000000B021 /* ReviewPromptCoordinator.swift in Sources */,
+				CE0000000000000000000B011 /* ReviewReadiness.swift in Sources */,
+				CE0000000000000000000B001 /* ReviewEligibility.swift in Sources */,
 				CD0000000000000000000103 /* AppDelegate.swift in Sources */,
 				CD0000000000000000000107 /* HomeView.swift in Sources */,
 				CD0000000000000000000109 /* KeychainStore.swift in Sources */,
@@ -715,6 +747,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				CD000000000000000000010F /* ConduitTests.swift in Sources */,
+				CE0000000000000000000B061 /* ReviewSettingsEvidenceTests.swift in Sources */,
+				CE0000000000000000000B051 /* ReviewReadinessTests.swift in Sources */,
+				CE0000000000000000000B041 /* ReviewPromptCoordinatorTests.swift in Sources */,
+				CE0000000000000000000B031 /* ReviewEligibilityTests.swift in Sources */,
 				CD0000000000000000000151 /* HealthTypeRegistryTests.swift in Sources */,
 				CD00000000000000000001E1 /* HealthKitAuthorizerTests.swift in Sources */,
 				CD0000000000000000000153 /* DatabaseMigrationTests.swift in Sources */,

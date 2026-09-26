@@ -127,3 +127,38 @@ command line. The bundle identifier is `dev.noebrito.Conduit`.
 `ci_scripts/ci_post_clone.sh` stamps `CURRENT_PROJECT_VERSION` with the Xcode
 Cloud build number so each TestFlight upload has a unique, increasing build
 number.
+
+## App Store reviews
+
+Automatic reviews use SwiftUI's native `requestReview` on iOS 17+, owned by a
+single `AppState.reviewPrompt` coordinator. Eligibility starts prospectively at
+the first 10-second uninterrupted visit to settled, visible Home with a recent
+nonempty successful delivery. It requires three local Gregorian days (at least
+20 elapsed hours apart) and 14 elapsed days of tenure. After 30 continuous
+foreground seconds, a cancellable two-second pause and a fresh readiness read
+precede the request. Setup, permission, configuration, import and troubleshooting
+sessions are suppressed until a true background/foreground transition. These
+intervals are product defaults, not Apple requirements or measured optima.
+
+One local UserDefaults record holds the bounded current-cycle day keys, delivery
+watermark, and attempt/version history; onboarding, configuration and queue resets
+do not clear it. Attempts require 180 elapsed days, three new qualifying days and
+an unrequested marketing version thereafter. The coordinator persists an attempt
+before calling StoreKit, including when StoreKit silently declines to display it;
+there is no displayed/submitted/rating callback, inferred outcome, analytics or
+Keychain review identity. Clock anomalies, corrupt state and missing versions
+defer requests. A clock change across a terminated process cannot be independently
+verified without an external time source; future stored timestamps still defer.
+
+Settings → About always offers the explicit App Store write-review link and a
+clearly identified public GitHub Help & Feedback link, with no automatic data
+attachments. See Apple's [RequestReviewAction documentation](https://developer.apple.com/documentation/storekit/requestreviewaction):
+development rendering and TestFlight behavior do not establish production prompt
+display or review submission.
+
+`ReviewEligibilityTests`, `ReviewPromptCoordinatorTests`, `ReviewReadinessTests`
+and `ReviewLinkTests` exercise the policy, persistence, injected lifecycle and
+transactional evidence. `ReviewSettingsEvidenceTests` captures Settings from an
+empty fixture in a real simulator window when `TEST_RUNNER_CONDUIT_EVIDENCE_DIR`
+is passed to `xcodebuild test`; point it outside the repository. This is a rendering
+check, not an App Store submission or physical-device HealthKit check.

@@ -52,7 +52,9 @@ final class ActivityLogViewModel {
         }
     }
 
+    @MainActor
     func retryBatch(_ entry: DeliveryLogEntry) async {
+        appState.reviewPrompt.suppressSession()
         do {
             try DeliveryLogDAO(appState.database).retryBatch(batchId: entry.batchId)
             await appState.syncEngine.flushNow()
