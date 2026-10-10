@@ -24,6 +24,9 @@ struct OutboxDAO {
     ///
     /// Uses `INSERT OR IGNORE` on `hk_sample_uuid`; returns `true` if a new row
     /// was inserted, `false` if it was a duplicate that was ignored.
+    /// Dedupe covers rows still in the outbox: `Uploader.commitSent` removes
+    /// delivered rows. Receiver replay requirements live in
+    /// `docs/webhook/HTTP_CONTRACT.md` (Idempotency).
     ///
     /// When a *new* row is inserted this also bumps the persisted
     /// `staged_daily_count` tally for `createdAt`'s local day, in the SAME
@@ -41,6 +44,11 @@ struct OutboxDAO {
     /// by-1. The increment stays inside the same transaction, preserving the
     /// no-drift invariant. The convenience single-sample `enqueue` keeps
     /// `bumpTally: true`.
+    ///
+    /// Workout heart-rate statistics are filtered against the current Heart Rate
+    /// toggle in this transaction, before serialization. Settings can change while
+    /// a HealthKit read suspends, so read-time filtering alone cannot enforce the
+    /// opt-out. A missing toggle retains the registry's default-on convention.
     @discardableResult
     static func enqueue(
         _ db: Database,
@@ -250,14 +258,11 @@ struct OutboxDAO {
 
     // MARK: - Import staging (enqueue-only, forward anchor untouched)
 
-    /// Enqueue a page of samples from an **explicit historical import** WITHOUT
-    /// advancing any HealthKit anchor (ARCHITECTURE.md §4.4, "Import history"
-    /// opt-in). This is the deliberate sibling to `ingest(...)`: the live
+    /// Enqueue samples for historical import or workout-route capture WITHOUT
+    /// advancing any HealthKit anchor. This is the sibling to `ingest(...)`: the live
     /// forward-capture anchor in `data_type_config` is left completely untouched,
-    /// so importing history never rewinds ongoing incremental capture. UUID
-    /// dedupe (`INSERT OR IGNORE`) means samples the forward stream already
-    /// staged are silently skipped, so the import and the live stream can't
-    /// double-stage the same sample.
+    /// so importing history never rewinds ongoing incremental capture.
+    /// Deduplication follows `enqueue`'s contract.
     ///
     /// `cap` enforces the same outbox back-pressure guard as `ingest`: once the
     /// outbox is at/over `cap`, staging stops and `hitCap` is `true` so the
@@ -405,6 +410,9 @@ struct OutboxDAO {
         }
     }
 
+    /// Release a batch rejected before submission, preserving its retry metadata.
+    /// Once `Uploader.upload` is called, its failure transitions own the rows and
+    /// must not be rolled back here.
     func releaseUnsubmittedBatch(batchID: String) throws {
         try database.dbWriter.write { db in
             try db.execute(

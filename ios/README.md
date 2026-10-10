@@ -23,7 +23,7 @@ ios/
 ├── Conduit/
 │   ├── App/             ConduitApp, AppDelegate, AppState (shared observable
 │   │                    singleton: database, sync engine, onboarding flag),
-│   │                    entitlements
+│   │                    SyncHealthIntent (Shortcuts), entitlements
 │   ├── Models/
 │   │   ├── Generated/   protoc output (sync.pb.swift — regenerate with
 │   │   │                scripts/generate-swift-proto.sh)
@@ -34,7 +34,7 @@ ios/
 │   │   │                ObserverCoordinator, AnchoredReader,
 │   │   │                WorkoutRouteReader (GPS routes),
 │   │   │                HistoryAccessProbe (iOS 27 limited-history floors)
-│   │   ├── Sync/        SyncEngine, Throttle, Batcher
+│   │   ├── Sync/        SyncEngine, ShortcutSync, Throttle, Batcher
 │   │   ├── Networking/  Uploader, BackgroundSession, BackoffPolicy,
 │   │   │                WebhookTester (foreground Test Connection probe)
 │   │   ├── Storage/     Database (GRDB) + DAOs, incl. DeliveryLogDAO
@@ -203,13 +203,14 @@ while locked: unlock the iPhone and retry. A lock during capture is reported as
 partial progress, preserving data already queued. An empty HealthKit read does
 not prove that no samples exist or that read permission was granted.
 
-Each run captures one incremental page (up to 200 objects) per enabled type,
-with atomic enqueue/anchor update. Types without a valid forward anchor are
-skipped and reported as not yet initialized; open Conduit to initialize them
-through its normal start-of-today capture before retrying the action.
-Routes use a deduplicated scan of up to 10 recent workouts. Capture stops between
-reads/workouts on cancellation or after a 20-second cooperative budget; an
-in-progress HealthKit query can exceed that budget. Outbox capacity still applies.
+For enabled types other than GPS routes, each run captures one incremental page
+(up to 200 objects), with atomic enqueue/anchor update. Those without a valid
+forward anchor are skipped and reported as not yet initialized; open Conduit to
+initialize them through its normal start-of-today capture before retrying the action.
+GPS routes scan up to 10 recent workouts per run and do not require an anchor.
+Capture stops between reads/workouts on cancellation or after a 20-second
+cooperative budget; an in-progress HealthKit query can exceed that budget.
+Outbox capacity still applies.
 More data may remain; the existing observer/import paths continue normally.
 
 The result distinguishes samples captured, new samples queued, deletions

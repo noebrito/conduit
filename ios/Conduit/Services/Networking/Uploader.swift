@@ -96,6 +96,8 @@ final class Uploader: NSObject {
 
     /// Enqueue a batch for background upload. The task's `taskDescription` carries
     /// the `batchID` so the delegate can look up the affected rows on completion.
+    /// - Returns: Whether a background task was started. Receiver acceptance is
+    ///   reported asynchronously through the delivery log.
     @discardableResult
     func upload(batch: Batcher.BatchResult, webhookURL: String, bearerToken: String) -> Bool {
         guard let url = URL(string: webhookURL) else {
@@ -126,8 +128,6 @@ final class Uploader: NSObject {
         let task = session.uploadTask(with: request, fromFile: tmpURL)
         task.taskDescription = batch.batchID
         task.resume()
-        // Submission is not receiver acceptance.
-
         logger.info("Enqueued upload task for batch \(batch.batchID, privacy: .public) (\(batch.rowIDs.count) rows)")
         return true
     }

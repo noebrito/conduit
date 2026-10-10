@@ -15,17 +15,16 @@ struct DataTypeConfig: Codable, Identifiable, Equatable, FetchableRecord, Persis
     var enabled: Bool
     /// Optional per-type override of the webhook's `minIntervalSeconds`.
     var minIntervalSeconds: Int?
-    /// Archived `HKQueryAnchor` (NSKeyedArchiver). Nil means "read from the start".
+    /// Archived `HKQueryAnchor` (NSKeyedArchiver). See `SyncEngine.handleObserverWake`
+    /// for initialization when nil.
     var anchorBlob: Data?
     /// Last time a read for this type completed successfully.
     var lastSyncAt: Date?
     /// Last time a read was attempted (success or failure).
     var lastAttemptAt: Date?
-    /// The forward-only capture floor: the point in time from which this type
-    /// started capturing. Set once, on the very first (anchor-less) read, and
-    /// used as the `withStart:` predicate so first-run capture skips existing
-    /// history and only stages samples created at/after setup (ARCHITECTURE.md
-    /// §4.4, forward-only default). Nil until the first read seeds it.
+    /// Persisted lower bound for an anchor-less read; nil until first seeded.
+    /// Seeding semantics live in `SyncEngine.forwardCaptureFloor`, and reuse
+    /// lives in `SyncEngine.handleObserverWake`.
     var captureStartedAt: Date? = nil
 
     var id: String { hkTypeId }

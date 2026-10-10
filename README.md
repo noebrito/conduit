@@ -47,6 +47,8 @@ The full Xcode project, Swift sources, tests, and release tooling live under
 
 See [`ios/README.md`](ios/README.md) for build, test, and layout notes, plus
 [recovery data and upgrade defaults](ios/README.md#supported-recovery-data).
+For syncing from Apple's Shortcuts app, see
+[Sync Health Data](ios/README.md#shortcuts--sync-health-data).
 
 ## Releasing
 

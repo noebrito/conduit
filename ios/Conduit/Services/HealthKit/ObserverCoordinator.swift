@@ -77,12 +77,9 @@ final class ObserverCoordinator {
             // Initial read. An HKObserverQuery is not guaranteed to fire for
             // samples that already exist when it is registered, so perform an
             // explicit anchored read now. `handleObserverWake` reads from the
-            // persisted anchor and enqueues atomically. On the very first run the
-            // anchor is nil, so the read is **forward-only**: it seeds a capture
-            // floor of "now" and stages only samples created at/after setup — no
-            // historical backfill (ARCHITECTURE.md §4.4). Idempotent: the stored
-            // anchor advances and `OutboxDAO` dedupes on sample UUID, so
-            // re-starting the observers never duplicates rows or re-seeds.
+            // persisted anchor and enqueues atomically. It owns forward-only
+            // initialization and relaunch behavior; the initial date floor is
+            // defined by `SyncEngine.forwardCaptureFloor`.
             Task { [weak self] in
                 await self?.syncEngine.handleObserverWake(typeIdentifier: identifier)
             }

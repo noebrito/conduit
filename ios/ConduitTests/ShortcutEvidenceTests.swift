@@ -1,11 +1,83 @@
 import XCTest
 import SwiftUI
 import AppIntents
+import HealthKit
 @testable import Conduit
 
-/// Simulator-rendered result fixtures, not screenshots of Siri or Shortcuts UI.
+/// Loopback upload evidence and simulator-rendered result fixtures. The rendered
+/// fixtures are not screenshots of Siri or Shortcuts UI.
 @MainActor
 final class ShortcutEvidenceTests: XCTestCase {
+    /// Opt-in integration check with a loopback receiver. HealthKit's page is
+    /// injected; configuration, staging, batching, background upload and the
+    /// persisted delivery result use the production path.
+    func testEnabledTypeSyncReachesExistingDestination() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        try XCTSkipUnless(environment["CONDUIT_EVIDENCE_DIR"] != nil && environment["CONDUIT_TEST_WEBHOOK_URL"] != nil)
+        let endpoint = try XCTUnwrap(environment["CONDUIT_TEST_WEBHOOK_URL"])
+        guard URL(string: endpoint)?.host == "127.0.0.1" else {
+            XCTFail("Evidence must stay on the local test receiver")
+            return
+        }
+        let database = try AppDatabase.makeInMemory()
+        var destination = WebhookConfig.makeDefault(url: endpoint, bearerTokenKeychainRef: "test-only")
+        try WebhookConfigDAO(database).save(&destination)
+        let storedDestination = try XCTUnwrap(WebhookConfigDAO(database).first())
+        let initialAnchor = try AnchoredReader.archiveAnchor(HKQueryAnchor(fromValue: 1))
+        let nextAnchor = HKQueryAnchor(fromValue: 2)
+        for (type, enabled) in [(HealthDataType.stepCount, true), (.heartRate, false)] {
+            try DataTypeConfigDAO(database).upsert(DataTypeConfig(hkTypeId: type.identifier, enabled: enabled,
+                minIntervalSeconds: nil, anchorBlob: initialAnchor, lastSyncAt: nil, lastAttemptAt: nil))
+        }
+        let now = Date()
+        let healthSample = HKQuantitySample(type: HKQuantityType(.stepCount),
+            quantity: HKQuantity(unit: .count(), doubleValue: 42), start: now, end: now)
+        let sample = try XCTUnwrap(AnchoredReader.makeSample(from: healthSample, type: .stepCount))
+        let uploader = Uploader.shared
+        let previousDatabase = uploader.database
+        let previousCallback = uploader.onDeliveryCommitted
+        uploader.database = database
+        uploader.onDeliveryCommitted = nil
+        defer {
+            uploader.database = previousDatabase
+            uploader.onDeliveryCommitted = previousCallback
+        }
+        var reads: [String] = []
+        let engine = SyncEngine(database: database, readAnchored: { type, anchor, since, limit, _ in
+            reads.append(type.identifier)
+            XCTAssertEqual(type.identifier, HealthDataType.stepCount.identifier)
+            XCTAssertNotNil(anchor)
+            XCTAssertNil(since)
+            XCTAssertEqual(limit, ShortcutSync.pageSize)
+            return AnchoredReader.Result(samples: [sample], deletedUuids: [], newAnchor: nextAnchor)
+        }, bearerToken: { "shortcut-evidence-token" })
+        let message = await SyncHealthIntent.execute(protectedDataAvailable: true,
+            isConfigured: { true }, sync: { await engine.syncFromShortcut() })
+        XCTAssertEqual(reads, [HealthDataType.stepCount.identifier])
+        XCTAssertTrue(message.contains("Captured 1 samples; queued 1 new samples"))
+        XCTAssertTrue(message.contains("Submitted 1 queued items"))
+        XCTAssertTrue(message.contains("not awaited or confirmed"))
+        XCTAssertEqual(try WebhookConfigDAO(database).first(), storedDestination)
+        XCTAssertEqual(try DataTypeConfigDAO(database).find(hkTypeId: HealthDataType.heartRate.identifier)?.enabled, false)
+        XCTAssertEqual(try DataTypeConfigDAO(database).find(hkTypeId: HealthDataType.stepCount.identifier)?.anchorBlob,
+            try AnchoredReader.archiveAnchor(nextAnchor))
+        let deadline = Date().addingTimeInterval(20)
+        while try DeliveryLogDAO(database).latest() == nil && Date() < deadline {
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        let delivery = try XCTUnwrap(DeliveryLogDAO(database).latest(), "Background upload did not complete")
+        XCTAssertEqual(delivery.httpStatus, 200)
+        XCTAssertEqual(delivery.sampleCount, 1)
+        XCTAssertEqual(delivery.accepted, 1)
+        XCTAssertTrue(delivery.isSuccess, delivery.errorMessage ?? "Upload failed")
+        XCTAssertEqual(try OutboxDAO(database).totalCount(), 0)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        try writeArtifact(encoder.encode(delivery), named: "shortcut-delivery-log.json")
+        try writeArtifact(Data(message.utf8), named: "shortcut-upload-result.txt")
+    }
+
     func testActionResultStates() async throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["CONDUIT_EVIDENCE_DIR"] != nil)
         let completed = await ShortcutSync.run(identifiers: ["enabled"], shouldStop: { false },

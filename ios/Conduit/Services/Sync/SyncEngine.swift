@@ -25,13 +25,12 @@ actor SyncEngine {
     private let keychain: KeychainStore
     private let logger = Logger(subsystem: "dev.noebrito.Conduit", category: "SyncEngine")
 
-    /// Workouts whose route we have already staged this session, so the recent-
-    /// workout re-scan doesn't re-run the two-step read for a route we've already
-    /// got. Deliberately memoizes ONLY definitive captures: a workout that had no
-    /// route is re-attempted on the next wake, which is exactly how a route Apple
-    /// finalizes *after* its workout gets picked up. In-memory by design — losing
-    /// it on relaunch costs one cheap re-scan, and UUID dedupe makes a redundant
-    /// capture a no-op, so it never needs to be durable.
+    /// Workouts with a nonempty route set fully staged in this process. Observer
+    /// and Shortcuts capture share the memo; no-route and cap-limited reads remain
+    /// retryable so late-finalized or partially staged routes can be picked up.
+    /// In-memory by design: relaunch may repeat capture of delivered routes.
+    /// See `OutboxDAO.enqueue` for queue dedupe scope and
+    /// `docs/webhook/HTTP_CONTRACT.md` for receiver replay requirements.
     private var workoutsWithCapturedRoute: Set<String> = []
 
     /// BGAppRefreshTask identifier for the background catch-up flush. MUST match
@@ -213,18 +212,11 @@ actor SyncEngine {
 
     // MARK: - Workout heart-rate privacy gate
 
-    /// Whether a workout read may carry `avg/max/min_heart_rate_bpm`, resolved
-    /// from the user's own Heart Rate data-type toggle — the same per-type
-    /// lookup `captureRecentRoutes` uses for its own route toggle. Turning Heart
-    /// Rate off suppresses these fields even when Workouts stays on, so the
-    /// enrichment never contradicts a promise the app's own toggle already made.
-    /// No row for Heart Rate yet (e.g. before `enableNewlyRegisteredTypes` has
-    /// run) defaults to included, matching Heart Rate's own default-on registry
-    /// convention — this only ever narrows on an explicit opt-out.
+    /// Resolve the read-time Heart Rate toggle for workout enrichment.
+    /// The authoritative staging check is in `OutboxDAO.enqueue`, because
+    /// Settings can change while a HealthKit read suspends.
     ///
-    /// Internal (not `private`) so `AnchoredReaderTests` can verify this gate
-    /// directly — the DB-driven decision, not just its shape, is what actually
-    /// makes the privacy promise true.
+    /// Internal so `AnchoredReaderTests` can verify the read-time DB lookup.
     func includeHeartRateStatisticsForWorkouts() throws -> Bool {
         try dataTypeConfigDAO.find(hkTypeId: HealthDataType.heartRate.identifier)?.enabled ?? true
     }
@@ -245,11 +237,8 @@ actor SyncEngine {
     /// therefore picked up on wake N+1 (workouts wake often, and the
     /// `BGAppRefreshTask` fallback drives it too).
     ///
-    /// The re-scan is cheap and safe to repeat because nothing about it is
-    /// stateful: the outbox's `hk_sample_uuid` UNIQUE + `INSERT OR IGNORE` means a
-    /// re-read route is silently ignored rather than double-staged. Workouts with
-    /// no route (treadmill, strength, GPS off) are the common case — they capture
-    /// nothing and are re-attempted next wake, which costs one bounded query.
+    /// Shared capture/deduplication invariants live with `workoutsWithCapturedRoute`
+    /// and `stageCapturedRoutes`, which Shortcuts also uses.
     ///
     /// Routes never advance a HealthKit anchor: capture is driven by the workout
     /// and made idempotent by dedupe, so there is no anchor to keep. That's why
@@ -344,9 +333,8 @@ actor SyncEngine {
     /// - **The forward anchor is never touched.** The read walks a local date
     ///   cursor (`before: nil` on the first page) and results are staged via
     ///   `OutboxDAO.stageImport`, which does not advance `data_type_config`'s
-    ///   anchor. Ongoing incremental capture is therefore unaffected, and UUID
-    ///   dedupe prevents any overlap between the import and the live stream from
-    ///   double-staging.
+    ///   anchor. Ongoing incremental capture is therefore unaffected;
+    ///   deduplication follows `OutboxDAO.enqueue`'s contract.
     /// - **Newest-first, and self-resuming past the cap.** The read is paged
     ///   `endDate`-descending (`AnchoredReader.readImportPage`) so recent days
     ///   stage/upload first, and when a page hits `outboxCap` the loop drains the
@@ -520,10 +508,9 @@ actor SyncEngine {
                     cap: webhook.outboxCap
                 )
                 if result.hitCap {
-                    // Wait for uploads to free room, then re-stage this same
-                    // workout — dedupe skips whatever already landed, so the
-                    // retry can't duplicate. A queue that never drains means a
-                    // stuck upload, and we stop rather than spin.
+                    // Wait for room, then retry this workout under the replay
+                    // contract documented at `OutboxDAO.enqueue`. Stop if the
+                    // queue never drains rather than spin.
                     guard await drainBelowCap(
                         webhook: webhook,
                         webhookID: webhookID,
@@ -603,8 +590,9 @@ actor SyncEngine {
         }
     }
 
-    /// Reuses the live anchors and atomic ingest, with one page per enabled type.
-    /// Routes have no anchor: scan a bounded recent workout page and dedupe.
+    /// A bounded read must never establish a type's initial forward anchor:
+    /// later anchored reads drop the date floor and could upload pre-existing
+    /// backdated records. Initialization stays on the normal observer path.
     func syncFromShortcut() async -> String {
         guard !shortcutIsRunning else { return "A Shortcuts sync is already running. Try again after it finishes." }
         shortcutIsRunning = true
@@ -758,6 +746,10 @@ actor SyncEngine {
 
     // MARK: - Private
 
+    /// Capture destination and token together on MainActor, then revalidate both
+    /// there immediately before submission, without an intervening await.
+    /// Settings saves on that actor; mixing snapshots can disclose a new token
+    /// to the old endpoint.
     @discardableResult
     private func flush() async throws -> Int {
         let destinationDAO = webhookConfigDAO

@@ -107,9 +107,9 @@
 		CE0000000000000000000B051 /* ReviewReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000B050 /* ReviewReadinessTests.swift */; };
 		CE0000000000000000000B061 /* ReviewSettingsEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000B060 /* ReviewSettingsEvidenceTests.swift */; };
 		CD000000000000000000C002 /* SyncHealthIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000C001 /* SyncHealthIntent.swift */; };
-				CD000000000000000000C012 /* ShortcutSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000C011 /* ShortcutSync.swift */; };
-				CD000000000000000000C022 /* ShortcutSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000C021 /* ShortcutSyncTests.swift */; };
-				CD000000000000000000C032 /* ShortcutEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000C031 /* ShortcutEvidenceTests.swift */; };
+		CD000000000000000000C012 /* ShortcutSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000C011 /* ShortcutSync.swift */; };
+		CD000000000000000000C022 /* ShortcutSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000C021 /* ShortcutSyncTests.swift */; };
+		CD000000000000000000C032 /* ShortcutEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000C031 /* ShortcutEvidenceTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -244,9 +244,9 @@
 		CE0000000000000000000B050 /* ReviewReadinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ReviewReadinessTests.swift"; sourceTree = "<group>"; };
 		CE0000000000000000000B060 /* ReviewSettingsEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSettingsEvidenceTests.swift; sourceTree = "<group>"; };
 		CD000000000000000000C001 /* SyncHealthIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncHealthIntent.swift; sourceTree = "<group>"; };
-				CD000000000000000000C011 /* ShortcutSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutSync.swift; sourceTree = "<group>"; };
-				CD000000000000000000C021 /* ShortcutSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutSyncTests.swift; sourceTree = "<group>"; };
-				CD000000000000000000C031 /* ShortcutEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutEvidenceTests.swift; sourceTree = "<group>"; };
+		CD000000000000000000C011 /* ShortcutSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutSync.swift; sourceTree = "<group>"; };
+		CD000000000000000000C021 /* ShortcutSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutSyncTests.swift; sourceTree = "<group>"; };
+		CD000000000000000000C031 /* ShortcutEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutEvidenceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
