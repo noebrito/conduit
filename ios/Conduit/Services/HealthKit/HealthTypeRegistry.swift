@@ -1,7 +1,7 @@
 import Foundation
 import HealthKit
 
-/// The OpenSearch data stream a type's samples are routed to (ARCHITECTURE.md §3).
+/// The OpenSearch data stream a type's samples are routed to.
 /// Streams are grouped by value *shape*, not by HK type, so new HK types add no
 /// schema work.
 enum HealthStream: String, Codable, CaseIterable, Sendable {
@@ -16,7 +16,7 @@ enum HealthStream: String, Codable, CaseIterable, Sendable {
     case route
 }
 
-/// UI grouping for the Data Types picker (ARCHITECTURE.md §7).
+/// UI grouping for the Data Types picker.
 enum HealthCategory: String, Codable, CaseIterable, Sendable {
     case activityFitness = "Activity & Fitness"
     case bodyMeasurements = "Body Measurements"
@@ -106,8 +106,8 @@ struct HealthDataType: Identifiable, Hashable, Sendable {
     }
 }
 
-/// Static registry of the supported data types. `docs/ARCHITECTURE.md` §7 is the
-/// authoritative list and count — the v1 types plus every group added since.
+/// Static registry of the supported data types. `ios/README.md` documents the
+/// supported recovery types and their recording requirements.
 ///
 /// Adding a type post-v1 is a single entry here (+ optionally an ingester
 /// correlation flattener) — no schema change.
@@ -147,13 +147,17 @@ struct HealthTypeRegistry: Sendable {
     }
 }
 
-// MARK: - The v1 type table
+// MARK: - Supported type table
 
 extension HealthDataType {
     // Activity & Fitness → conduit-quantity
     static let heartRate = HealthDataType(identifier: HKQuantityTypeIdentifier.heartRate.rawValue, displayName: "Heart Rate", category: .activityFitness, defaultUnit: "count/min", stream: .quantity)
     static let restingHeartRate = HealthDataType(identifier: HKQuantityTypeIdentifier.restingHeartRate.rawValue, displayName: "Resting Heart Rate", category: .activityFitness, defaultUnit: "count/min", stream: .quantity)
     static let heartRateVariabilitySDNN = HealthDataType(identifier: HKQuantityTypeIdentifier.heartRateVariabilitySDNN.rawValue, displayName: "Heart Rate Variability (SDNN)", category: .activityFitness, defaultUnit: "ms", stream: .quantity)
+    // RMSSD is iOS 27+; keep the raw identifier so the iOS 17 deployment target
+    // compiles and existing nil-skip behavior applies.
+    static let heartRateVariabilityRMSSD = HealthDataType(identifier: "HKQuantityTypeIdentifierHeartRateVariabilityRMSSD", displayName: "Heart Rate Variability (RMSSD)", category: .activityFitness, defaultUnit: "ms", stream: .quantity)
+    static let timeInDaylight = HealthDataType(identifier: HKQuantityTypeIdentifier.timeInDaylight.rawValue, displayName: "Time in Daylight", category: .activityFitness, defaultUnit: "min", stream: .quantity)
     static let walkingHeartRateAverage = HealthDataType(identifier: HKQuantityTypeIdentifier.walkingHeartRateAverage.rawValue, displayName: "Walking Heart Rate Average", category: .activityFitness, defaultUnit: "count/min", stream: .quantity)
     static let stepCount = HealthDataType(identifier: HKQuantityTypeIdentifier.stepCount.rawValue, displayName: "Steps", category: .activityFitness, defaultUnit: "count", stream: .quantity)
     static let distanceWalkingRunning = HealthDataType(identifier: HKQuantityTypeIdentifier.distanceWalkingRunning.rawValue, displayName: "Walking + Running Distance", category: .activityFitness, defaultUnit: "m", stream: .quantity)
@@ -230,7 +234,7 @@ extension HealthDataType {
     static let estimatedWorkoutEffortScore = HealthDataType(identifier: "HKQuantityTypeIdentifierEstimatedWorkoutEffortScore", displayName: "Estimated Workout Effort Score", category: .activityFitness, defaultUnit: "appleEffortScore", stream: .quantity)
 
     static let activityFitness: [HealthDataType] = [
-        .heartRate, .restingHeartRate, .heartRateVariabilitySDNN, .walkingHeartRateAverage,
+        .heartRate, .restingHeartRate, .heartRateVariabilitySDNN, .heartRateVariabilityRMSSD, .walkingHeartRateAverage, .timeInDaylight,
         .stepCount, .distanceWalkingRunning, .distanceCycling, .distanceSwimming,
         .flightsClimbed, .activeEnergyBurned, .basalEnergyBurned,
         .appleExerciseTime, .appleStandTime, .appleStandHour, .vo2Max,
@@ -264,11 +268,15 @@ extension HealthDataType {
         .respiratoryRate, .oxygenSaturation, .bodyTemperature, .bloodGlucose, .bloodPressure,
     ]
 
-    // Sleep & Mindfulness → conduit-category
+    // Sleep & Mindfulness → conduit-category + conduit-quantity.
+    static let appleSleepingWristTemperature = HealthDataType(identifier: HKQuantityTypeIdentifier.appleSleepingWristTemperature.rawValue, displayName: "Sleeping Wrist Temperature", category: .sleepMindfulness, defaultUnit: "degC", stream: .quantity)
+    // Breathing disturbances are iOS 18+; use the same raw-string/nil-skip path
+    // as effort scores to compile at the iOS 17 deployment target.
+    static let appleSleepingBreathingDisturbances = HealthDataType(identifier: "HKQuantityTypeIdentifierAppleSleepingBreathingDisturbances", displayName: "Sleeping Breathing Disturbances", category: .sleepMindfulness, defaultUnit: "count", stream: .quantity)
     static let sleepAnalysis = HealthDataType(identifier: HKCategoryTypeIdentifier.sleepAnalysis.rawValue, displayName: "Sleep Analysis", category: .sleepMindfulness, defaultUnit: nil, stream: .category)
     static let mindfulSession = HealthDataType(identifier: HKCategoryTypeIdentifier.mindfulSession.rawValue, displayName: "Mindful Session", category: .sleepMindfulness, defaultUnit: nil, stream: .category)
 
-    static let sleepMindfulness: [HealthDataType] = [.sleepAnalysis, .mindfulSession]
+    static let sleepMindfulness: [HealthDataType] = [.sleepAnalysis, .mindfulSession, .appleSleepingWristTemperature, .appleSleepingBreathingDisturbances]
 
     // Heart Events → conduit-category
     static let highHeartRateEvent = HealthDataType(identifier: HKCategoryTypeIdentifier.highHeartRateEvent.rawValue, displayName: "High Heart Rate Event", category: .heartEvents, defaultUnit: nil, stream: .category)

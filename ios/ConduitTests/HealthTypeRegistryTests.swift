@@ -1,10 +1,11 @@
 import XCTest
 import HealthKit
+import SwiftUI
+import UIKit
 @testable import Conduit
 
-/// The two registry identifiers HealthKit only vends on iOS 18+, while this
-/// project's deployment target is iOS 17.0 — the only entries in the whole
-/// registry whose `sampleType` is legitimately nil on a supported OS.
+/// The two effort-score identifiers HealthKit only vends on iOS 18+, while
+/// this project's deployment target is iOS 17.0.
 ///
 /// Spelled here as literals, deliberately duplicating `HealthTypeRegistry`'s own
 /// literals rather than reading `HealthDataType.workoutEffortScore.identifier`.
@@ -36,11 +37,85 @@ enum EffortScoreIdentifiers {
     }
 }
 
+@MainActor
+final class HKPermissionWarningTests: XCTestCase {
+    func testRecoveryWarningsExcludeUnavailableTypes() throws {
+        let enabledAt = Date().addingTimeInterval(-172800)
+        let configurations = try RecoveryMetricReadings.all.map { reading in
+            (type: try XCTUnwrap(HealthTypeRegistry.shared.type(forIdentifier: reading.identifier)),
+             enabled: true, enabledAt: Optional(enabledAt), lastSyncAt: Optional<Date>.none)
+        }
+        let view = try makePermissionsView(configurations)
+        let expectedIDs = Set(RecoveryMetricReadings.all
+            .filter { RecoveryMetricReadings.isAvailable($0.identifier) }
+            .map(\.identifier))
+
+        XCTAssertEqual(Set(view.typesWithWarning.map(\.identifier)), expectedIDs)
+        XCTAssertFalse(expectedIDs.isEmpty)
+
+        let controller = hostForSnapshot(
+            NavigationStack { view.environment(makeSnapshotAppState()) },
+            style: .light,
+            sizeCategory: .large,
+            settle: 1.2
+        )
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 2
+        format.opaque = true
+        let image = UIGraphicsImageRenderer(size: SnapshotEnv.canvasSize, format: format).image { _ in
+            controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+        }
+        try writeArtifact(XCTUnwrap(image.pngData()), named: "recovery-permission-warnings.png")
+    }
+
+    func testAvailableWarningsRespectEnablementAndSyncTiming() throws {
+        let now = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))
+        let enabledAt = now.addingTimeInterval(-172800)
+        let view = try makePermissionsView([
+            (.heartRate, true, enabledAt, nil),
+            (.stepCount, true, enabledAt, enabledAt.addingTimeInterval(-3600)),
+            (.timeInDaylight, true, enabledAt, enabledAt.addingTimeInterval(3600)),
+            (.restingHeartRate, true, now.addingTimeInterval(-3600), nil),
+            (.appleSleepingWristTemperature, false, enabledAt, nil),
+            (.heartRateVariabilitySDNN, true, nil, nil),
+            (.distanceWalkingRunning, true, enabledAt, enabledAt),
+        ])
+
+        XCTAssertEqual(Set(view.typesWithWarning.map(\.identifier)),
+                       Set([HealthDataType.heartRate.identifier, HealthDataType.stepCount.identifier]))
+    }
+
+    private func makePermissionsView(
+        _ configurations: [(type: HealthDataType, enabled: Bool, enabledAt: Date?, lastSyncAt: Date?)]
+    ) throws -> HKPermissionsDetailView {
+        let database = try AppDatabase.makeInMemory()
+        let dao = DataTypeConfigDAO(database)
+        for configuration in configurations {
+            try dao.upsert(DataTypeConfig(
+                hkTypeId: configuration.type.identifier,
+                enabled: configuration.enabled,
+                minIntervalSeconds: nil,
+                anchorBlob: nil,
+                lastSyncAt: configuration.lastSyncAt,
+                lastAttemptAt: nil
+            ))
+            let key = "conduit.typeEnabledAt.\(configuration.type.identifier)"
+            let previous = UserDefaults.standard.object(forKey: key)
+            UserDefaults.standard.set(configuration.enabledAt, forKey: key)
+            addTeardownBlock {
+                UserDefaults.standard.set(previous, forKey: key)
+            }
+        }
+        let viewModel = SettingsViewModel(appState: AppState(database: database))
+        viewModel.load()
+        return HKPermissionsDetailView(viewModel: viewModel)
+    }
+}
+
 final class HealthTypeRegistryTests: XCTestCase {
     private let registry = HealthTypeRegistry.shared
 
     func testHasAllV1Types() {
-        // ARCHITECTURE.md §7 specifies ~30 types across four streams.
         XCTAssertGreaterThanOrEqual(registry.all.count, 30)
     }
 
@@ -60,17 +135,15 @@ final class HealthTypeRegistryTests: XCTestCase {
         }
     }
 
-    /// This is the only test that can catch a typo in the two effort-score
-    /// identifiers, which are hand-written string literals in the registry that no
-    /// compiler checks. So the skip below is deliberately narrow: it is keyed on
-    /// the OS version via `EffortScoreIdentifiers.isAvailableOnThisOS`, NOT on
-    /// `sampleType == nil`. A blanket nil-skip would swallow a misspelling on every
-    /// runner; this way an iOS 18+ runner still proves both spellings resolve, and
-    /// an iOS 17.x runner (a supported deployment target) does not fail on a
-    /// genuine, expected unavailability.
+    /// Availability skips are keyed on explicit OS requirements for effort
+    /// scores and recovery metrics, never on `sampleType == nil`: a blanket
+    /// nil-skip would swallow misspelled raw identifiers on every runner.
     func testEveryIdentifierResolvesToAnHKSampleType() {
         for type in registry.all {
             if EffortScoreIdentifiers.all.contains(type.identifier), !EffortScoreIdentifiers.isAvailableOnThisOS {
+                continue
+            }
+            if RecoveryMetricReadings.minimumIOS[type.identifier].map({ ProcessInfo.processInfo.operatingSystemVersion.majorVersion < $0 }) == true {
                 continue
             }
             XCTAssertNotNil(type.sampleType, "Unresolvable HK identifier: \(type.identifier)")
@@ -364,4 +437,23 @@ final class HealthTypeRegistryTests: XCTestCase {
             XCTAssertEqual(type.defaultUnit, "appleEffortScore", "\(identifier) unit")
         }
     }
+    func testRecoveryMetricsHaveDistinctIdentifiersNamesCategoriesAndCanonicalUnits() throws {
+        for reading in RecoveryMetricReadings.all {
+            let type = try XCTUnwrap(registry.type(forIdentifier: reading.identifier))
+            XCTAssertEqual(type.displayName, reading.name)
+            XCTAssertEqual(type.category, reading.category)
+            XCTAssertEqual(type.stream, .quantity)
+            XCTAssertEqual(type.defaultUnit, reading.wireUnit)
+            if RecoveryMetricReadings.isAvailable(reading.identifier) {
+                let sampleType = try XCTUnwrap(type.sampleType)
+                XCTAssertTrue(registry.readTypes.contains(sampleType))
+            } else {
+                XCTAssertNil(type.sampleType)
+                XCTAssertTrue(type.authorizationTypes.isEmpty)
+            }
+        }
+        XCTAssertNotEqual(HealthDataType.heartRateVariabilityRMSSD.identifier, HealthDataType.heartRateVariabilitySDNN.identifier)
+        XCTAssertNotEqual(HealthDataType.heartRateVariabilityRMSSD.displayName, HealthDataType.heartRateVariabilitySDNN.displayName)
+    }
+
 }

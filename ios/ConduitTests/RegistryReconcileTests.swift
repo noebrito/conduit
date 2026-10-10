@@ -357,6 +357,72 @@ final class RegistryReconcileTests: XCTestCase {
         XCTAssertEqual(authorizeCalls, 1, "the persisted signature must suppress a second prompt")
     }
 
+    @MainActor
+    func testRecoveryMetricsAreAutoEnabledAndRePromptedOnceOnUpgrade() async throws {
+        let appState = AppState(database: appDB)
+        let dao = DataTypeConfigDAO(appDB)
+        let defaults = try makeCleanDefaults()
+        let recoveryMetricIDs = RecoveryMetricReadings.all.map(\.identifier)
+        let availableRecoveryMetricIDs = recoveryMetricIDs.filter {
+            HealthTypeRegistry.shared.type(forIdentifier: $0)?.sampleType != nil
+        }
+
+        // Seed a pre-upgrade install: every other type configured, and the stored
+        // signature is the pre-upgrade read set.
+        for type in HealthTypeRegistry.shared.all where !recoveryMetricIDs.contains(type.identifier) {
+            try dao.setEnabled(true, hkTypeId: type.identifier)
+        }
+        let priorSignature = HealthTypeRegistry.shared.readTypes
+            .map(\.identifier)
+            .filter { !recoveryMetricIDs.contains($0) }
+            .sorted()
+            .joined(separator: ",")
+        defaults.set(priorSignature, forKey: AppState.authorizedSignatureKey)
+        XCTAssertNotEqual(priorSignature, AppState.authorizedTypesSignature(),
+                          "registering recovery metrics must GROW the signature — that growth is what triggers the re-prompt")
+
+        var authorizeCalls = 0
+        var lastRequested: [HealthDataType] = []
+        let authorize: (_ types: [HealthDataType]) async throws -> Void = { types in
+            authorizeCalls += 1
+            lastRequested = types
+        }
+
+        await appState.reconcileRegistry(registry: .shared, defaults: defaults, authorize: authorize)
+
+        // Gate 1: recovery metrics are on by default — no manual toggling on
+        // upgrade. This is a static registry-driven insert, independent of
+        // whether the identifier resolves on the running OS, so it applies to
+        // all four unconditionally.
+        for id in recoveryMetricIDs {
+            let row = try XCTUnwrap(try dao.find(hkTypeId: id), "no config row written for \(id)")
+            XCTAssertTrue(row.enabled, "\(id) must be enabled by default after upgrade")
+        }
+
+        // Gate 2: exactly one authorization request, and the sheet lists every
+        // recovery metric available on the running OS.
+        XCTAssertEqual(authorizeCalls, 1, "the grown read set must re-prompt exactly once")
+        let requestedIDs = Set(lastRequested.map(\.identifier))
+        for id in availableRecoveryMetricIDs {
+            XCTAssertTrue(requestedIDs.contains(id), "authorization request must include \(id)")
+        }
+
+        // Existing opt-outs must survive reconciliation as well.
+        try dao.setEnabled(false, hkTypeId: recoveryMetricIDs[0])
+        // A second launch does not re-prompt.
+        await appState.reconcileRegistry(registry: .shared, defaults: defaults, authorize: authorize)
+        XCTAssertEqual(authorizeCalls, 1, "the persisted signature must suppress a second prompt")
+        XCTAssertFalse(try XCTUnwrap(dao.find(hkTypeId: recoveryMetricIDs[0])).enabled)
+        let upgrade: [String: Any] = [
+            "new_types_enabled_on_first_launch": recoveryMetricIDs,
+            "authorization_requests_after_two_launches": authorizeCalls,
+            "available_recovery_types_requested": availableRecoveryMetricIDs,
+            "rmssd_opt_out_preserved": try XCTUnwrap(dao.find(hkTypeId: recoveryMetricIDs[0])).enabled == false,
+        ]
+        try writeArtifact(JSONSerialization.data(withJSONObject: upgrade, options: [.prettyPrinted, .sortedKeys]),
+                          named: "persisted-recovery-upgrade.json")
+    }
+
     // MARK: - Helpers
 
     /// A private, empty `UserDefaults` suite so tests never read or mutate the

@@ -24,12 +24,12 @@ If you want to know precisely what does — and does not — leave your device, 
 
 That protobuf schema is the **authoritative wire-schema-of-record**: it is the
 exact definition of the payload the app serializes and uploads to your webhook.
-Nothing is sent that isn't described there. It carries HealthKit samples you
-explicitly opted into — quantities, categories, workouts, correlations — tagged
-with their source and timestamps, wrapped in a batch envelope keyed for
-deduplication. No identifiers beyond a per-install device UUID that you can see
-generated in the code. Inspect it and you can see the whole story of what's on
-the wire.
+Nothing is sent that isn't described there. It carries HealthKit samples for
+the data types enabled in Conduit — quantities, categories, workouts,
+correlations — tagged with their source and timestamps, wrapped in a batch
+envelope keyed for deduplication. No identifiers beyond a per-install device UUID
+that you can see generated in the code. Inspect it and you can see the whole
+story of what's on the wire.
 
 ## The app: [`ios/`](ios/)
 
@@ -45,7 +45,8 @@ The full Xcode project, Swift sources, tests, and release tooling live under
   committed team id enables one-command builds but cannot sign without the
   private certificates (which are not in this repo).
 
-See [`ios/README.md`](ios/README.md) for the full build, test, and layout notes.
+See [`ios/README.md`](ios/README.md) for build, test, and layout notes, plus
+[recovery data and upgrade defaults](ios/README.md#supported-recovery-data).
 
 ## Releasing
 
