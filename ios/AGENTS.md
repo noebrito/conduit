@@ -27,7 +27,7 @@ The invariants to know before touching this — everything else is in those file
   "not limited" answer, so excluding a type hides a real floor and hands it a green checkmark over a
   truncated history (regressions: `testWorkoutAndRouteFloorsAreHonouredLikeAnyOtherType`,
   `testWorkoutsOnlyRunThatHitItsFloorIsNotReportedComplete`). Failure is whole-call, so a per-type
-  loop has no partial-failure shape to recover and would cost ~57 sequential XPC round trips per
+  loop has no partial-failure shape to recover and would cost ~61 sequential XPC round trips per
   run.
 - **"Unknown" is not "no floor".** A failed probe resolves nothing about any type it asked about, so
   a run with any unresolved type never reaches `.completed`/`isSuccess`; it parks on

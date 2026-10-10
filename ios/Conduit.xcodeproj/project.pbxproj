@@ -15,6 +15,7 @@
 		CD000000000000000000010D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000010C /* Assets.xcassets */; };
 		CD0000000000000000000A31 /* RunningDynamicsEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000A30 /* RunningDynamicsEvidenceTests.swift */; };
 		CD0000000000000000000A33 /* AthleteMetricsEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000A32 /* AthleteMetricsEvidenceTests.swift */; };
+		CD0000000000000000000B33 /* RecoveryMetricsEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000B32 /* RecoveryMetricsEvidenceTests.swift */; };
 		CD0000000000000000000A41 /* WorkoutEnrichmentEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000A40 /* WorkoutEnrichmentEvidenceTests.swift */; };
 		CD0000000000000000000A51 /* EvidenceArtifacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000A50 /* EvidenceArtifacts.swift */; };
 		CD000000000000000000010F /* ConduitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000010E /* ConduitTests.swift */; };
@@ -151,6 +152,7 @@
 		CD000000000000000000010C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		CD0000000000000000000A30 /* RunningDynamicsEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunningDynamicsEvidenceTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000A32 /* AthleteMetricsEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteMetricsEvidenceTests.swift; sourceTree = "<group>"; };
+		CD0000000000000000000B32 /* RecoveryMetricsEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryMetricsEvidenceTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000A40 /* WorkoutEnrichmentEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutEnrichmentEvidenceTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000A50 /* EvidenceArtifacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvidenceArtifacts.swift; sourceTree = "<group>"; };
 		CD000000000000000000010E /* ConduitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConduitTests.swift; sourceTree = "<group>"; };
@@ -532,6 +534,7 @@
 				CD0000000000000000000A20 /* AnchoredReaderTests.swift */,
 				CD0000000000000000000A30 /* RunningDynamicsEvidenceTests.swift */,
 				CD0000000000000000000A32 /* AthleteMetricsEvidenceTests.swift */,
+				CD0000000000000000000B32 /* RecoveryMetricsEvidenceTests.swift */,
 				CD0000000000000000000A40 /* WorkoutEnrichmentEvidenceTests.swift */,
 				CD0000000000000000000A50 /* EvidenceArtifacts.swift */,
 				CD000000000000000000B007 /* ConduitStatusSnapshotTests.swift */,
@@ -778,6 +781,7 @@
 				CD0000000000000000000A21 /* AnchoredReaderTests.swift in Sources */,
 				CD0000000000000000000A31 /* RunningDynamicsEvidenceTests.swift in Sources */,
 				CD0000000000000000000A33 /* AthleteMetricsEvidenceTests.swift in Sources */,
+				CD0000000000000000000B33 /* RecoveryMetricsEvidenceTests.swift in Sources */,
 				CD0000000000000000000A41 /* WorkoutEnrichmentEvidenceTests.swift in Sources */,
 				CD0000000000000000000A51 /* EvidenceArtifacts.swift in Sources */,
 				CD000000000000000000B014 /* ConduitStatusSnapshotTests.swift in Sources */,

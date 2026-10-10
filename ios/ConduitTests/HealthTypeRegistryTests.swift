@@ -2,9 +2,8 @@ import XCTest
 import HealthKit
 @testable import Conduit
 
-/// The two registry identifiers HealthKit only vends on iOS 18+, while this
-/// project's deployment target is iOS 17.0 — the only entries in the whole
-/// registry whose `sampleType` is legitimately nil on a supported OS.
+/// The two effort-score identifiers HealthKit only vends on iOS 18+, while
+/// this project's deployment target is iOS 17.0.
 ///
 /// Spelled here as literals, deliberately duplicating `HealthTypeRegistry`'s own
 /// literals rather than reading `HealthDataType.workoutEffortScore.identifier`.
@@ -71,6 +70,9 @@ final class HealthTypeRegistryTests: XCTestCase {
     func testEveryIdentifierResolvesToAnHKSampleType() {
         for type in registry.all {
             if EffortScoreIdentifiers.all.contains(type.identifier), !EffortScoreIdentifiers.isAvailableOnThisOS {
+                continue
+            }
+            if RecoveryMetricReadings.minimumIOS[type.identifier].map({ ProcessInfo.processInfo.operatingSystemVersion.majorVersion < $0 }) == true {
                 continue
             }
             XCTAssertNotNil(type.sampleType, "Unresolvable HK identifier: \(type.identifier)")
@@ -364,4 +366,23 @@ final class HealthTypeRegistryTests: XCTestCase {
             XCTAssertEqual(type.defaultUnit, "appleEffortScore", "\(identifier) unit")
         }
     }
+    func testRecoveryMetricsHaveDistinctIdentifiersNamesCategoriesAndCanonicalUnits() throws {
+        for reading in RecoveryMetricReadings.all {
+            let type = try XCTUnwrap(registry.type(forIdentifier: reading.identifier))
+            XCTAssertEqual(type.displayName, reading.name)
+            XCTAssertEqual(type.category, reading.category)
+            XCTAssertEqual(type.stream, .quantity)
+            XCTAssertEqual(type.defaultUnit, reading.wireUnit)
+            if RecoveryMetricReadings.isAvailable(reading.identifier) {
+                let sampleType = try XCTUnwrap(type.sampleType)
+                XCTAssertTrue(registry.readTypes.contains(sampleType))
+            } else {
+                XCTAssertNil(type.sampleType)
+                XCTAssertTrue(type.authorizationTypes.isEmpty)
+            }
+        }
+        XCTAssertNotEqual(HealthDataType.heartRateVariabilityRMSSD.identifier, HealthDataType.heartRateVariabilitySDNN.identifier)
+        XCTAssertNotEqual(HealthDataType.heartRateVariabilityRMSSD.displayName, HealthDataType.heartRateVariabilitySDNN.displayName)
+    }
+
 }
