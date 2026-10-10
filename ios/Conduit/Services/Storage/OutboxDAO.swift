@@ -405,6 +405,19 @@ struct OutboxDAO {
         }
     }
 
+    func releaseUnsubmittedBatch(batchID: String) throws {
+        try database.dbWriter.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE outbox
+                    SET state = ?, batch_id = NULL, inflight_at = NULL
+                    WHERE batch_id = ? AND state = ?
+                    """,
+                arguments: [OutboxState.pending.rawValue, batchID, OutboxState.inflight.rawValue]
+            )
+        }
+    }
+
     /// Update the delivery state of a set of rows (used by the uploader in I3).
     func updateState(
         ids: [Int64],

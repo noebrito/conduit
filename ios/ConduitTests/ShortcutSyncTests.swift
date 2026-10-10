@@ -199,6 +199,103 @@ final class ShortcutSyncTests: XCTestCase {
         XCTAssertEqual(try OutboxDAO(database).count(state: .inflight), 0)
     }
 
+    @MainActor
+    func testFailedBatchFileWriteRetainsUploaderBackoff() async throws {
+        let database = try AppDatabase.makeInMemory()
+        let webhook = try configure(database, type: .stepCount)
+        let outbox = OutboxDAO(database)
+        try outbox.enqueue(sample: sample("queued"), hkTypeId: HealthDataType.stepCount.identifier,
+            webhookId: try XCTUnwrap(webhook.id))
+        let uploader = Uploader.shared
+        let previousDatabase = uploader.database
+        uploader.database = database
+        defer { uploader.database = previousDatabase }
+        var submissions = 0
+        var uploaderOutcome: OutboxRow?
+        let engine = SyncEngine(database: database, bearerToken: { "test-token" }, submitUpload: { batch, url, token in
+            submissions += 1
+            let blockedFile = FileManager.default.temporaryDirectory.appendingPathComponent("conduit-batch-\(batch.batchID).json")
+            do {
+                try FileManager.default.createDirectory(at: blockedFile, withIntermediateDirectories: false)
+            } catch {
+                XCTFail("Could not create the failing-write fixture: \(error)")
+                return false
+            }
+            defer { try? FileManager.default.removeItem(at: blockedFile) }
+            let submitted = uploader.upload(batch: batch, webhookURL: url, bearerToken: token)
+            XCTAssertFalse(submitted)
+            uploaderOutcome = try? outbox.find(hkSampleUuid: "queued")
+            return submitted
+        })
+        await engine.flushNow()
+        let outcome = try XCTUnwrap(uploaderOutcome)
+        let retained = try XCTUnwrap(outbox.find(hkSampleUuid: "queued"))
+        XCTAssertEqual(retained, outcome)
+        XCTAssertEqual(retained.state, .pending)
+        XCTAssertNil(retained.batchId)
+        XCTAssertEqual(retained.attemptCount, 1)
+        XCTAssertGreaterThan(try XCTUnwrap(retained.nextAttemptAt), Date())
+        XCTAssertFalse(try XCTUnwrap(retained.lastError).isEmpty)
+        await engine.flushNow()
+        XCTAssertEqual(submissions, 1)
+        XCTAssertEqual(try outbox.find(hkSampleUuid: "queued"), retained)
+    }
+
+    private func queueRetry(_ database: AppDatabase, webhook: WebhookConfig) throws -> OutboxRow {
+        let outbox = OutboxDAO(database)
+        try outbox.enqueue(sample: sample("retry"), hkTypeId: HealthDataType.stepCount.identifier,
+            webhookId: try XCTUnwrap(webhook.id))
+        var row = try XCTUnwrap(outbox.find(hkSampleUuid: "retry"))
+        row.attemptCount = 2
+        row.nextAttemptAt = Date().addingTimeInterval(-60)
+        row.lastError = "Earlier upload failed"
+        try database.dbWriter.write { try row.update($0) }
+        return try XCTUnwrap(outbox.find(hkSampleUuid: "retry"))
+    }
+
+    @MainActor
+    func testRejectedDestinationSnapshotPreservesQueuedRetryState() async throws {
+        let database = try AppDatabase.makeInMemory()
+        let webhook = try configure(database, type: .stepCount)
+        let before = try queueRetry(database, webhook: webhook)
+        let outbox = OutboxDAO(database)
+        let engine = SyncEngine(database: database, bearerToken: {
+            (try? outbox.count(state: .inflight)) == 1 ? "replacement-token" : "original-token"
+        }, submitUpload: { _, _, _ in
+            XCTFail("A rejected credential snapshot must not submit")
+            return true
+        })
+        await engine.flushNow()
+        let after = try XCTUnwrap(outbox.find(hkSampleUuid: "retry"))
+        XCTAssertEqual(after, before)
+    }
+
+    @MainActor
+    func testShortcutCancelledAfterBatchBuildDoesNotSubmitOrEraseRetryState() async throws {
+        let database = try AppDatabase.makeInMemory()
+        let webhook = try configure(database, type: .stepCount)
+        let before = try queueRetry(database, webhook: webhook)
+        let outbox = OutboxDAO(database)
+        var cancelledAfterBuild = false
+        let engine = SyncEngine(database: database, readAnchored: { _, _, _, _, _ in
+            AnchoredReader.Result(samples: [], deletedUuids: [], newAnchor: HKQueryAnchor(fromValue: 2))
+        }, bearerToken: {
+            if (try? outbox.count(state: .inflight)) == 1 {
+                cancelledAfterBuild = true
+                withUnsafeCurrentTask { $0?.cancel() }
+            }
+            return "test-token"
+        }, submitUpload: { _, _, _ in
+            XCTFail("Cancellation after batch construction must not start an upload")
+            return true
+        })
+        let action = Task { await engine.syncFromShortcut() }
+        let message = await action.value
+        XCTAssertTrue(cancelledAfterBuild)
+        XCTAssertTrue(message.contains("Submitted 0"))
+        XCTAssertEqual(try outbox.find(hkSampleUuid: "retry"), before)
+    }
+
     private func enrichedWorkout(_ uuid: String) -> Conduit_V1_Sample {
         var result = sample(uuid)
         result.workout = AnchoredReader.makeWorkoutValue(activityType: "running", durationSeconds: 600,

@@ -809,20 +809,22 @@ actor SyncEngine {
         }
 
         let submitUpload = self.submitUpload
-        let submitted: Bool
+        let submitted: Bool?
         do {
-            submitted = try await MainActor.run {
-                guard try destinationDAO.first() == webhook, token() == bearerToken else { return false }
+            submitted = try await MainActor.run { () -> Bool? in
+                guard try destinationDAO.first() == webhook, token() == bearerToken else { return nil }
+                guard !Task.isCancelled else { return nil }
                 return submitUpload(batch, webhook.url, bearerToken)
             }
         } catch {
-            try outboxDAO.updateState(ids: batch.rowIDs, to: .pending)
+            try outboxDAO.releaseUnsubmittedBatch(batchID: batch.batchID)
             throw error
         }
-        guard submitted else {
-            try outboxDAO.updateState(ids: batch.rowIDs, to: .pending)
+        guard let submitted else {
+            try outboxDAO.releaseUnsubmittedBatch(batchID: batch.batchID)
             return 0
         }
+        guard submitted else { return 0 }
 
         // Keep a background-refresh request pending so the outbox still drains if
         // the app is suspended before the next observer wake or foreground open.
