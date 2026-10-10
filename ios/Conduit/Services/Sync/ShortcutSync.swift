@@ -13,6 +13,7 @@ enum ShortcutSync {
         var deletions = 0
         var limited = false
         var notice: String?
+        var uninitializedType: String?
     }
 
     struct Summary {
@@ -57,6 +58,9 @@ enum ShortcutSync {
                 summary.capture.queued += result.queued
                 summary.capture.deletions += result.deletions
                 summary.capture.limited = summary.capture.limited || result.limited
+                if let type = result.uninitializedType {
+                    summary.notices.append("\(type) is not yet initialized. Open Conduit to start forward capture, then retry; this action skipped that type.")
+                }
                 if let notice = result.notice { summary.notices.append(notice); break }
             } catch {
                 summary.notices.append(failureMessage(error))

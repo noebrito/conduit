@@ -204,7 +204,9 @@ partial progress, preserving data already queued. An empty HealthKit read does
 not prove that no samples exist or that read permission was granted.
 
 Each run captures one incremental page (up to 200 objects) per enabled type,
-with the normal first-read start-of-today floor and atomic enqueue/anchor update.
+with atomic enqueue/anchor update. Types without a valid forward anchor are
+skipped and reported as not yet initialized; open Conduit to initialize them
+through its normal start-of-today capture before retrying the action.
 Routes use a deduplicated scan of up to 10 recent workouts. Capture stops between
 reads/workouts on cancellation or after a 20-second cooperative budget; an
 in-progress HealthKit query can exceed that budget. Outbox capacity still applies.

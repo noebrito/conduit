@@ -50,6 +50,14 @@ struct OutboxDAO {
         createdAt: Date,
         bumpTally: Bool = true
     ) throws -> Bool {
+        var sample = sample
+        if case .workout(var workout)? = sample.value,
+           try DataTypeConfig.fetchOne(db, key: HealthDataType.heartRate.identifier)?.enabled == false {
+            workout.clearAvgHeartRateBpm()
+            workout.clearMaxHeartRateBpm()
+            workout.clearMinHeartRateBpm()
+            sample.workout = workout
+        }
         let payload = try sample.jsonUTF8Data()
         try db.execute(
             sql: """

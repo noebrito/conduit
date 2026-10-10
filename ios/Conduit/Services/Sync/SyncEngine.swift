@@ -11,15 +11,17 @@ import os
 /// `handleObserverWake`; the `AppDelegate` starts it once on launch.
 actor SyncEngine {
     private let database: AppDatabase
-    private let store: HKHealthStore
     private let reader: AnchoredReader
-    private let routeReader: WorkoutRouteReader
+    private let readAnchored: (HealthDataType, HKQueryAnchor?, Date?, Int, Bool) async throws -> AnchoredReader.Result
+    private let scanWorkouts: (Date?, Date?, Int) async throws -> [HKWorkout]
+    private let readRoutes: (HKWorkout) async throws -> [Conduit_V1_Sample]
     private let outboxDAO: OutboxDAO
     private let webhookConfigDAO: WebhookConfigDAO
     private let dataTypeConfigDAO: DataTypeConfigDAO
     private var throttle: Throttle
     private let batcher: Batcher
-    private let uploader: Uploader
+    private let bearerToken: @MainActor () -> String?
+    private let submitUpload: @MainActor (Batcher.BatchResult, String, String) -> Bool
     private let keychain: KeychainStore
     private let logger = Logger(subsystem: "dev.noebrito.Conduit", category: "SyncEngine")
 
@@ -59,17 +61,30 @@ actor SyncEngine {
         database: AppDatabase,
         store: HKHealthStore = HKHealthStore(),
         uploader: Uploader = .shared,
-        keychain: KeychainStore = .shared
+        keychain: KeychainStore = .shared,
+        readAnchored: ((HealthDataType, HKQueryAnchor?, Date?, Int, Bool) async throws -> AnchoredReader.Result)? = nil,
+        scanWorkouts: ((Date?, Date?, Int) async throws -> [HKWorkout])? = nil,
+        readRoutes: ((HKWorkout) async throws -> [Conduit_V1_Sample])? = nil,
+        bearerToken: (@MainActor () -> String?)? = nil,
+        submitUpload: (@MainActor (Batcher.BatchResult, String, String) -> Bool)? = nil
     ) {
         self.database = database
-        self.store = store
-        self.reader = AnchoredReader(store: store)
-        self.routeReader = WorkoutRouteReader(store: store)
+        let reader = AnchoredReader(store: store)
+        let routeReader = WorkoutRouteReader(store: store)
+        self.reader = reader
+        self.readAnchored = readAnchored ?? { type, anchor, since, limit, includeHR in
+            try await reader.read(type: type, anchor: anchor, since: since, limit: limit, includeHeartRateStatistics: includeHR)
+        }
+        self.scanWorkouts = scanWorkouts ?? { since, before, limit in
+            try await routeReader.workouts(since: since, before: before, limit: limit)
+        }
+        self.readRoutes = readRoutes ?? { try await routeReader.routeSamples(for: $0) }
         self.outboxDAO = OutboxDAO(database)
         self.webhookConfigDAO = WebhookConfigDAO(database)
         self.dataTypeConfigDAO = DataTypeConfigDAO(database)
         self.batcher = Batcher(database: database)
-        self.uploader = uploader
+        self.bearerToken = bearerToken ?? { keychain.webhookBearerToken }
+        self.submitUpload = submitUpload ?? { uploader.upload(batch: $0, webhookURL: $1, bearerToken: $2) }
         self.keychain = keychain
         // Default throttle; replaced from stored webhook config on first use.
         self.throttle = Throttle(minInterval: 900, forceFlushThreshold: 200)
@@ -154,11 +169,9 @@ actor SyncEngine {
                 captureFloor = nil
             }
 
-            let result = try await reader.read(
-                type: dataType,
-                anchor: anchor,
-                since: captureFloor,
-                includeHeartRateStatistics: try includeHeartRateStatisticsForWorkouts()
+            let result = try await readAnchored(
+                dataType, anchor, captureFloor, HKObjectQueryNoLimit,
+                try includeHeartRateStatisticsForWorkouts()
             )
 
             // §4.4 critical invariant: anchor advance + sample enqueue in one transaction.
@@ -192,7 +205,7 @@ actor SyncEngine {
             }
             throttle.recordFlush()
 
-            try await flush(webhook: webhook, webhookID: webhookID)
+            try await flush()
         } catch {
             logger.error("handleObserverWake(\(typeIdentifier, privacy: .public)) error: \(error.localizedDescription, privacy: .public)")
         }
@@ -256,7 +269,7 @@ actor SyncEngine {
                 value: -WorkoutRouteReader.rescanWindowDays,
                 to: Date()
             )
-            let workouts = try await routeReader.workouts(since: since, limit: HKObjectQueryNoLimit)
+            let workouts = try await scanWorkouts(since, nil, HKObjectQueryNoLimit)
 
             var stagedRoutes = 0
             for workout in workouts {
@@ -268,7 +281,7 @@ actor SyncEngine {
                 // wake retries it.
                 let samples: [Conduit_V1_Sample]
                 do {
-                    samples = try await routeReader.routeSamples(for: workout)
+                    samples = try await readRoutes(workout)
                 } catch {
                     logger.error("Route read failed for workout \(workoutUUID, privacy: .public): \(error.localizedDescription, privacy: .public)")
                     continue
@@ -278,17 +291,8 @@ actor SyncEngine {
                 // finished attaching one yet.
                 guard !samples.isEmpty else { continue }
 
-                let staged = try outboxDAO.stageImport(
-                    samples: samples,
-                    hkTypeId: HealthDataType.workoutRoute.identifier,
-                    webhookId: webhookID,
-                    cap: cap
-                )
+                let staged = try stageCapturedRoutes(samples, for: workout, webhookID: webhookID, cap: cap)
                 stagedRoutes += staged.inserted
-                // The route exists and is now ours — a re-read would only ever be
-                // deduped away, so stop asking for it. Memoize even when the row
-                // was a duplicate (staged 0): that also means we already have it.
-                workoutsWithCapturedRoute.insert(workoutUUID)
                 if staged.hitCap {
                     logger.info("Route capture paused: outbox at cap")
                     break
@@ -302,6 +306,18 @@ actor SyncEngine {
             // committed — never let it fail the wake.
             logger.error("captureRecentRoutes error: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    private func stageCapturedRoutes(
+        _ samples: [Conduit_V1_Sample], for workout: HKWorkout, webhookID: Int64, cap: Int?
+    ) throws -> (inserted: Int, hitCap: Bool) {
+        guard !samples.isEmpty, !workoutsWithCapturedRoute.contains(workout.uuid.uuidString) else {
+            return (0, false)
+        }
+        let staged = try outboxDAO.stageImport(samples: samples,
+            hkTypeId: HealthDataType.workoutRoute.identifier, webhookId: webhookID, cap: cap)
+        if !staged.hitCap { workoutsWithCapturedRoute.insert(workout.uuid.uuidString) }
+        return staged
     }
 
     // MARK: - Import history (explicit opt-in)
@@ -477,11 +493,7 @@ actor SyncEngine {
                 return HistoryImporter.Summary(staged: staged, hitCap: false, cancelled: true, cursor: cursor)
             }
 
-            let workouts = try await routeReader.workouts(
-                since: since,
-                before: cursor,
-                limit: pageSize
-            )
+            let workouts = try await scanWorkouts(since, cursor, pageSize)
             guard !workouts.isEmpty else {
                 return HistoryImporter.Summary(
                     staged: staged, hitCap: false, cancelled: false, cursor: cursor, exhausted: true
@@ -494,7 +506,7 @@ actor SyncEngine {
                 }
                 let samples: [Conduit_V1_Sample]
                 do {
-                    samples = try await routeReader.routeSamples(for: workout)
+                    samples = try await readRoutes(workout)
                 } catch {
                     logger.error("Route read failed for workout \(workout.uuid.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)")
                     continue
@@ -531,9 +543,10 @@ actor SyncEngine {
                         cap: webhook.outboxCap
                     )
                     result.inserted += retried.inserted
+                    result.hitCap = retried.hitCap
                 }
                 staged += result.inserted
-                workoutsWithCapturedRoute.insert(workout.uuid.uuidString)
+                if !result.hitCap { workoutsWithCapturedRoute.insert(workout.uuid.uuidString) }
                 onProgress(staged)
             }
 
@@ -572,7 +585,7 @@ actor SyncEngine {
         let deadline = Date().addingTimeInterval(SyncEngine.importDrainTimeout)
         while Date() < deadline {
             if isCancelled() { return false }
-            _ = try? await flush(webhook: webhook, webhookID: webhookID)
+            _ = try? await flush()
             try? await Task.sleep(nanoseconds: UInt64(SyncEngine.importDrainPollInterval * 1_000_000_000))
             let total = (try? outboxDAO.totalCount()) ?? webhook.outboxCap
             if total <= resumeThreshold { return true }
@@ -584,8 +597,7 @@ actor SyncEngine {
     /// Bypasses the time gate but still respects count-empty guard.
     func flushNow() async {
         do {
-            guard let webhook = try webhookConfigDAO.first(), let webhookID = webhook.id else { return }
-            try await flush(webhook: webhook, webhookID: webhookID)
+            try await flush()
         } catch {
             logger.error("flushNow error: \(error.localizedDescription, privacy: .public)")
         }
@@ -601,7 +613,7 @@ actor SyncEngine {
             guard let webhook = try webhookConfigDAO.first(), let webhookID = webhook.id else {
                 return "Open Conduit and configure your destination first. Nothing was captured or queued."
             }
-            guard let token = keychain.webhookBearerToken, !token.isEmpty else {
+            guard let token = await bearerToken(), !token.isEmpty else {
                 return "The destination token is unavailable. Unlock your iPhone and check Conduit setup. Nothing was captured or queued."
             }
             let enabled = try dataTypeConfigDAO.enabled().map(\.hkTypeId).sorted()
@@ -618,15 +630,16 @@ actor SyncEngine {
                     }
                     if type.stream == .route {
                         let since = Calendar.current.date(byAdding: .day, value: -WorkoutRouteReader.rescanWindowDays, to: Date())
-                        let workouts = try await self.routeReader.workouts(since: since, limit: ShortcutSync.workoutLimit)
+                        let workouts = try await self.scanWorkouts(since, nil, ShortcutSync.workoutLimit)
                         var capture = ShortcutSync.Capture(limited: workouts.count == ShortcutSync.workoutLimit)
                         for workout in workouts {
                             if Task.isCancelled || Date() >= deadline { capture.limited = true; break }
+                            guard !self.workoutsWithCapturedRoute.contains(workout.uuid.uuidString) else { continue }
                             do {
-                                let samples = try await self.routeReader.routeSamples(for: workout)
+                                let samples = try await self.readRoutes(workout)
                                 capture.captured += samples.count
                                 guard try self.dataTypeConfigDAO.find(hkTypeId: identifier)?.enabled == true else { capture.limited = true; break }
-                                let staged = try self.outboxDAO.stageImport(samples: samples, hkTypeId: identifier, webhookId: webhookID, cap: webhook.outboxCap)
+                                let staged = try self.stageCapturedRoutes(samples, for: workout, webhookID: webhookID, cap: webhook.outboxCap)
                                 capture.queued += staged.inserted
                                 if staged.hitCap { capture.limited = true; break }
                             } catch {
@@ -636,13 +649,11 @@ actor SyncEngine {
                         }
                         return capture
                     }
-                    let anchor = AnchoredReader.unarchiveAnchor(config.anchorBlob)
-                    let floor = config.captureStartedAt ?? Self.forwardCaptureFloor()
-                    if anchor == nil && config.captureStartedAt == nil {
-                        try self.dataTypeConfigDAO.setCaptureStartedAt(floor, hkTypeId: identifier)
+                    guard let anchor = AnchoredReader.unarchiveAnchor(config.anchorBlob) else {
+                        return ShortcutSync.Capture(limited: true, uninitializedType: type.displayName)
                     }
-                    let result = try await self.reader.read(type: type, anchor: anchor, since: floor,
-                        limit: ShortcutSync.pageSize, includeHeartRateStatistics: try self.includeHeartRateStatisticsForWorkouts())
+                    let result = try await self.readAnchored(type, anchor, nil, ShortcutSync.pageSize,
+                        try self.includeHeartRateStatisticsForWorkouts())
                     guard let current = try self.dataTypeConfigDAO.find(hkTypeId: identifier), current.enabled,
                           current.anchorBlob == config.anchorBlob else {
                         // An observer/import can run while the HealthKit read awaits.
@@ -660,7 +671,7 @@ actor SyncEngine {
                         return ShortcutSync.Capture(captured: result.samples.count, notice: ShortcutSync.failureMessage(error))
                     }
                 },
-                flush: { try await self.flush(webhook: webhook, webhookID: webhookID) }
+                flush: { try await self.flush() }
             )
             return summary.message
         } catch {
@@ -748,7 +759,14 @@ actor SyncEngine {
     // MARK: - Private
 
     @discardableResult
-    private func flush(webhook: WebhookConfig, webhookID: Int64) async throws -> Int {
+    private func flush() async throws -> Int {
+        let destinationDAO = webhookConfigDAO
+        let token = self.bearerToken
+        guard let (webhook, bearerToken) = try await MainActor.run(body: {
+            guard let webhook = try destinationDAO.first(), webhook.id != nil,
+                  let credential = token(), !credential.isEmpty else { return nil as (WebhookConfig, String)? }
+            return (webhook, credential)
+        }), let webhookID = webhook.id else { return 0 }
         // Reclaim any batch that's been `.inflight` long enough to be stuck
         // rather than genuinely still uploading (see `staleInflightTimeout`),
         // BEFORE draining — so a reclaimed row is immediately eligible for the
@@ -790,16 +808,25 @@ actor SyncEngine {
             return 0
         }
 
-        guard let bearerToken = keychain.webhookBearerToken else {
-            logger.error("No bearer token in keychain — cannot upload")
+        let submitUpload = self.submitUpload
+        let submitted: Bool
+        do {
+            submitted = try await MainActor.run {
+                guard try destinationDAO.first() == webhook, token() == bearerToken else { return false }
+                return submitUpload(batch, webhook.url, bearerToken)
+            }
+        } catch {
+            try outboxDAO.updateState(ids: batch.rowIDs, to: .pending)
+            throw error
+        }
+        guard submitted else {
+            try outboxDAO.updateState(ids: batch.rowIDs, to: .pending)
             return 0
         }
-
-        let submitted = uploader.upload(batch: batch, webhookURL: webhook.url, bearerToken: bearerToken)
 
         // Keep a background-refresh request pending so the outbox still drains if
         // the app is suspended before the next observer wake or foreground open.
         scheduleBackgroundFlush()
-        return submitted ? batch.rowIDs.count : 0
+        return batch.rowIDs.count
     }
 }
