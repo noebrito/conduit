@@ -1,5 +1,7 @@
 import XCTest
 import HealthKit
+import SwiftUI
+import UIKit
 @testable import Conduit
 
 /// The two effort-score identifiers HealthKit only vends on iOS 18+, while
@@ -50,6 +52,20 @@ final class HKPermissionWarningTests: XCTestCase {
 
         XCTAssertEqual(Set(view.typesWithWarning.map(\.identifier)), expectedIDs)
         XCTAssertFalse(expectedIDs.isEmpty)
+
+        let controller = hostForSnapshot(
+            NavigationStack { view.environment(makeSnapshotAppState()) },
+            style: .light,
+            sizeCategory: .large,
+            settle: 1.2
+        )
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 2
+        format.opaque = true
+        let image = UIGraphicsImageRenderer(size: SnapshotEnv.canvasSize, format: format).image { _ in
+            controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+        }
+        try writeArtifact(XCTUnwrap(image.pngData()), named: "recovery-permission-warnings.png")
     }
 
     func testAvailableWarningsRespectEnablementAndSyncTiming() throws {
@@ -100,7 +116,6 @@ final class HealthTypeRegistryTests: XCTestCase {
     private let registry = HealthTypeRegistry.shared
 
     func testHasAllV1Types() {
-        // ARCHITECTURE.md §7 specifies ~30 types across four streams.
         XCTAssertGreaterThanOrEqual(registry.all.count, 30)
     }
 
@@ -120,14 +135,9 @@ final class HealthTypeRegistryTests: XCTestCase {
         }
     }
 
-    /// This is the only test that can catch a typo in the two effort-score
-    /// identifiers, which are hand-written string literals in the registry that no
-    /// compiler checks. So the skip below is deliberately narrow: it is keyed on
-    /// the OS version via `EffortScoreIdentifiers.isAvailableOnThisOS`, NOT on
-    /// `sampleType == nil`. A blanket nil-skip would swallow a misspelling on every
-    /// runner; this way an iOS 18+ runner still proves both spellings resolve, and
-    /// an iOS 17.x runner (a supported deployment target) does not fail on a
-    /// genuine, expected unavailability.
+    /// Availability skips are keyed on explicit OS requirements for effort
+    /// scores and recovery metrics, never on `sampleType == nil`: a blanket
+    /// nil-skip would swallow misspelled raw identifiers on every runner.
     func testEveryIdentifierResolvesToAnHKSampleType() {
         for type in registry.all {
             if EffortScoreIdentifiers.all.contains(type.identifier), !EffortScoreIdentifiers.isAvailableOnThisOS {

@@ -413,6 +413,14 @@ final class RegistryReconcileTests: XCTestCase {
         await appState.reconcileRegistry(registry: .shared, defaults: defaults, authorize: authorize)
         XCTAssertEqual(authorizeCalls, 1, "the persisted signature must suppress a second prompt")
         XCTAssertFalse(try XCTUnwrap(dao.find(hkTypeId: recoveryMetricIDs[0])).enabled)
+        let upgrade: [String: Any] = [
+            "new_types_enabled_on_first_launch": recoveryMetricIDs,
+            "authorization_requests_after_two_launches": authorizeCalls,
+            "available_recovery_types_requested": availableRecoveryMetricIDs,
+            "rmssd_opt_out_preserved": try XCTUnwrap(dao.find(hkTypeId: recoveryMetricIDs[0])).enabled == false,
+        ]
+        try writeArtifact(JSONSerialization.data(withJSONObject: upgrade, options: [.prettyPrinted, .sortedKeys]),
+                          named: "persisted-recovery-upgrade.json")
     }
 
     // MARK: - Helpers

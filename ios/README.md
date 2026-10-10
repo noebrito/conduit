@@ -57,9 +57,8 @@ ios/
 
 ## Supported recovery data
 
-Version 1.9 adds the four recovery types below. The registry supports 61 HealthKit
-types across Activity & Fitness, Body Measurements, Vitals, Sleep & Mindfulness,
-Heart Events, Workouts and Nutrition.
+Version 1.9 adds the four recovery types below. The full supported type list is
+defined in [`HealthTypeRegistry.swift`](Conduit/Services/HealthKit/HealthTypeRegistry.swift).
 Recovery additions travel as ordinary quantity samples with their own identifier,
 source and timestamps; Conduit exports raw readings without diagnosis or scoring.
 
@@ -68,17 +67,18 @@ source and timestamps; Conduit exports raw readings without diagnosis or scoring
 | Heart Rate Variability (RMSSD) | `ms` | 27 | Requires a compatible HealthKit writer; API availability alone does not guarantee samples. Separate from the existing SDNN type. |
 | Sleeping Wrist Temperature | `degC` | 16 (app requires 17) | [Apple Watch Series 8+, Ultra, or SE 3](https://support.apple.com/en-us/102674), with sleep tracking and Sleep Focus configured. Separate from Body Temperature. |
 | Sleeping Breathing Disturbances | `count` | 18 | [Apple Watch Series 9+, Ultra 2+, or SE 3](https://support.apple.com/en-us/120031) with sleep tracking; these are raw measurements, not a sleep-apnea notification or diagnosis. |
-| Time in Daylight | `min` | 17 | Apple Watch with watchOS 10+ uses its ambient light sensor; no supporting writer means no samples. |
+| Time in Daylight | `min` | 17 | [Apple Watch SE, Series 6+, or Ultra](https://support.apple.com/en-us/119065) with watchOS 10+ uses its ambient light sensor; no supporting writer means no samples. |
 
 Sleeping wrist temperature is the absolute HealthKit temperature, not the deviation
 from baseline shown in Health ([Apple’s API documentation](https://developer.apple.com/documentation/healthkit/hkquantitytypeidentifier/applesleepingwristtemperature)).
 
 Identifiers unavailable on the running OS are skipped for HealthKit authorization,
-observation and reading. On upgrade, all four new Conduit toggles default **on**,
-existing choices remain intact, and the grown available read set triggers one
-HealthKit authorization request. Users still control HealthKit read permission and
-can turn each type off in Conduit. A subsequent OS upgrade that makes another type
-available grows the authorization set and triggers another request. This follows
+observation, reading and permission warnings. On upgrade, all four new Conduit
+toggles default **on**, existing choices remain intact, and the grown available
+read set triggers one HealthKit authorization request. Users still control
+HealthKit read permission and can turn each type off in Conduit. A subsequent OS
+upgrade that makes another type available grows the authorization set and triggers
+another request. This follows
 the athlete-metrics precedent; sensitive-category expansion would need a separate
 consent/default-off decision and is outside this batch.
 

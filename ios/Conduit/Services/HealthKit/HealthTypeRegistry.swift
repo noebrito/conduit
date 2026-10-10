@@ -1,7 +1,7 @@
 import Foundation
 import HealthKit
 
-/// The OpenSearch data stream a type's samples are routed to (ARCHITECTURE.md §3).
+/// The OpenSearch data stream a type's samples are routed to.
 /// Streams are grouped by value *shape*, not by HK type, so new HK types add no
 /// schema work.
 enum HealthStream: String, Codable, CaseIterable, Sendable {
@@ -16,7 +16,7 @@ enum HealthStream: String, Codable, CaseIterable, Sendable {
     case route
 }
 
-/// UI grouping for the Data Types picker (ARCHITECTURE.md §7).
+/// UI grouping for the Data Types picker.
 enum HealthCategory: String, Codable, CaseIterable, Sendable {
     case activityFitness = "Activity & Fitness"
     case bodyMeasurements = "Body Measurements"
@@ -147,19 +147,16 @@ struct HealthTypeRegistry: Sendable {
     }
 }
 
-// MARK: - The v1 type table
+// MARK: - Supported type table
 
 extension HealthDataType {
     // Activity & Fitness → conduit-quantity
     static let heartRate = HealthDataType(identifier: HKQuantityTypeIdentifier.heartRate.rawValue, displayName: "Heart Rate", category: .activityFitness, defaultUnit: "count/min", stream: .quantity)
     static let restingHeartRate = HealthDataType(identifier: HKQuantityTypeIdentifier.restingHeartRate.rawValue, displayName: "Resting Heart Rate", category: .activityFitness, defaultUnit: "count/min", stream: .quantity)
     static let heartRateVariabilitySDNN = HealthDataType(identifier: HKQuantityTypeIdentifier.heartRateVariabilitySDNN.rawValue, displayName: "Heart Rate Variability (SDNN)", category: .activityFitness, defaultUnit: "ms", stream: .quantity)
-    // RMSSD is distinct from SDNN. iOS 27+; keep the raw identifier so the
-    // iOS 17 deployment target compiles and existing nil-skip behavior applies.
-    // Availability of the API does not guarantee a device/app records samples.
+    // RMSSD is iOS 27+; keep the raw identifier so the iOS 17 deployment target
+    // compiles and existing nil-skip behavior applies.
     static let heartRateVariabilityRMSSD = HealthDataType(identifier: "HKQuantityTypeIdentifierHeartRateVariabilityRMSSD", displayName: "Heart Rate Variability (RMSSD)", category: .activityFitness, defaultUnit: "ms", stream: .quantity)
-    // Apple Watch (watchOS 10+) records daylight with its ambient light sensor;
-    // users without a supporting writer may have no samples.
     static let timeInDaylight = HealthDataType(identifier: HKQuantityTypeIdentifier.timeInDaylight.rawValue, displayName: "Time in Daylight", category: .activityFitness, defaultUnit: "min", stream: .quantity)
     static let walkingHeartRateAverage = HealthDataType(identifier: HKQuantityTypeIdentifier.walkingHeartRateAverage.rawValue, displayName: "Walking Heart Rate Average", category: .activityFitness, defaultUnit: "count/min", stream: .quantity)
     static let stepCount = HealthDataType(identifier: HKQuantityTypeIdentifier.stepCount.rawValue, displayName: "Steps", category: .activityFitness, defaultUnit: "count", stream: .quantity)
@@ -272,11 +269,9 @@ extension HealthDataType {
     ]
 
     // Sleep & Mindfulness → conduit-category + conduit-quantity.
-    // Wrist temperature requires a temperature-sensing Apple Watch worn during
-    // sleep. Breathing disturbances require a supporting Apple Watch and sleep
-    // tracking, and are raw counts, not a sleep-apnea diagnosis. iOS 18+ uses the
-    // same raw-string/nil-skip path as effort scores; do not add #available guards.
     static let appleSleepingWristTemperature = HealthDataType(identifier: HKQuantityTypeIdentifier.appleSleepingWristTemperature.rawValue, displayName: "Sleeping Wrist Temperature", category: .sleepMindfulness, defaultUnit: "degC", stream: .quantity)
+    // Breathing disturbances are iOS 18+; use the same raw-string/nil-skip path
+    // as effort scores to compile at the iOS 17 deployment target.
     static let appleSleepingBreathingDisturbances = HealthDataType(identifier: "HKQuantityTypeIdentifierAppleSleepingBreathingDisturbances", displayName: "Sleeping Breathing Disturbances", category: .sleepMindfulness, defaultUnit: "count", stream: .quantity)
     static let sleepAnalysis = HealthDataType(identifier: HKCategoryTypeIdentifier.sleepAnalysis.rawValue, displayName: "Sleep Analysis", category: .sleepMindfulness, defaultUnit: nil, stream: .category)
     static let mindfulSession = HealthDataType(identifier: HKCategoryTypeIdentifier.mindfulSession.rawValue, displayName: "Mindful Session", category: .sleepMindfulness, defaultUnit: nil, stream: .category)
