@@ -156,6 +156,76 @@ final class ShortcutSyncTests: XCTestCase {
     }
 
     @MainActor
+    func testDelayedObserverCannotRestoreSampleAfterShortcutDeliversDeletion() async throws {
+        let database = try AppDatabase.makeInMemory()
+        _ = try configure(database, type: .stepCount)
+        let identifier = HealthDataType.stepCount.identifier
+        let startingAnchor = try XCTUnwrap(DataTypeConfigDAO(database).anchorBlob(hkTypeId: identifier))
+        let gate = ShortcutReadGate()
+        let deletedSample = sample("deleted-steps")
+        var delivered: [Conduit_V1_Envelope] = []
+        let engine = SyncEngine(database: database, readAnchored: { _, anchor, _, limit, _ in
+            XCTAssertEqual(try anchor.map(AnchoredReader.archiveAnchor), startingAnchor)
+            if limit == HKObjectQueryNoLimit {
+                return await gate.pause(AnchoredReader.Result(samples: [deletedSample], deletedUuids: [], newAnchor: HKQueryAnchor(fromValue: 2)))
+            }
+            XCTAssertEqual(limit, ShortcutSync.pageSize)
+            return AnchoredReader.Result(samples: [], deletedUuids: [deletedSample.uuid], newAnchor: HKQueryAnchor(fromValue: 3))
+        }, bearerToken: { "test-token" }, submitUpload: { batch, _, _ in
+            if let envelope = try? Conduit_V1_Envelope(jsonUTF8Data: batch.encodedJSON) { delivered.append(envelope) }
+            return self.deliver(batch, database: database)
+        })
+        let observer = Task { await engine.handleObserverWake(typeIdentifier: identifier) }
+        await gate.waitUntilStarted()
+        let message = await engine.syncFromShortcut()
+        XCTAssertTrue(message.contains("processed 1 deletions. Submitted 1"))
+        XCTAssertEqual(delivered.flatMap(\.batches).flatMap(\.deletedUuids), [deletedSample.uuid])
+        XCTAssertTrue(delivered.flatMap(\.batches).flatMap(\.samples).isEmpty)
+        XCTAssertEqual(try OutboxDAO(database).totalCount(), 0)
+        let committedConfig = try XCTUnwrap(DataTypeConfigDAO(database).find(hkTypeId: identifier))
+        XCTAssertNotEqual(committedConfig.anchorBlob, startingAnchor)
+        await gate.resume()
+        await observer.value
+        XCTAssertEqual(try DataTypeConfigDAO(database).find(hkTypeId: identifier), committedConfig)
+        XCTAssertEqual(try OutboxDAO(database).totalCount(), 0)
+        XCTAssertEqual(try StagedDailyCountDAO(database).count(), 0)
+        XCTAssertEqual(delivered.count, 1)
+    }
+
+    @MainActor
+    func testDelayedShortcutCannotStageOrReportDeletionsAfterObserverAdvances() async throws {
+        let database = try AppDatabase.makeInMemory()
+        _ = try configure(database, type: .stepCount)
+        let identifier = HealthDataType.stepCount.identifier
+        let gate = ShortcutReadGate()
+        let deletedSample = sample("deleted-steps")
+        var delivered: [Conduit_V1_Envelope] = []
+        let engine = SyncEngine(database: database, readAnchored: { _, _, _, limit, _ in
+            if limit == ShortcutSync.pageSize {
+                return await gate.pause(AnchoredReader.Result(samples: [deletedSample], deletedUuids: ["stale-deletion"], newAnchor: HKQueryAnchor(fromValue: 2)))
+            }
+            return AnchoredReader.Result(samples: [], deletedUuids: [deletedSample.uuid], newAnchor: HKQueryAnchor(fromValue: 3))
+        }, bearerToken: { "test-token" }, submitUpload: { batch, _, _ in
+            if let envelope = try? Conduit_V1_Envelope(jsonUTF8Data: batch.encodedJSON) { delivered.append(envelope) }
+            return self.deliver(batch, database: database)
+        })
+        let shortcut = Task { await engine.syncFromShortcut() }
+        await gate.waitUntilStarted()
+        await engine.handleObserverWake(typeIdentifier: identifier)
+        XCTAssertEqual(delivered.flatMap(\.batches).flatMap(\.deletedUuids), [deletedSample.uuid])
+        XCTAssertEqual(try OutboxDAO(database).totalCount(), 0)
+        let committedConfig = try XCTUnwrap(DataTypeConfigDAO(database).find(hkTypeId: identifier))
+        await gate.resume()
+        let message = await shortcut.value
+        XCTAssertTrue(message.contains("Captured 1 samples; queued 0 new samples; processed 0 deletions. Submitted 0"))
+        XCTAssertTrue(message.contains("Capture was bounded"))
+        XCTAssertEqual(try DataTypeConfigDAO(database).find(hkTypeId: identifier), committedConfig)
+        XCTAssertEqual(try OutboxDAO(database).totalCount(), 0)
+        XCTAssertEqual(try StagedDailyCountDAO(database).count(), 0)
+        XCTAssertEqual(delivered.count, 1)
+    }
+
+    @MainActor
     func testDestinationReplacementDuringReadSubmitsOnlyMatchingCredentials() async throws {
         let database = try AppDatabase.makeInMemory()
         var webhook = try configure(database, type: .stepCount)
@@ -410,6 +480,34 @@ final class ShortcutSyncTests: XCTestCase {
         XCTAssertEqual(reads, [HealthDataType.stepCount.identifier])
         XCTAssertTrue(message.contains("Heart Rate is not yet initialized"))
         XCTAssertEqual(try OutboxDAO(database).totalCount(), 1)
+    }
+
+    @MainActor
+    func testUnavailableTypeIsSkippedBeforeInitializationAdvice() async throws {
+        let unavailable = HealthDataType.heartRateVariabilityRMSSD
+        if #available(iOS 27, *) { throw XCTSkip("RMSSD is available on iOS 27") }
+        XCTAssertNil(unavailable.sampleType)
+        let database = try AppDatabase.makeInMemory()
+        _ = try configure(database, type: unavailable, initialized: false)
+        try enable(database, type: .stepCount)
+        try enable(database, type: .heartRate, initialized: false)
+        let captured = sample("available-steps")
+        var reads: [String] = []
+        let engine = SyncEngine(database: database, readAnchored: { type, _, _, _, _ in
+            reads.append(type.identifier)
+            return AnchoredReader.Result(samples: [captured], deletedUuids: [], newAnchor: HKQueryAnchor(fromValue: 2))
+        }, bearerToken: { "test-token" }, submitUpload: { batch, _, _ in self.deliver(batch, database: database) })
+        let message = await engine.syncFromShortcut()
+        XCTAssertEqual(reads, [HealthDataType.stepCount.identifier])
+        XCTAssertTrue(message.contains("Heart Rate is not yet initialized"))
+        XCTAssertFalse(message.contains(unavailable.displayName))
+        XCTAssertTrue(message.contains("queued 1 new samples"))
+        XCTAssertTrue(message.contains("Submitted 1"))
+        let skipped = try XCTUnwrap(DataTypeConfigDAO(database).find(hkTypeId: unavailable.identifier))
+        XCTAssertNil(skipped.anchorBlob)
+        XCTAssertNil(skipped.captureStartedAt)
+        XCTAssertNil(skipped.lastSyncAt)
+        XCTAssertEqual(try OutboxDAO(database).totalCount(), 0)
     }
 
     @MainActor

@@ -95,7 +95,7 @@ final class WorkoutEnrichmentEvidenceTests: XCTestCase {
             samples: [sample],
             hkTypeId: HealthDataType.workout.identifier,
             webhookId: webhookID,
-            anchorBlob: Data("anchor-workout".utf8)
+            anchorBlob: Data("anchor-workout".utf8), expectedAnchorBlob: nil
         )
 
         // The real batcher builds the body the background URLSession POSTs.

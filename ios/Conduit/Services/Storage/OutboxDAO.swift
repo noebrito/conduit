@@ -195,11 +195,15 @@ struct OutboxDAO {
         hkTypeId: String,
         webhookId: Int64,
         anchorBlob: Data?,
+        expectedAnchorBlob: Data?,
         deletedUuids: [String] = [],
         cap: Int? = nil,
         syncedAt: Date = Date()
-    ) throws -> Int {
+    ) throws -> Int? {
         try database.dbWriter.write { db in
+            guard try DataTypeConfig.fetchOne(db, key: hkTypeId)?.anchorBlob == expectedAnchorBlob else {
+                return nil
+            }
             var insertedCount = 0
             var currentTotal = cap != nil ? try OutboxRow.fetchCount(db) : 0
             var droppedForCap = false

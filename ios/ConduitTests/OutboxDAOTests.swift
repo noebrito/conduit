@@ -52,7 +52,7 @@ final class OutboxDAOTests: XCTestCase {
             samples: samples,
             hkTypeId: heartRateID,
             webhookId: webhookId,
-            anchorBlob: anchorBlob
+            anchorBlob: anchorBlob, expectedAnchorBlob: nil
         )
 
         XCTAssertEqual(inserted, 2)
@@ -68,14 +68,14 @@ final class OutboxDAOTests: XCTestCase {
             samples: [makeSample(uuid: "A"), makeSample(uuid: "B")],
             hkTypeId: heartRateID,
             webhookId: webhookId,
-            anchorBlob: Data([0x01])
+            anchorBlob: Data([0x01]), expectedAnchorBlob: nil
         )
 
         let insertedSecondPass = try outbox.ingest(
             samples: [makeSample(uuid: "A"), makeSample(uuid: "B"), makeSample(uuid: "C")],
             hkTypeId: heartRateID,
             webhookId: webhookId,
-            anchorBlob: Data([0x02])
+            anchorBlob: Data([0x02]), expectedAnchorBlob: Data([0x01])
         )
 
         XCTAssertEqual(insertedSecondPass, 1, "Only the new sample C should be inserted")
@@ -83,6 +83,38 @@ final class OutboxDAOTests: XCTestCase {
 
         let config = try DataTypeConfigDAO(appDB).find(hkTypeId: heartRateID)
         XCTAssertEqual(config?.anchorBlob, Data([0x02]), "Anchor should advance on re-run")
+    }
+
+    func testIngestRejectsStaleStartingAnchorsWithoutChangingPersistedState() throws {
+        let syncedAt = Date()
+        let inserted = try outbox.ingest(
+            samples: [makeSample(uuid: "retained")],
+            hkTypeId: heartRateID,
+            webhookId: webhookId,
+            anchorBlob: Data([0x03]),
+            expectedAnchorBlob: nil,
+            syncedAt: syncedAt
+        )
+        XCTAssertEqual(inserted, 1)
+        let committedConfig = try XCTUnwrap(DataTypeConfigDAO(appDB).find(hkTypeId: heartRateID))
+        let committedRow = try XCTUnwrap(outbox.find(hkSampleUuid: "retained"))
+        let staleAnchors: [Data?] = [nil, Data([0x01])]
+        for staleAnchor in staleAnchors {
+            let rejected = try outbox.ingest(
+                samples: [makeSample(uuid: "stale-sample")],
+                hkTypeId: heartRateID,
+                webhookId: webhookId,
+                anchorBlob: Data([0x02]),
+                expectedAnchorBlob: staleAnchor,
+                deletedUuids: ["retained", "stale-tombstone"],
+                syncedAt: syncedAt.addingTimeInterval(60)
+            )
+            XCTAssertNil(rejected)
+            XCTAssertEqual(try DataTypeConfigDAO(appDB).find(hkTypeId: heartRateID), committedConfig)
+            XCTAssertEqual(try outbox.find(hkSampleUuid: "retained"), committedRow)
+            XCTAssertEqual(try outbox.totalCount(), 1)
+            XCTAssertEqual(try StagedDailyCountDAO(appDB).count(on: syncedAt), 1)
+        }
     }
 
     func testReadyToSendReturnsPendingRows() throws {
@@ -103,7 +135,7 @@ final class OutboxDAOTests: XCTestCase {
             samples: samples,
             hkTypeId: heartRateID,
             webhookId: webhookId,
-            anchorBlob: Data([0xFF]),
+            anchorBlob: Data([0xFF]), expectedAnchorBlob: nil,
             cap: 3
         )
 
@@ -122,7 +154,7 @@ final class OutboxDAOTests: XCTestCase {
             samples: samples,
             hkTypeId: heartRateID,
             webhookId: webhookId,
-            anchorBlob: Data([0x02]),
+            anchorBlob: Data([0x02]), expectedAnchorBlob: Data([0x01]),
             cap: 3
         )
 
@@ -138,7 +170,7 @@ final class OutboxDAOTests: XCTestCase {
             samples: samples,
             hkTypeId: heartRateID,
             webhookId: webhookId,
-            anchorBlob: Data([0xAA]),
+            anchorBlob: Data([0xAA]), expectedAnchorBlob: nil,
             cap: 100
         )
 
@@ -156,7 +188,7 @@ final class OutboxDAOTests: XCTestCase {
             samples: [makeSample(uuid: "live-1")],
             hkTypeId: heartRateID,
             webhookId: webhookId,
-            anchorBlob: Data([0x07]),
+            anchorBlob: Data([0x07]), expectedAnchorBlob: nil,
             deletedUuids: ["ghost-1"]
         )
 
@@ -214,7 +246,7 @@ final class OutboxDAOTests: XCTestCase {
             samples: [makeSample(uuid: "s1")],
             hkTypeId: heartRateID,
             webhookId: webhookId,
-            anchorBlob: Data([0x01]),
+            anchorBlob: Data([0x01]), expectedAnchorBlob: nil,
             deletedUuids: ["g1", "g2"]
         )
         XCTAssertEqual(try tally.count(), 1, "only the one live sample counts toward the daily tally, not the two tombstones")
@@ -285,7 +317,7 @@ final class OutboxDAOTests: XCTestCase {
             samples: firstBatch,
             hkTypeId: heartRateID,
             webhookId: webhookId,
-            anchorBlob: Data([0x01]),
+            anchorBlob: Data([0x01]), expectedAnchorBlob: nil,
             cap: 3
         )
         XCTAssertEqual(inserted, 3)
@@ -295,7 +327,7 @@ final class OutboxDAOTests: XCTestCase {
             samples: [makeSample(uuid: "blocked")],
             hkTypeId: heartRateID,
             webhookId: webhookId,
-            anchorBlob: Data([0x02]),
+            anchorBlob: Data([0x02]), expectedAnchorBlob: Data([0x01]),
             cap: 3
         )
         XCTAssertEqual(blocked, 0, "While the outbox is at cap, nothing new stages")
@@ -313,7 +345,7 @@ final class OutboxDAOTests: XCTestCase {
             samples: [makeSample(uuid: "today-1"), makeSample(uuid: "today-2")],
             hkTypeId: heartRateID,
             webhookId: webhookId,
-            anchorBlob: Data([0x03]),
+            anchorBlob: Data([0x03]), expectedAnchorBlob: Data([0x01]),
             cap: 3
         )
         XCTAssertEqual(resumed, 2, "Once drained below cap, forward capture stages again")
@@ -491,7 +523,7 @@ final class OutboxDAOTests: XCTestCase {
             samples: samples,
             hkTypeId: heartRateID,
             webhookId: webhookId,
-            anchorBlob: Data([0x01])
+            anchorBlob: Data([0x01]), expectedAnchorBlob: nil
         )
         XCTAssertEqual(try staged.count(), 5, "Tally should equal the number of samples staged today")
         XCTAssertEqual(try outbox.count(state: .pending), 5)
@@ -572,7 +604,7 @@ final class OutboxDAOTests: XCTestCase {
         _ = try outbox.ingest(
             samples: (0..<7).map { makeSample(uuid: "s-\($0)") },
             hkTypeId: heartRateID, webhookId: webhookId,
-            anchorBlob: Data([0x01]), syncedAt: syncedAt)
+            anchorBlob: Data([0x01]), expectedAnchorBlob: nil, syncedAt: syncedAt)
 
         XCTAssertEqual(try staged.count(on: syncedAt), baselineTally,
                        "Batched per-page tally must equal the per-sample baseline")
@@ -581,7 +613,7 @@ final class OutboxDAOTests: XCTestCase {
         _ = try outbox.ingest(
             samples: (0..<7).map { makeSample(uuid: "s-\($0)") },
             hkTypeId: heartRateID, webhookId: webhookId,
-            anchorBlob: Data([0x02]), syncedAt: syncedAt)
+            anchorBlob: Data([0x02]), expectedAnchorBlob: Data([0x01]), syncedAt: syncedAt)
         XCTAssertEqual(try staged.count(on: syncedAt), baselineTally,
                        "Duplicate page must not inflate the tally")
 

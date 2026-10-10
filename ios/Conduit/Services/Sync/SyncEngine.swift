@@ -177,14 +177,15 @@ actor SyncEngine {
             // `cap` enforces the configured outbox back-pressure limit: if the
             // batch would exceed it, ingest stages what fits and leaves the
             // anchor UNADVANCED so the rest is re-delivered next read (no loss).
-            let inserted = try outboxDAO.ingest(
+            guard let inserted = try outboxDAO.ingest(
                 samples: result.samples,
                 hkTypeId: typeIdentifier,
                 webhookId: webhookID,
                 anchorBlob: result.newAnchorData,
+                expectedAnchorBlob: typeConfig.anchorBlob,
                 deletedUuids: result.deletedUuids,
                 cap: webhook.outboxCap
-            )
+            ) else { return }
             if result.deletedUuids.isEmpty {
                 logger.info("Observer wake for \(typeIdentifier, privacy: .public): \(inserted) new samples staged")
             } else {
@@ -613,7 +614,7 @@ actor SyncEngine {
                 capture: { identifier in
                     // Re-check the toggle after actor reentrancy during each read.
                     guard let config = try self.dataTypeConfigDAO.find(hkTypeId: identifier), config.enabled,
-                          let type = HealthTypeRegistry.shared.type(forIdentifier: identifier) else {
+                          let type = HealthTypeRegistry.shared.type(forIdentifier: identifier), type.sampleType != nil else {
                         return ShortcutSync.Capture()
                     }
                     if type.stream == .route {
@@ -642,16 +643,16 @@ actor SyncEngine {
                     }
                     let result = try await self.readAnchored(type, anchor, nil, ShortcutSync.pageSize,
                         try self.includeHeartRateStatisticsForWorkouts())
-                    guard let current = try self.dataTypeConfigDAO.find(hkTypeId: identifier), current.enabled,
-                          current.anchorBlob == config.anchorBlob else {
-                        // An observer/import can run while the HealthKit read awaits.
-                        // Never overwrite a newer anchor with this older page.
+                    guard try self.dataTypeConfigDAO.find(hkTypeId: identifier)?.enabled == true else {
                         return ShortcutSync.Capture(captured: result.samples.count, limited: true)
                     }
                     do {
-                        let inserted = try self.outboxDAO.ingest(samples: result.samples, hkTypeId: identifier,
+                        guard let inserted = try self.outboxDAO.ingest(samples: result.samples, hkTypeId: identifier,
                             webhookId: webhookID, anchorBlob: result.newAnchorData,
-                            deletedUuids: result.deletedUuids, cap: webhook.outboxCap)
+                            expectedAnchorBlob: config.anchorBlob,
+                            deletedUuids: result.deletedUuids, cap: webhook.outboxCap) else {
+                            return ShortcutSync.Capture(captured: result.samples.count, limited: true)
+                        }
                         return ShortcutSync.Capture(captured: result.samples.count, queued: inserted,
                             deletions: result.deletedUuids.count,
                             limited: result.samples.count + result.deletedUuids.count >= ShortcutSync.pageSize || inserted < result.samples.count)
