@@ -75,6 +75,8 @@ actor SyncEngine {
         self.throttle = Throttle(minInterval: 900, forceFlushThreshold: 200)
     }
 
+    private var shortcutIsRunning = false
+
     // MARK: - Forward-only capture floor
 
     /// The forward-only capture floor seeded on the first (anchor-less) read of
@@ -570,7 +572,7 @@ actor SyncEngine {
         let deadline = Date().addingTimeInterval(SyncEngine.importDrainTimeout)
         while Date() < deadline {
             if isCancelled() { return false }
-            try? await flush(webhook: webhook, webhookID: webhookID)
+            _ = try? await flush(webhook: webhook, webhookID: webhookID)
             try? await Task.sleep(nanoseconds: UInt64(SyncEngine.importDrainPollInterval * 1_000_000_000))
             let total = (try? outboxDAO.totalCount()) ?? webhook.outboxCap
             if total <= resumeThreshold { return true }
@@ -586,6 +588,83 @@ actor SyncEngine {
             try await flush(webhook: webhook, webhookID: webhookID)
         } catch {
             logger.error("flushNow error: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Reuses the live anchors and atomic ingest, with one page per enabled type.
+    /// Routes have no anchor: scan a bounded recent workout page and dedupe.
+    func syncFromShortcut() async -> String {
+        guard !shortcutIsRunning else { return "A Shortcuts sync is already running. Try again after it finishes." }
+        shortcutIsRunning = true
+        defer { shortcutIsRunning = false }
+        do {
+            guard let webhook = try webhookConfigDAO.first(), let webhookID = webhook.id else {
+                return "Open Conduit and configure your destination first. Nothing was captured or queued."
+            }
+            guard let token = keychain.webhookBearerToken, !token.isEmpty else {
+                return "The destination token is unavailable. Unlock your iPhone and check Conduit setup. Nothing was captured or queued."
+            }
+            let enabled = try dataTypeConfigDAO.enabled().map(\.hkTypeId).sorted()
+            guard !enabled.isEmpty else { return "No Health types are enabled. Enable types in Conduit first. Nothing was captured or queued." }
+            let deadline = Date().addingTimeInterval(ShortcutSync.timeBudget)
+            let summary = await ShortcutSync.run(
+                identifiers: enabled,
+                shouldStop: { Task.isCancelled || Date() >= deadline },
+                capture: { identifier in
+                    // Re-check the toggle after actor reentrancy during each read.
+                    guard let config = try self.dataTypeConfigDAO.find(hkTypeId: identifier), config.enabled,
+                          let type = HealthTypeRegistry.shared.type(forIdentifier: identifier) else {
+                        return ShortcutSync.Capture()
+                    }
+                    if type.stream == .route {
+                        let since = Calendar.current.date(byAdding: .day, value: -WorkoutRouteReader.rescanWindowDays, to: Date())
+                        let workouts = try await self.routeReader.workouts(since: since, limit: ShortcutSync.workoutLimit)
+                        var capture = ShortcutSync.Capture(limited: workouts.count == ShortcutSync.workoutLimit)
+                        for workout in workouts {
+                            if Task.isCancelled || Date() >= deadline { capture.limited = true; break }
+                            do {
+                                let samples = try await self.routeReader.routeSamples(for: workout)
+                                capture.captured += samples.count
+                                guard try self.dataTypeConfigDAO.find(hkTypeId: identifier)?.enabled == true else { capture.limited = true; break }
+                                let staged = try self.outboxDAO.stageImport(samples: samples, hkTypeId: identifier, webhookId: webhookID, cap: webhook.outboxCap)
+                                capture.queued += staged.inserted
+                                if staged.hitCap { capture.limited = true; break }
+                            } catch {
+                                capture.notice = ShortcutSync.failureMessage(error)
+                                break
+                            }
+                        }
+                        return capture
+                    }
+                    let anchor = AnchoredReader.unarchiveAnchor(config.anchorBlob)
+                    let floor = config.captureStartedAt ?? Self.forwardCaptureFloor()
+                    if anchor == nil && config.captureStartedAt == nil {
+                        try self.dataTypeConfigDAO.setCaptureStartedAt(floor, hkTypeId: identifier)
+                    }
+                    let result = try await self.reader.read(type: type, anchor: anchor, since: floor,
+                        limit: ShortcutSync.pageSize, includeHeartRateStatistics: try self.includeHeartRateStatisticsForWorkouts())
+                    guard let current = try self.dataTypeConfigDAO.find(hkTypeId: identifier), current.enabled,
+                          current.anchorBlob == config.anchorBlob else {
+                        // An observer/import can run while the HealthKit read awaits.
+                        // Never overwrite a newer anchor with this older page.
+                        return ShortcutSync.Capture(captured: result.samples.count, limited: true)
+                    }
+                    do {
+                        let inserted = try self.outboxDAO.ingest(samples: result.samples, hkTypeId: identifier,
+                            webhookId: webhookID, anchorBlob: result.newAnchorData,
+                            deletedUuids: result.deletedUuids, cap: webhook.outboxCap)
+                        return ShortcutSync.Capture(captured: result.samples.count, queued: inserted,
+                            deletions: result.deletedUuids.count,
+                            limited: result.samples.count + result.deletedUuids.count >= ShortcutSync.pageSize || inserted < result.samples.count)
+                    } catch {
+                        return ShortcutSync.Capture(captured: result.samples.count, notice: ShortcutSync.failureMessage(error))
+                    }
+                },
+                flush: { try await self.flush(webhook: webhook, webhookID: webhookID) }
+            )
+            return summary.message
+        } catch {
+            return "Could not read Conduit configuration. Unlock your iPhone and open Conduit, then retry. Nothing was captured or queued by this action."
         }
     }
 
@@ -668,7 +747,8 @@ actor SyncEngine {
 
     // MARK: - Private
 
-    private func flush(webhook: WebhookConfig, webhookID: Int64) async throws {
+    @discardableResult
+    private func flush(webhook: WebhookConfig, webhookID: Int64) async throws -> Int {
         // Reclaim any batch that's been `.inflight` long enough to be stuck
         // rather than genuinely still uploading (see `staleInflightTimeout`),
         // BEFORE draining — so a reclaimed row is immediately eligible for the
@@ -707,18 +787,19 @@ actor SyncEngine {
             if drained {
                 try SyncStateDAO(database).setLastSyncedAt()
             }
-            return
+            return 0
         }
 
         guard let bearerToken = keychain.webhookBearerToken else {
             logger.error("No bearer token in keychain — cannot upload")
-            return
+            return 0
         }
 
-        uploader.upload(batch: batch, webhookURL: webhook.url, bearerToken: bearerToken)
+        let submitted = uploader.upload(batch: batch, webhookURL: webhook.url, bearerToken: bearerToken)
 
         // Keep a background-refresh request pending so the outbox still drains if
         // the app is suspended before the next observer wake or foreground open.
         scheduleBackgroundFlush()
+        return submitted ? batch.rowIDs.count : 0
     }
 }

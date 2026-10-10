@@ -191,3 +191,33 @@ empty fixture in a real simulator window when `TEST_RUNNER_CONDUIT_EVIDENCE_DIR`
 is passed to `xcodebuild test`; point it outside the repository. This is a rendering
 check; physical-device StoreKit presentation and end-to-end link opening remain
 unverified.
+
+## Shortcuts — Sync Health Data
+
+After setup, add **Conduit → Sync Health Data** in Apple's Shortcuts app, or use
+Conduit's provided **Sync Health Data** app shortcut. It uses only the existing
+destination, token and enabled types; it does not request new permissions.
+The action requires local device authentication and checks protected-data
+availability before opening the database. HealthKit reads may be unavailable
+while locked: unlock the iPhone and retry. A lock during capture is reported as
+partial progress, preserving data already queued. An empty HealthKit read does
+not prove that no samples exist or that read permission was granted.
+
+Each run captures one incremental page (up to 200 objects) per enabled type,
+with the normal first-read start-of-today floor and atomic enqueue/anchor update.
+Routes use a deduplicated scan of up to 10 recent workouts. Capture stops between
+reads/workouts on cancellation or after a 20-second cooperative budget; an
+in-progress HealthKit query can exceed that budget. Outbox capacity still applies.
+More data may remain; the existing observer/import paths continue normally.
+
+The result distinguishes samples captured, new samples queued, deletions
+processed, and samples **submitted for background upload**. Submission may
+include older queued data. It does **not** wait for or claim receiver acceptance;
+check Activity Log for the actual delivery result. It flushes one batch, respecting
+existing backoff and batch-size limits. Cancellation retains committed pages and
+skips starting a new upload. There is no new background scheduler or relay.
+
+Local simulator and injected tests do not verify appearance/execution inside the
+native Shortcuts app, Siri, physical-device locked-data behavior, cancellation by
+Shortcuts/iOS, or large-queue behavior.
+Validate those on an iPhone before an App Store release.

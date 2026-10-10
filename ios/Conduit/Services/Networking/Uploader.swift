@@ -96,10 +96,11 @@ final class Uploader: NSObject {
 
     /// Enqueue a batch for background upload. The task's `taskDescription` carries
     /// the `batchID` so the delegate can look up the affected rows on completion.
-    func upload(batch: Batcher.BatchResult, webhookURL: String, bearerToken: String) {
+    @discardableResult
+    func upload(batch: Batcher.BatchResult, webhookURL: String, bearerToken: String) -> Bool {
         guard let url = URL(string: webhookURL) else {
             logger.error("Invalid webhook URL: \(webhookURL, privacy: .public)")
-            return
+            return false
         }
 
         var request = URLRequest(url: url)
@@ -119,13 +120,16 @@ final class Uploader: NSObject {
         } catch {
             logger.error("Failed to write batch file: \(error.localizedDescription, privacy: .public)")
             resetToRetry(batchID: batch.batchID, error: error.localizedDescription, retryAfter: nil, httpStatus: nil)
-            return
+            return false
         }
 
         let task = session.uploadTask(with: request, fromFile: tmpURL)
         task.taskDescription = batch.batchID
         task.resume()
+        // Submission is not receiver acceptance.
+
         logger.info("Enqueued upload task for batch \(batch.batchID, privacy: .public) (\(batch.rowIDs.count) rows)")
+        return true
     }
 
     // MARK: - Crash recovery
