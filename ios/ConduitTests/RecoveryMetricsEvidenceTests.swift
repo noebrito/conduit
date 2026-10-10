@@ -136,7 +136,7 @@ final class RecoveryMetricsEvidenceTests: XCTestCase {
             let hkSample = HKQuantitySample(type: hkType, quantity: HKQuantity(unit: reading.recordedUnit, doubleValue: reading.recordedValue), start: start, end: start.addingTimeInterval(60))
             let sample = try XCTUnwrap(AnchoredReader.makeSample(from: hkSample, type: type))
             XCTAssertEqual(sample.quantity.value, reading.wireValue, accuracy: 0.0001)
-            _ = try outbox.ingest(samples: [sample], hkTypeId: reading.identifier, webhookId: webhookID, anchorBlob: Data("anchor".utf8), expectedAnchorBlob: nil)
+            _ = try outbox.ingest(samples: [sample], hkTypeId: reading.identifier, webhookId: webhookID, anchorBlob: Data("anchor".utf8), expectedAnchorBlob: nil, expectedIngestRevision: 0)
         }
 
         let batch = try XCTUnwrap(Batcher(database: db).buildBatch(webhookID: webhookID, limit: 500, deviceID: "recovery-evidence-device", now: start.addingTimeInterval(120)))

@@ -193,6 +193,63 @@ final class ShortcutSyncTests: XCTestCase {
     }
 
     @MainActor
+    func testDelayedObserverCannotRestoreDeletionAfterCapLimitedShortcutAndInflightDelivery() async throws {
+        let database = try AppDatabase.makeInMemory()
+        let webhook = try configure(database, type: .stepCount, cap: 1)
+        let webhookID = try XCTUnwrap(webhook.id)
+        let identifier = HealthDataType.stepCount.identifier
+        let typeDAO = DataTypeConfigDAO(database)
+        let startingConfig = try XCTUnwrap(typeDAO.find(hkTypeId: identifier))
+        let outbox = OutboxDAO(database)
+        try outbox.enqueue(sample: sample("already-inflight"), hkTypeId: identifier, webhookId: webhookID)
+        let inflightBatch = try XCTUnwrap(Batcher(database: database).buildBatch(webhookID: webhookID, limit: 1, deviceID: "test"))
+        let inflightRow = try XCTUnwrap(outbox.find(hkSampleUuid: "already-inflight"))
+        XCTAssertEqual(try outbox.count(state: .inflight), webhook.outboxCap)
+        let gate = ShortcutReadGate()
+        let deletedSample = sample("deleted-steps")
+        let blockedSample = sample("blocked-by-cap")
+        var delivered: [Conduit_V1_Envelope] = []
+        let engine = SyncEngine(database: database, readAnchored: { _, _, _, limit, _ in
+            if limit == HKObjectQueryNoLimit {
+                return await gate.pause(AnchoredReader.Result(samples: [deletedSample], deletedUuids: [], newAnchor: HKQueryAnchor(fromValue: 2)))
+            }
+            return AnchoredReader.Result(samples: [blockedSample], deletedUuids: [deletedSample.uuid], newAnchor: HKQueryAnchor(fromValue: 3))
+        }, bearerToken: { "test-token" }, submitUpload: { batch, _, _ in
+            if let envelope = try? Conduit_V1_Envelope(jsonUTF8Data: batch.encodedJSON) { delivered.append(envelope) }
+            return self.deliver(batch, database: database)
+        })
+        let observer = Task { await engine.handleObserverWake(typeIdentifier: identifier) }
+        await gate.waitUntilStarted()
+        let message = await engine.syncFromShortcut()
+        XCTAssertTrue(message.contains("Captured 1 samples; queued 0 new samples; processed 1 deletions. Submitted 1"))
+        XCTAssertTrue(message.contains("Capture was bounded"))
+        XCTAssertEqual(delivered.flatMap(\.batches).flatMap(\.deletedUuids), [deletedSample.uuid])
+        XCTAssertTrue(delivered.flatMap(\.batches).flatMap(\.samples).isEmpty)
+        XCTAssertNil(try outbox.find(hkSampleUuid: deletedSample.uuid))
+        XCTAssertNil(try outbox.find(hkSampleUuid: blockedSample.uuid))
+        XCTAssertEqual(try outbox.find(hkSampleUuid: "already-inflight"), inflightRow)
+        let committedConfig = try XCTUnwrap(typeDAO.find(hkTypeId: identifier))
+        var expectedConfig = startingConfig
+        expectedConfig.ingestRevision += 1
+        XCTAssertEqual(committedConfig, expectedConfig)
+        XCTAssertTrue(deliver(inflightBatch, database: database))
+        XCTAssertEqual(try outbox.totalCount(), 0)
+        let lastSynced = try SyncStateDAO(database).lastSyncedAt()
+        await gate.resume()
+        await observer.value
+        XCTAssertEqual(try typeDAO.find(hkTypeId: identifier), committedConfig)
+        XCTAssertEqual(try SyncStateDAO(database).lastSyncedAt(), lastSynced)
+        XCTAssertEqual(try outbox.totalCount(), 0)
+        XCTAssertEqual(try StagedDailyCountDAO(database).count(), 1)
+        XCTAssertEqual(delivered.count, 1)
+        let retryMessage = await engine.syncFromShortcut()
+        XCTAssertTrue(retryMessage.contains("queued 1 new samples; processed 1 deletions. Submitted 2"))
+        XCTAssertEqual(delivered.flatMap(\.batches).flatMap(\.samples).map(\.uuid), [blockedSample.uuid])
+        XCTAssertEqual(try outbox.totalCount(), 0)
+        XCTAssertNotEqual(try typeDAO.anchorBlob(hkTypeId: identifier), startingConfig.anchorBlob)
+    }
+
+    @MainActor
     func testDelayedShortcutCannotStageOrReportDeletionsAfterObserverAdvances() async throws {
         let database = try AppDatabase.makeInMemory()
         _ = try configure(database, type: .stepCount)

@@ -62,7 +62,7 @@ final class AnchoredReaderTests: XCTestCase {
             samples: result.samples,
             hkTypeId: heartRateID,
             webhookId: webhookID,
-            anchorBlob: Data([0x01]), expectedAnchorBlob: nil,
+            anchorBlob: Data([0x01]), expectedAnchorBlob: nil, expectedIngestRevision: 0,
             deletedUuids: result.deletedUuids
         )
 
@@ -84,7 +84,7 @@ final class AnchoredReaderTests: XCTestCase {
             samples: [makeSample(uuid: "s1")],
             hkTypeId: heartRateID,
             webhookId: webhookID,
-            anchorBlob: Data([0x01]), expectedAnchorBlob: nil,
+            anchorBlob: Data([0x01]), expectedAnchorBlob: nil, expectedIngestRevision: 0,
             deletedUuids: []
         )
         XCTAssertEqual(try outbox.totalCount(), 1, "no tombstone rows when there are no deletions")

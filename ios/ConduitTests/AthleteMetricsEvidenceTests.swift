@@ -164,7 +164,7 @@ final class AthleteMetricsEvidenceTests: XCTestCase {
                 samples: [sample],
                 hkTypeId: type.identifier,
                 webhookId: webhookID,
-                anchorBlob: Data("anchor-\(type.identifier)".utf8), expectedAnchorBlob: nil
+                anchorBlob: Data("anchor-\(type.identifier)".utf8), expectedAnchorBlob: nil, expectedIngestRevision: 0
             )
         }
 

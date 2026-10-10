@@ -196,12 +196,15 @@ struct OutboxDAO {
         webhookId: Int64,
         anchorBlob: Data?,
         expectedAnchorBlob: Data?,
+        expectedIngestRevision: Int64,
         deletedUuids: [String] = [],
         cap: Int? = nil,
         syncedAt: Date = Date()
     ) throws -> Int? {
         try database.dbWriter.write { db in
-            guard try DataTypeConfig.fetchOne(db, key: hkTypeId)?.anchorBlob == expectedAnchorBlob else {
+            let config = try DataTypeConfig.fetchOne(db, key: hkTypeId)
+            guard config?.anchorBlob == expectedAnchorBlob,
+                  (config?.ingestRevision ?? 0) == expectedIngestRevision else {
                 return nil
             }
             var insertedCount = 0
@@ -256,6 +259,15 @@ struct OutboxDAO {
                     syncedAt: syncedAt
                 )
             }
+            try db.execute(
+                sql: """
+                    INSERT INTO data_type_config (hk_type_id, enabled, ingest_revision)
+                    VALUES (?, ?, 1)
+                    ON CONFLICT(hk_type_id) DO UPDATE SET
+                        ingest_revision = ingest_revision + 1
+                    """,
+                arguments: [hkTypeId, true]
+            )
             return insertedCount
         }
     }

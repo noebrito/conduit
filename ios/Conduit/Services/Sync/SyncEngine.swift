@@ -183,6 +183,7 @@ actor SyncEngine {
                 webhookId: webhookID,
                 anchorBlob: result.newAnchorData,
                 expectedAnchorBlob: typeConfig.anchorBlob,
+                expectedIngestRevision: typeConfig.ingestRevision,
                 deletedUuids: result.deletedUuids,
                 cap: webhook.outboxCap
             ) else { return }
@@ -650,6 +651,7 @@ actor SyncEngine {
                         guard let inserted = try self.outboxDAO.ingest(samples: result.samples, hkTypeId: identifier,
                             webhookId: webhookID, anchorBlob: result.newAnchorData,
                             expectedAnchorBlob: config.anchorBlob,
+                            expectedIngestRevision: config.ingestRevision,
                             deletedUuids: result.deletedUuids, cap: webhook.outboxCap) else {
                             return ShortcutSync.Capture(captured: result.samples.count, limited: true)
                         }

@@ -26,6 +26,7 @@ struct DataTypeConfig: Codable, Identifiable, Equatable, FetchableRecord, Persis
     /// Seeding semantics live in `SyncEngine.forwardCaptureFloor`, and reuse
     /// lives in `SyncEngine.handleObserverWake`.
     var captureStartedAt: Date? = nil
+    var ingestRevision: Int64 = 0
 
     var id: String { hkTypeId }
 
@@ -39,5 +40,6 @@ struct DataTypeConfig: Codable, Identifiable, Equatable, FetchableRecord, Persis
         case lastSyncAt = "last_sync_at"
         case lastAttemptAt = "last_attempt_at"
         case captureStartedAt = "capture_started_at"
+        case ingestRevision = "ingest_revision"
     }
 }
