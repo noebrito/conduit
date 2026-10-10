@@ -9,9 +9,10 @@ struct HKPermissionsDetailView: View {
     let viewModel: SettingsViewModel
     @Environment(\.openURL) private var openURL
 
-    private var typesWithWarning: [HealthDataType] {
+    var typesWithWarning: [HealthDataType] {
         let cutoff = Date().addingTimeInterval(-86400)
         return HealthTypeRegistry.shared.all.filter { type in
+            guard type.sampleType != nil else { return false }
             guard viewModel.enabledTypeIDs.contains(type.identifier) else { return false }
             guard let enabledAt = viewModel.typeEnabledDate(type.identifier) else { return false }
             guard enabledAt < cutoff else { return false }

@@ -35,6 +35,67 @@ enum EffortScoreIdentifiers {
     }
 }
 
+@MainActor
+final class HKPermissionWarningTests: XCTestCase {
+    func testRecoveryWarningsExcludeUnavailableTypes() throws {
+        let enabledAt = Date().addingTimeInterval(-172800)
+        let configurations = try RecoveryMetricReadings.all.map { reading in
+            (type: try XCTUnwrap(HealthTypeRegistry.shared.type(forIdentifier: reading.identifier)),
+             enabled: true, enabledAt: Optional(enabledAt), lastSyncAt: Optional<Date>.none)
+        }
+        let view = try makePermissionsView(configurations)
+        let expectedIDs = Set(RecoveryMetricReadings.all
+            .filter { RecoveryMetricReadings.isAvailable($0.identifier) }
+            .map(\.identifier))
+
+        XCTAssertEqual(Set(view.typesWithWarning.map(\.identifier)), expectedIDs)
+        XCTAssertFalse(expectedIDs.isEmpty)
+    }
+
+    func testAvailableWarningsRespectEnablementAndSyncTiming() throws {
+        let now = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))
+        let enabledAt = now.addingTimeInterval(-172800)
+        let view = try makePermissionsView([
+            (.heartRate, true, enabledAt, nil),
+            (.stepCount, true, enabledAt, enabledAt.addingTimeInterval(-3600)),
+            (.timeInDaylight, true, enabledAt, enabledAt.addingTimeInterval(3600)),
+            (.restingHeartRate, true, now.addingTimeInterval(-3600), nil),
+            (.appleSleepingWristTemperature, false, enabledAt, nil),
+            (.heartRateVariabilitySDNN, true, nil, nil),
+            (.distanceWalkingRunning, true, enabledAt, enabledAt),
+        ])
+
+        XCTAssertEqual(Set(view.typesWithWarning.map(\.identifier)),
+                       Set([HealthDataType.heartRate.identifier, HealthDataType.stepCount.identifier]))
+    }
+
+    private func makePermissionsView(
+        _ configurations: [(type: HealthDataType, enabled: Bool, enabledAt: Date?, lastSyncAt: Date?)]
+    ) throws -> HKPermissionsDetailView {
+        let database = try AppDatabase.makeInMemory()
+        let dao = DataTypeConfigDAO(database)
+        for configuration in configurations {
+            try dao.upsert(DataTypeConfig(
+                hkTypeId: configuration.type.identifier,
+                enabled: configuration.enabled,
+                minIntervalSeconds: nil,
+                anchorBlob: nil,
+                lastSyncAt: configuration.lastSyncAt,
+                lastAttemptAt: nil
+            ))
+            let key = "conduit.typeEnabledAt.\(configuration.type.identifier)"
+            let previous = UserDefaults.standard.object(forKey: key)
+            UserDefaults.standard.set(configuration.enabledAt, forKey: key)
+            addTeardownBlock {
+                UserDefaults.standard.set(previous, forKey: key)
+            }
+        }
+        let viewModel = SettingsViewModel(appState: AppState(database: database))
+        viewModel.load()
+        return HKPermissionsDetailView(viewModel: viewModel)
+    }
+}
+
 final class HealthTypeRegistryTests: XCTestCase {
     private let registry = HealthTypeRegistry.shared
 

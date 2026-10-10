@@ -57,8 +57,9 @@ ios/
 
 ## Supported recovery data
 
-The registry supports 61 HealthKit types across Activity & Fitness, Body
-Measurements, Vitals, Sleep & Mindfulness, Heart Events, Workouts and Nutrition.
+Version 1.9 adds the four recovery types below. The registry supports 61 HealthKit
+types across Activity & Fitness, Body Measurements, Vitals, Sleep & Mindfulness,
+Heart Events, Workouts and Nutrition.
 Recovery additions travel as ordinary quantity samples with their own identifier,
 source and timestamps; Conduit exports raw readings without diagnosis or scoring.
 

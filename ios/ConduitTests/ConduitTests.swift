@@ -110,6 +110,25 @@ final class AppStoreVersionTests: XCTestCase {
             XCTAssertNotNil(Int(component), "Non-numeric component in version \(shortVersion)")
         }
     }
+
+    func test_recoveryMetrics_shipAfterTheReviewOnlyRelease() {
+        XCTAssertEqual(shortVersion.compare("1.8", options: .numeric), .orderedDescending)
+    }
+
+    func test_appTestAndWidgetMarketingVersionsMatch() throws {
+        XCTAssertEqual(
+            Bundle(for: AppStoreVersionTests.self).object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+            shortVersion
+        )
+        let pluginsURL = try XCTUnwrap(Bundle.main.builtInPlugInsURL)
+        let extensions = try FileManager.default.contentsOfDirectory(at: pluginsURL, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "appex" }
+        XCTAssertEqual(extensions.count, 1)
+        for url in extensions {
+            let widget = try XCTUnwrap(Bundle(url: url))
+            XCTAssertEqual(widget.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, shortVersion)
+        }
+    }
 }
 
 /// The version bump as a user actually sees it: Settings → About → "Version".
