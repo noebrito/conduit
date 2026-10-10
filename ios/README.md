@@ -203,9 +203,10 @@ while locked: unlock the iPhone and retry. A lock during capture is reported as
 partial progress, preserving data already queued. An empty HealthKit read does
 not prove that no samples exist or that read permission was granted.
 
-For enabled types other than GPS routes, each run captures one incremental page
-(up to 200 objects), with atomic enqueue/anchor update. Those without a valid
-forward anchor are skipped and reported as not yet initialized; open Conduit to
+For enabled types available on this iOS version other than GPS routes, each run
+captures at most one incremental page (up to 200 objects), with atomic
+enqueue/anchor update. Types without a valid forward anchor are skipped and
+reported as not yet initialized; open Conduit to
 initialize them through its normal start-of-today capture before retrying the action.
 GPS routes scan up to 10 recent workouts per run and do not require an anchor.
 Capture stops between reads/workouts on cancellation or after a 20-second

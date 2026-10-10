@@ -163,8 +163,9 @@ struct OutboxDAO {
 
     // MARK: - Atomic ingest (§4.4 critical invariant)
 
-    /// Persist the result of an `AnchoredReader.read(...)`: enqueue every sample
-    /// **and** advance the type's anchor in **one** transaction.
+    /// Commit a current `AnchoredReader.read(...)` result: enqueue samples and
+    /// tombstones, update the anchor when capacity permits, and increment the
+    /// type's ingest revision in **one** transaction.
     ///
     /// This is the single most important correctness property of Phase I2.
     /// Persisting the anchor without the samples (or vice versa, across two
@@ -173,7 +174,18 @@ struct OutboxDAO {
     /// is one SQLite transaction, so either everything here commits or nothing
     /// does.
     ///
+    /// Reject a read if its starting anchor or ingest revision has changed.
+    /// Every committed ingest increments the revision, including empty reads and
+    /// cap-limited reads that leave the anchor unchanged. An anchor comparison
+    /// alone cannot prevent a delayed read from resurrecting a deleted sample
+    /// after a cap-limited ingest's tombstone has been delivered and purged.
+    /// The revision also distinguishes commits with identical sync timestamps.
+    /// Regression coverage:
+    /// `ShortcutSyncTests.testDelayedObserverCannotRestoreDeletionAfterCapLimitedShortcutAndInflightDelivery`.
+    ///
     /// - Parameters:
+    ///   - expectedAnchorBlob: stored anchor captured before starting the read.
+    ///   - expectedIngestRevision: revision from that same pre-read config snapshot.
     ///   - deletedUuids: UUIDs HealthKit reported as DELETED for this type since
     ///     the last read (`AnchoredReader.Result.deletedUuids`). Each is staged
     ///     as a **tombstone** (`op == .delete`) in this same transaction so the
@@ -186,9 +198,10 @@ struct OutboxDAO {
     ///     the anchor is **NOT** advanced (see below) so nothing is lost. `nil`
     ///     disables the guard. Tombstones are tiny and correctness-critical, so
     ///     they are staged regardless of the cap (a dropped tombstone would
-    ///     re-create the ghost problem); an over-cap tombstone is re-delivered +
-    ///     deduped on the next read anyway if the anchor didn't advance.
-    /// - Returns: the number of *newly* inserted (non-duplicate) rows.
+    ///     re-create the ghost problem). If the anchor stays put, a later read
+    ///     may replay the tombstone; deduplication follows `enqueue`'s contract.
+    /// - Returns: the number of newly inserted sample rows, excluding tombstones,
+    ///   or `nil` for a stale read rejected without changing persisted state.
     @discardableResult
     func ingest(
         samples: [Conduit_V1_Sample],

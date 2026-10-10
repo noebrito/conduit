@@ -76,6 +76,8 @@ final class ShortcutEvidenceTests: XCTestCase {
         encoder.dateEncodingStrategy = .iso8601
         try writeArtifact(encoder.encode(delivery), named: "shortcut-delivery-log.json")
         try writeArtifact(Data(message.utf8), named: "shortcut-upload-result.txt")
+        let appState = AppState(database: database, reloadTimelines: {})
+        try await capture(ActivityLogView().environment(appState), named: "shortcut-delivered-activity.png")
     }
 
     func testActionResultStates() async throws {
@@ -124,6 +126,29 @@ final class ShortcutEvidenceTests: XCTestCase {
     private func settle() {
         let deadline = Date().addingTimeInterval(0.5)
         while Date() < deadline { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
+    }
+
+    private func capture<V: View>(_ view: V, named name: String) async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        XCTAssertEqual(scene.activationState, .foregroundActive)
+        let host = UIHostingController(rootView: view)
+        let window = UIWindow(windowScene: scene)
+        window.overrideUserInterfaceStyle = .light
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        // Let Activity's MainActor observation task publish the delivered row.
+        try await Task.sleep(nanoseconds: 800_000_000)
+        host.view.layoutIfNeeded()
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        let png = try XCTUnwrap(image.pngData())
+        try writeArtifact(png, named: name)
+        let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
 }

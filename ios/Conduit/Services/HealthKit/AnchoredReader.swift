@@ -4,18 +4,8 @@ import HealthKit
 /// Performs an incremental (anchored) read of a single HealthKit type and maps
 /// the results into wire-format `Conduit_V1_Sample` values.
 ///
-/// ## Critical invariant (ARCHITECTURE.md §4.4)
-///
-/// The `newAnchor` returned here marks "everything up to this point has been
-/// read". The caller MUST persist that anchor **and** enqueue the returned
-/// `samples` in the **same** SQLite transaction. If the anchor is saved without
-/// the samples (e.g. a crash between two separate writes), the next read starts
-/// *after* those samples and they are **permanently lost** — HealthKit will
-/// never hand them to us again.
-///
-/// `OutboxDAO.ingest(samples:hkTypeId:webhookId:anchorBlob:)` is the supported
-/// way to satisfy this: it enqueues and advances the anchor atomically. Do not
-/// save `result.newAnchorData` through any other path.
+/// Forward-capture persistence, stale-read rejection and back-pressure are owned
+/// by `OutboxDAO.ingest`. Commit `result.newAnchorData` only through that boundary.
 struct AnchoredReader {
     /// Result of one anchored read.
     struct Result {

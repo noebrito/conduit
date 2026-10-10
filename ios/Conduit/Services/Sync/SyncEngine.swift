@@ -116,7 +116,7 @@ actor SyncEngine {
     /// Steps (ARCHITECTURE.md §4.4):
     /// 1. Look up the webhook config and enabled state.
     /// 2. Perform anchored read for the type.
-    /// 3. Enqueue new samples + advance anchor in ONE transaction (§4.4 invariant).
+    /// 3. Commit through `OutboxDAO.ingest`.
     /// 4. Check throttle; if green, build batch and enqueue upload.
     func handleObserverWake(typeIdentifier: String) async {
         do {
@@ -173,10 +173,7 @@ actor SyncEngine {
                 try includeHeartRateStatisticsForWorkouts()
             )
 
-            // §4.4 critical invariant: anchor advance + sample enqueue in one transaction.
-            // `cap` enforces the configured outbox back-pressure limit: if the
-            // batch would exceed it, ingest stages what fits and leaves the
-            // anchor UNADVANCED so the rest is re-delivered next read (no loss).
+            // Persistence and stale-read rejection are owned by `OutboxDAO.ingest`.
             guard let inserted = try outboxDAO.ingest(
                 samples: result.samples,
                 hkTypeId: typeIdentifier,
@@ -242,9 +239,8 @@ actor SyncEngine {
     /// Shared capture/deduplication invariants live with `workoutsWithCapturedRoute`
     /// and `stageCapturedRoutes`, which Shortcuts also uses.
     ///
-    /// Routes never advance a HealthKit anchor: capture is driven by the workout
-    /// and made idempotent by dedupe, so there is no anchor to keep. That's why
-    /// this stages via `stageImport` (enqueue-only) and not `ingest`.
+    /// Routes have no forward anchor, so this stages via `stageImport`
+    /// (enqueue-only) rather than `ingest`.
     private func captureRecentRoutes(webhookID: Int64, cap: Int?) async {
         do {
             guard

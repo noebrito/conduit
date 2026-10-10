@@ -242,6 +242,24 @@ final class ShortcutSyncTests: XCTestCase {
         XCTAssertEqual(try outbox.totalCount(), 0)
         XCTAssertEqual(try StagedDailyCountDAO(database).count(), 1)
         XCTAssertEqual(delivered.count, 1)
+        let resumedConfig = try XCTUnwrap(typeDAO.find(hkTypeId: identifier))
+        let receipt: [String: Any] = [
+            "shortcut_result": message,
+            "outbox_limit": webhook.outboxCap,
+            "delivered_deletions": delivered.flatMap(\.batches).flatMap(\.deletedUuids),
+            "delivered_sample_uuids": delivered.flatMap(\.batches).flatMap(\.samples).map(\.uuid),
+            "anchor_unchanged_after_cap": committedConfig.anchorBlob == startingConfig.anchorBlob,
+            "anchor_unchanged_after_delayed_observer": resumedConfig.anchorBlob == committedConfig.anchorBlob,
+            "ingest_revision_before": startingConfig.ingestRevision,
+            "ingest_revision_after_cap": committedConfig.ingestRevision,
+            "ingest_revision_after_delayed_observer": resumedConfig.ingestRevision,
+            "config_unchanged_after_delayed_observer": resumedConfig == committedConfig,
+            "last_synced_unchanged_after_delayed_observer": try SyncStateDAO(database).lastSyncedAt() == lastSynced,
+            "deleted_sample_queued_after_delayed_observer": try outbox.find(hkSampleUuid: deletedSample.uuid) != nil,
+            "outbox_count_after_delayed_observer": try outbox.totalCount(),
+        ]
+        try writeArtifact(JSONSerialization.data(withJSONObject: receipt, options: [.prettyPrinted, .sortedKeys]),
+                          named: "shortcut-cap-race-state.json")
         let retryMessage = await engine.syncFromShortcut()
         XCTAssertTrue(retryMessage.contains("queued 1 new samples; processed 1 deletions. Submitted 2"))
         XCTAssertEqual(delivered.flatMap(\.batches).flatMap(\.samples).map(\.uuid), [blockedSample.uuid])
