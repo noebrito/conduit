@@ -5,9 +5,8 @@ import GRDB
 /// (ARCHITECTURE.md §4.7 `data_type_config`).
 ///
 /// One row per HK type the user has enabled. `anchorBlob` is the archived
-/// `HKQueryAnchor` for incremental reads — it MUST only ever be advanced in the
-/// same transaction that enqueues the samples that anchor covers (§4.4). See
-/// `AnchoredReader` and `OutboxDAO.ingest(...)`.
+/// `HKQueryAnchor` for incremental reads. Forward-capture persistence and
+/// stale-read rejection are owned by `OutboxDAO.ingest`.
 struct DataTypeConfig: Codable, Identifiable, Equatable, FetchableRecord, PersistableRecord {
     /// HealthKit type identifier string, e.g. `HKQuantityTypeIdentifierHeartRate`.
     var hkTypeId: String
@@ -26,6 +25,7 @@ struct DataTypeConfig: Codable, Identifiable, Equatable, FetchableRecord, Persis
     /// Seeding semantics live in `SyncEngine.forwardCaptureFloor`, and reuse
     /// lives in `SyncEngine.handleObserverWake`.
     var captureStartedAt: Date? = nil
+    /// See `OutboxDAO.ingest` for read concurrency semantics.
     var ingestRevision: Int64 = 0
 
     var id: String { hkTypeId }

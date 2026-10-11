@@ -5,12 +5,8 @@ import SwiftProtobuf
 /// CRUD for `outbox` rows (ARCHITECTURE.md §4.7).
 ///
 /// The outbox is the durable staging area between HealthKit reads and webhook
-/// delivery. Its two correctness-critical behaviours both live here:
-///
-/// 1. **Dedupe** — `enqueue` is `INSERT OR IGNORE` on the UNIQUE
-///    `hk_sample_uuid`, so re-observed samples never produce duplicate rows.
-/// 2. **Atomic ingest** — `ingest(...)` enqueues a batch of samples *and*
-///    advances the type's HealthKit anchor in a single transaction (§4.4).
+/// delivery. See `enqueue` for deduplication and replay scope, and `ingest`
+/// for atomic persistence, stale-read rejection and capacity invariants.
 struct OutboxDAO {
     let database: AppDatabase
 
@@ -32,9 +28,8 @@ struct OutboxDAO {
     /// `staged_daily_count` tally for `createdAt`'s local day, in the SAME
     /// transaction. This is the single choke point through which every staging
     /// path (`ingest`, `stageImport`, the convenience `enqueue`) flows, so the
-    /// "Staged today" counter can never drift from what was actually staged, and
-    /// — because duplicates return early without incrementing — it never
-    /// double-counts a re-observed sample. See `StagedDailyCountDAO`.
+    /// tally follows newly inserted rows; ignored duplicates add nothing.
+    /// See `StagedDailyCountDAO` for tally semantics.
     ///
     /// `bumpTally` lets a batch caller (`ingest`/`stageImport`) suppress the
     /// per-sample tally upsert and instead bump the day bucket **once** by the

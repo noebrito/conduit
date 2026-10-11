@@ -121,9 +121,9 @@ struct AnchoredReader {
     /// **oldest** sample returned by the previous page (available as
     /// `Result.oldestEndDate`). The window is boundary-**inclusive** (default
     /// predicate options), so a sample sitting exactly on the cursor is re-read
-    /// on the next page and harmlessly skipped by `OutboxDAO.stageImport`'s UUID
-    /// dedupe — this avoids ever dropping same-timestamp siblings that a fixed
-    /// page limit split across two pages.
+    /// on the next page under `OutboxDAO.enqueue`'s replay contract. This avoids
+    /// dropping same-timestamp siblings that a fixed page limit split across
+    /// two pages.
     ///
     /// Like the anchored import it replaced, this NEVER touches the live
     /// forward-capture anchor in `data_type_config`; results are staged via
@@ -183,9 +183,9 @@ struct AnchoredReader {
     /// samples between `since` (lower) and `before` (upper). Both `nil` → no
     /// predicate (all history, up to now). Uses default (non-strict) options so
     /// the bounds are inclusive for point samples — a sample exactly on the
-    /// `before` cursor is re-read on the next page and deduped, which is safer
-    /// than a strict/exclusive bound that could drop same-timestamp samples a
-    /// page split apart. Static + `HKHealthStore`-free so it is unit-testable.
+    /// `before` cursor is re-read on the next page. See `readImportPage` for the
+    /// boundary rationale and replay contract. Static + `HKHealthStore`-free
+    /// so it is unit-testable.
     static func importWindowPredicate(since: Date?, before: Date?) -> NSPredicate? {
         guard since != nil || before != nil else { return nil }
         return HKQuery.predicateForSamples(withStart: since, end: before, options: [])

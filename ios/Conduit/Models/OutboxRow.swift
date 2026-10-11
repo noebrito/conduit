@@ -25,10 +25,10 @@ enum OutboxOp: String, Codable, DatabaseValueConvertible {
 /// A single staged HealthKit sample awaiting (or completing) delivery
 /// (ARCHITECTURE.md §4.7 `outbox`).
 ///
-/// `hkSampleUuid` is UNIQUE — re-observed samples (e.g. after a permission flip)
-/// are `INSERT OR IGNORE`d, never duplicated (§4.4). `payloadBlob` holds the
-/// proto3-canonical-JSON encoding of the `Conduit_V1_Sample` so the batcher (I3)
-/// can reassemble envelopes without re-reading HealthKit.
+/// Deduplication and replay scope are owned by `OutboxDAO.enqueue`.
+/// `payloadBlob` holds the proto3-canonical-JSON encoding of the
+/// `Conduit_V1_Sample` so the batcher (I3) can reassemble envelopes without
+/// re-reading HealthKit.
 struct OutboxRow: Codable, Identifiable, Equatable, FetchableRecord, MutablePersistableRecord {
     var id: Int64?
     /// FK to the destination `webhook_config` row.

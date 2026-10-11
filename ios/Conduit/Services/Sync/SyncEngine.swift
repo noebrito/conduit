@@ -536,8 +536,8 @@ actor SyncEngine {
             }
 
             // Newest-first paging cursor: continue from the oldest workout of
-            // this page. Inclusive bounds mean that workout is re-read once and
-            // deduped, which is safer than risking a same-timestamp sibling.
+            // this page. Inclusive bounds preserve same-timestamp siblings;
+            // re-reads follow `OutboxDAO.enqueue`'s replay contract.
             guard let oldest = workouts.last?.endDate, oldest != cursor else {
                 return HistoryImporter.Summary(
                     staged: staged, hitCap: false, cancelled: false, cursor: cursor, exhausted: true
