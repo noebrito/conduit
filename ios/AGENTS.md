@@ -80,16 +80,15 @@ contrast, genuinely can be constructed in a test (the deprecated
 initializer and `HKWorkoutEvent(type:dateInterval:metadata:)` both work on an iOS 17 target,
 deprecation warning only), so `makeWorkoutValue` takes real `[HKWorkoutEvent]`.
 
-**Privacy gate:** `SyncEngine.includeHeartRateStatisticsForWorkouts()` resolves whether
-avg/max/min HR may be sent, from the user's own Heart Rate data-type toggle (`DataTypeConfigDAO`) —
-turning Heart Rate off suppresses these fields in the workout payload even though Workouts stays on.
-The public privacy policy (`conduit/api/internal/handler/privacy.html`, served at
-`https://health.noebrito.dev/privacy`) now promises exactly that, so the gate is a published,
-App-Review-facing contract — deleting it makes that copy false, not just less cautious.
-Threaded through `AnchoredReader.read`/`readImportPage`/`makeSample` as `includeHeartRateStatistics`
-(default `true`, so every pre-existing call site — routes, running dynamics, correlation tests — is
-unaffected). Any future workout-payload field with the same "derived from a toggleable type" shape
-should reuse this exact gate-resolution pattern rather than inventing a new one.
+**Privacy gate:** the authoritative staging invariant is documented at `OutboxDAO.enqueue`;
+`SyncEngine.includeHeartRateStatisticsForWorkouts()` is the read-time check. Regression coverage:
+`ShortcutSyncTests.testHeartRateDisabledDuringWorkoutReadIsAbsentFromSubmittedPayload` and
+`testSharedImportStagingUsesCurrentHeartRatePermission`.
+The gate is required by the public privacy policy (`conduit/api/internal/handler/privacy.html`,
+served at `https://health.noebrito.dev/privacy`), a published, App-Review-facing contract —
+deleting it makes that copy false, not just less cautious.
+Any future workout-payload field derived from a toggleable type should reuse that shared
+staging gate rather than relying only on read-time filtering.
 
 **Still unverified on a real device:** whether `HKWorkoutBuilder`-recorded Apple Watch workouts
 actually populate `statistics(for:)` (no Apple Watch was available while implementing this).
@@ -107,15 +106,14 @@ owns it and `AnchoredReader.makeSample` returns nil for `.route`. `ObserverCoord
 **no** observer for it — HealthKit associates only forward (workout → route, no reverse lookup), so
 capture rides the **workout** wake: `SyncEngine.captureRecentRoutes` re-scans workouts from the last
 `WorkoutRouteReader.rescanWindowDays` on each wake, because Apple attaches a route **shortly after**
-its workout ends and the first wake usually predates it. That re-scan is safe only because routes
-stage via `stageImport` (never advances an anchor — routes have none) and the outbox's UNIQUE
-`hk_sample_uuid` dedupes a re-read route to a no-op. Only definitive captures are memoized
-(`workoutsWithCapturedRoute`, in-memory); a routeless workout is deliberately re-attempted, which is
-what catches a late-finalized route. **No route is the common case** (indoor/manual/GPS-off) — stage
-nothing, no error. History import routes through the same reader (`SyncEngine.importRoutes`, driven
-by the enabled-registry loop in `ImportRunner`, so routes checkpoint and resume like every other
-type). A route read that fails for ONE workout is still skipped and logged, but an error from the
-workout scan or from staging propagates so the run is recorded as failed, not silently short.
+its workout ends and the first wake usually predates it. Shared capture/deduplication invariants
+live with `SyncEngine.workoutsWithCapturedRoute` and `stageCapturedRoutes`; see
+`ShortcutSyncTests.testDeliveredRoutesAreMemoizedAcrossShortcutsAndObserver` and
+`testEmptyAndPartiallyStagedRoutesRemainRetryable`. History import routes through the same reader
+(`SyncEngine.importRoutes`, driven by the enabled-registry loop in `ImportRunner`, so routes
+checkpoint and resume like every other type). A route read that fails for ONE workout is still
+skipped and logged, but an error from the workout scan or from staging propagates so the run is
+recorded as failed, not silently short.
 
 **Privacy (do not regress):** reading a *stored* route needs the HealthKit read auth for
 `HKSeriesType.workoutRoute()` and **nothing else** — no CoreLocation permission, no

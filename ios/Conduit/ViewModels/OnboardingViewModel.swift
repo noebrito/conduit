@@ -162,15 +162,15 @@ final class OnboardingViewModel {
         appState.completeOnboarding()
 
         // Start capturing right away so new samples flow without an app
-        // relaunch. Capture is forward-only by default: the first read seeds
-        // each type's anchor to "now", so only data created at/after setup is
-        // staged (no historical backfill).
+        // relaunch. Forward-only initialization is owned by
+        // `SyncEngine.handleObserverWake` and `SyncEngine.forwardCaptureFloor`.
         appState.startDataCapture()
 
         // Optional explicit opt-in: import PAST history over the chosen range.
         // Runs ONLY when the user turned it on (OFF by default) and ONLY after
-        // startDataCapture(), so the forward anchors are seeded first. The import
-        // stages via the enqueue-only path (no forward anchor advance) and is
+        // startDataCapture() launches forward capture; it does not await initial
+        // reads or anchor persistence. The import stages via the enqueue-only
+        // path (no forward anchor advance) and is
         // paged + outbox-cap bounded, so it can't flood the queue.
         if importExistingHistory {
             let since = importRange.startDate(now: Date(), customStart: customImportStart)

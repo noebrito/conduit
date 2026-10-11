@@ -5,9 +5,8 @@ import GRDB
 /// (ARCHITECTURE.md §4.7 `data_type_config`).
 ///
 /// One row per HK type the user has enabled. `anchorBlob` is the archived
-/// `HKQueryAnchor` for incremental reads — it MUST only ever be advanced in the
-/// same transaction that enqueues the samples that anchor covers (§4.4). See
-/// `AnchoredReader` and `OutboxDAO.ingest(...)`.
+/// `HKQueryAnchor` for incremental reads. Forward-capture persistence and
+/// stale-read rejection are owned by `OutboxDAO.ingest`.
 struct DataTypeConfig: Codable, Identifiable, Equatable, FetchableRecord, PersistableRecord {
     /// HealthKit type identifier string, e.g. `HKQuantityTypeIdentifierHeartRate`.
     var hkTypeId: String
@@ -15,18 +14,19 @@ struct DataTypeConfig: Codable, Identifiable, Equatable, FetchableRecord, Persis
     var enabled: Bool
     /// Optional per-type override of the webhook's `minIntervalSeconds`.
     var minIntervalSeconds: Int?
-    /// Archived `HKQueryAnchor` (NSKeyedArchiver). Nil means "read from the start".
+    /// Archived `HKQueryAnchor` (NSKeyedArchiver). See `SyncEngine.handleObserverWake`
+    /// for initialization when nil.
     var anchorBlob: Data?
     /// Last time a read for this type completed successfully.
     var lastSyncAt: Date?
     /// Last time a read was attempted (success or failure).
     var lastAttemptAt: Date?
-    /// The forward-only capture floor: the point in time from which this type
-    /// started capturing. Set once, on the very first (anchor-less) read, and
-    /// used as the `withStart:` predicate so first-run capture skips existing
-    /// history and only stages samples created at/after setup (ARCHITECTURE.md
-    /// §4.4, forward-only default). Nil until the first read seeds it.
+    /// Persisted lower bound for an anchor-less read; nil until first seeded.
+    /// Seeding semantics live in `SyncEngine.forwardCaptureFloor`, and reuse
+    /// lives in `SyncEngine.handleObserverWake`.
     var captureStartedAt: Date? = nil
+    /// See `OutboxDAO.ingest` for read concurrency semantics.
+    var ingestRevision: Int64 = 0
 
     var id: String { hkTypeId }
 
@@ -40,5 +40,6 @@ struct DataTypeConfig: Codable, Identifiable, Equatable, FetchableRecord, Persis
         case lastSyncAt = "last_sync_at"
         case lastAttemptAt = "last_attempt_at"
         case captureStartedAt = "capture_started_at"
+        case ingestRevision = "ingest_revision"
     }
 }

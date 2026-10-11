@@ -30,8 +30,8 @@ import HealthKit
 /// (`HKQuery.predicateForObjects(from: workout)`). There is no public reverse
 /// lookup, so capture must be workout-driven. And Apple attaches the route
 /// **shortly after** the workout ends, so the first observer wake for a workout
-/// often finds no route yet. `SyncEngine` handles that by re-scanning recent
-/// workouts on each wake; UUID dedupe makes the re-attempts free.
+/// often finds no route yet. Re-scanning and capture deduplication are owned by
+/// `SyncEngine.captureRecentRoutes` and `SyncEngine.stageCapturedRoutes`.
 ///
 /// ## Batch-size note
 ///

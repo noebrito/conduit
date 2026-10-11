@@ -168,4 +168,44 @@ final class DatabaseMigrationTests: XCTestCase {
         let appDB = try AppDatabase.makeInMemory()
         XCTAssertNoThrow(try appDB.migrator.migrate(appDB.dbWriter))
     }
+
+    func testIngestRevisionMigrationPreservesExistingCaptureStateAndSurvivesReopen() throws {
+        let writer = try DatabaseQueue()
+        let migrator = try AppDatabase.makeInMemory().migrator
+        try migrator.migrate(writer, upTo: "v11-import-history-floor")
+        let identifier = HealthDataType.stepCount.identifier
+        let anchor = Data([0x01])
+        let syncedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        try writer.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO data_type_config
+                        (hk_type_id, enabled, anchor_blob, last_sync_at, last_attempt_at, capture_started_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                arguments: [identifier, true, anchor, syncedAt, syncedAt, syncedAt]
+            )
+        }
+        let upgraded = try AppDatabase(writer)
+        let config = try XCTUnwrap(DataTypeConfigDAO(upgraded).find(hkTypeId: identifier))
+        XCTAssertTrue(config.enabled)
+        XCTAssertEqual(config.anchorBlob, anchor)
+        XCTAssertEqual(config.lastSyncAt, syncedAt)
+        XCTAssertEqual(config.lastAttemptAt, syncedAt)
+        XCTAssertEqual(config.captureStartedAt, syncedAt)
+        XCTAssertEqual(config.ingestRevision, 0)
+        var webhook = WebhookConfig.makeDefault(url: "https://example.com/sync", bearerTokenKeychainRef: "test")
+        try WebhookConfigDAO(upgraded).save(&webhook)
+        var sample = Conduit_V1_Sample()
+        sample.uuid = "blocked-by-cap"
+        XCTAssertEqual(try OutboxDAO(upgraded).ingest(
+            samples: [sample], hkTypeId: identifier, webhookId: try XCTUnwrap(webhook.id),
+            anchorBlob: Data([0x02]), expectedAnchorBlob: anchor, expectedIngestRevision: 0, cap: 0
+        ), 0)
+        var expected = config
+        expected.ingestRevision = 1
+        let reopened = try AppDatabase(writer)
+        XCTAssertEqual(try DataTypeConfigDAO(reopened).find(hkTypeId: identifier), expected)
+        XCTAssertEqual(try OutboxDAO(reopened).totalCount(), 0)
+    }
 }

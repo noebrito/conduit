@@ -103,7 +103,7 @@ final class RunningDynamicsEvidenceTests: XCTestCase {
                 samples: [sample],
                 hkTypeId: type.identifier,
                 webhookId: webhookID,
-                anchorBlob: Data("anchor-\(type.identifier)".utf8)
+                anchorBlob: Data("anchor-\(type.identifier)".utf8), expectedAnchorBlob: nil, expectedIngestRevision: 0
             )
         }
 

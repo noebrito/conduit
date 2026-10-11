@@ -522,12 +522,9 @@ final class AppState {
     ///
     /// Reads the persisted `data_type_config` (the set onboarding authorized —
     /// not the full registry) and starts observer queries for it. Starting the
-    /// observers also performs an initial anchored read. Capture is
-    /// **forward-only by default**: the first (anchor-less) read seeds a capture
-    /// floor of "now", so only samples created at/after setup are staged — no
-    /// historical backfill. Idempotent: safe to call on every launch and again
-    /// right after onboarding (the forward seed only fires on the very first
-    /// read per type, gated on a nil stored anchor).
+    /// observers also launches an initial anchored read. Forward-only initialization
+    /// and relaunch behavior are owned by `SyncEngine.handleObserverWake` and
+    /// `SyncEngine.forwardCaptureFloor`.
     func startDataCapture() {
         let enabledIDs: Set<String>
         do {

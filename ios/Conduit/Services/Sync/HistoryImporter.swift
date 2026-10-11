@@ -17,7 +17,7 @@ import HealthKit
 ///    limit is reached.
 /// 3. **Auto-resume across the cap** — instead of stopping one-shot on `hitCap`,
 ///    the loop asks `waitForCapacity()` to drain the queue below the cap, then
-///    re-reads the SAME window (UUID dedupe skips what was already staged) and
+///    re-reads the SAME window under `OutboxDAO.enqueue`'s replay contract and
 ///    continues — so a range larger than the cap completes on its own with no
 ///    manual re-tap. It stays cooperative with the cap (never stages past it)
 ///    and honours `isCancelled()`.
@@ -139,7 +139,7 @@ enum HistoryImporter {
             if staged.hitCap {
                 // Outbox full mid-page. Do NOT advance the cursor: wait for the
                 // queue to drain below the cap, then re-read the SAME window
-                // (dedupe skips the rows we already staged) and continue.
+                // under `OutboxDAO.enqueue`'s replay contract and continue.
                 try onCheckpoint(cursor, total)
                 if isCancelled() {
                     return Summary(staged: total, hitCap: true, cancelled: true, cursor: cursor)

@@ -62,8 +62,8 @@ struct DataTypeConfigDAO {
     }
 
     /// Record the forward-only capture floor for a type. Called once, on the
-    /// first (anchor-less) read, so `handleObserverWake` can seed the initial
-    /// anchored query with a `withStart:` predicate and skip existing history.
+    /// first (anchor-less) read. Seeding and reuse are owned by
+    /// `SyncEngine.forwardCaptureFloor` and `SyncEngine.handleObserverWake`.
     /// Updates the existing row (the type is already enabled at this point).
     func setCaptureStartedAt(_ date: Date, hkTypeId: String) throws {
         try database.dbWriter.write { db in
@@ -75,10 +75,10 @@ struct DataTypeConfigDAO {
     }
 
     /// One-time remediation: clear every type's stored anchor **and** its
-    /// capture-start floor so the next read re-seeds forward-only from a fresh
-    /// "now". Used together with `OutboxDAO.deleteAll()` to drain a device that
-    /// staged its full Health history under the old all-history backfill. Also
-    /// clears the sync timestamps so the UI reflects the reset.
+    /// capture-start floor so the next observer read re-seeds through
+    /// `SyncEngine.forwardCaptureFloor`. Used with `OutboxDAO.deleteAll()` to
+    /// drain a device that staged its full Health history under the old
+    /// all-history backfill. Also clears sync timestamps so the UI reflects the reset.
     func resetAllAnchors() throws {
         try database.dbWriter.write { db in
             try db.execute(
@@ -96,12 +96,9 @@ struct DataTypeConfigDAO {
     /// Advance the anchor and sync timestamps for a type **within an existing
     /// transaction**.
     ///
-    /// This is the half of the §4.4 invariant that lives in `data_type_config`:
-    /// callers MUST invoke it inside the same `db` write that enqueues the
-    /// samples the anchor covers, otherwise advancing the anchor without
-    /// persisting the samples permanently loses data. `OutboxDAO.ingest(...)`
-    /// composes both halves in one transaction; do not call this on its own
-    /// after a separate enqueue.
+    /// Apply this update through `OutboxDAO.ingest`'s transaction. That boundary
+    /// owns persistence, stale-read rejection and capacity invariants; do not
+    /// call this after a separate enqueue.
     static func advanceAnchor(
         _ db: Database,
         hkTypeId: String,

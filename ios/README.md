@@ -23,7 +23,7 @@ ios/
 ├── Conduit/
 │   ├── App/             ConduitApp, AppDelegate, AppState (shared observable
 │   │                    singleton: database, sync engine, onboarding flag),
-│   │                    entitlements
+│   │                    SyncHealthIntent (Shortcuts), entitlements
 │   ├── Models/
 │   │   ├── Generated/   protoc output (sync.pb.swift — regenerate with
 │   │   │                scripts/generate-swift-proto.sh)
@@ -34,7 +34,7 @@ ios/
 │   │   │                ObserverCoordinator, AnchoredReader,
 │   │   │                WorkoutRouteReader (GPS routes),
 │   │   │                HistoryAccessProbe (iOS 27 limited-history floors)
-│   │   ├── Sync/        SyncEngine, Throttle, Batcher
+│   │   ├── Sync/        SyncEngine, ShortcutSync, Throttle, Batcher
 │   │   ├── Networking/  Uploader, BackgroundSession, BackoffPolicy,
 │   │   │                WebhookTester (foreground Test Connection probe)
 │   │   ├── Storage/     Database (GRDB) + DAOs, incl. DeliveryLogDAO
@@ -191,3 +191,37 @@ empty fixture in a real simulator window when `TEST_RUNNER_CONDUIT_EVIDENCE_DIR`
 is passed to `xcodebuild test`; point it outside the repository. This is a rendering
 check; physical-device StoreKit presentation and end-to-end link opening remain
 unverified.
+
+## Shortcuts — Sync Health Data
+
+After setup, add **Conduit → Sync Health Data** in Apple's Shortcuts app, or use
+Conduit's provided **Sync Health Data** app shortcut. It uses only the existing
+destination, token and enabled types; it does not request new permissions.
+The action requires local device authentication and checks protected-data
+availability before opening the database. HealthKit reads may be unavailable
+while locked: unlock the iPhone and retry. A lock during capture is reported as
+partial progress, preserving data already queued. An empty HealthKit read does
+not prove that no samples exist or that read permission was granted.
+
+For enabled types available on this iOS version other than GPS routes, each run
+captures at most one incremental page (up to 200 objects), with atomic
+enqueue/anchor update. Types without a valid forward anchor are skipped and
+reported as not yet initialized; open Conduit to
+initialize them through its normal start-of-today capture before retrying the action.
+GPS routes scan up to 10 recent workouts per run and do not require an anchor.
+Capture stops between reads/workouts on cancellation or after a 20-second
+cooperative budget; an in-progress HealthKit query can exceed that budget.
+Outbox capacity still applies.
+More data may remain; the existing observer/import paths continue normally.
+
+The result distinguishes samples captured, new samples queued, deletions
+processed, and samples **submitted for background upload**. Submission may
+include older queued data. It does **not** wait for or claim receiver acceptance;
+check Activity Log for the actual delivery result. It flushes one batch, respecting
+existing backoff and batch-size limits. Cancellation retains committed pages and
+skips starting a new upload. There is no new background scheduler or relay.
+
+Local simulator and injected tests do not verify appearance/execution inside the
+native Shortcuts app, Siri, physical-device locked-data behavior, cancellation by
+Shortcuts/iOS, or large-queue behavior.
+Validate those on an iPhone before an App Store release.

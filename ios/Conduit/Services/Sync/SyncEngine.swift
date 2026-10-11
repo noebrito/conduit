@@ -11,25 +11,26 @@ import os
 /// `handleObserverWake`; the `AppDelegate` starts it once on launch.
 actor SyncEngine {
     private let database: AppDatabase
-    private let store: HKHealthStore
     private let reader: AnchoredReader
-    private let routeReader: WorkoutRouteReader
+    private let readAnchored: (HealthDataType, HKQueryAnchor?, Date?, Int, Bool) async throws -> AnchoredReader.Result
+    private let scanWorkouts: (Date?, Date?, Int) async throws -> [HKWorkout]
+    private let readRoutes: (HKWorkout) async throws -> [Conduit_V1_Sample]
     private let outboxDAO: OutboxDAO
     private let webhookConfigDAO: WebhookConfigDAO
     private let dataTypeConfigDAO: DataTypeConfigDAO
     private var throttle: Throttle
     private let batcher: Batcher
-    private let uploader: Uploader
+    private let bearerToken: @MainActor () -> String?
+    private let submitUpload: @MainActor (Batcher.BatchResult, String, String) -> Bool
     private let keychain: KeychainStore
     private let logger = Logger(subsystem: "dev.noebrito.Conduit", category: "SyncEngine")
 
-    /// Workouts whose route we have already staged this session, so the recent-
-    /// workout re-scan doesn't re-run the two-step read for a route we've already
-    /// got. Deliberately memoizes ONLY definitive captures: a workout that had no
-    /// route is re-attempted on the next wake, which is exactly how a route Apple
-    /// finalizes *after* its workout gets picked up. In-memory by design — losing
-    /// it on relaunch costs one cheap re-scan, and UUID dedupe makes a redundant
-    /// capture a no-op, so it never needs to be durable.
+    /// Workouts with a nonempty route set fully staged in this process. Observer
+    /// and Shortcuts capture share the memo; no-route and cap-limited reads remain
+    /// retryable so late-finalized or partially staged routes can be picked up.
+    /// In-memory by design: relaunch may repeat capture of delivered routes.
+    /// See `OutboxDAO.enqueue` for queue dedupe scope and
+    /// `docs/webhook/HTTP_CONTRACT.md` for receiver replay requirements.
     private var workoutsWithCapturedRoute: Set<String> = []
 
     /// BGAppRefreshTask identifier for the background catch-up flush. MUST match
@@ -59,21 +60,36 @@ actor SyncEngine {
         database: AppDatabase,
         store: HKHealthStore = HKHealthStore(),
         uploader: Uploader = .shared,
-        keychain: KeychainStore = .shared
+        keychain: KeychainStore = .shared,
+        readAnchored: ((HealthDataType, HKQueryAnchor?, Date?, Int, Bool) async throws -> AnchoredReader.Result)? = nil,
+        scanWorkouts: ((Date?, Date?, Int) async throws -> [HKWorkout])? = nil,
+        readRoutes: ((HKWorkout) async throws -> [Conduit_V1_Sample])? = nil,
+        bearerToken: (@MainActor () -> String?)? = nil,
+        submitUpload: (@MainActor (Batcher.BatchResult, String, String) -> Bool)? = nil
     ) {
         self.database = database
-        self.store = store
-        self.reader = AnchoredReader(store: store)
-        self.routeReader = WorkoutRouteReader(store: store)
+        let reader = AnchoredReader(store: store)
+        let routeReader = WorkoutRouteReader(store: store)
+        self.reader = reader
+        self.readAnchored = readAnchored ?? { type, anchor, since, limit, includeHR in
+            try await reader.read(type: type, anchor: anchor, since: since, limit: limit, includeHeartRateStatistics: includeHR)
+        }
+        self.scanWorkouts = scanWorkouts ?? { since, before, limit in
+            try await routeReader.workouts(since: since, before: before, limit: limit)
+        }
+        self.readRoutes = readRoutes ?? { try await routeReader.routeSamples(for: $0) }
         self.outboxDAO = OutboxDAO(database)
         self.webhookConfigDAO = WebhookConfigDAO(database)
         self.dataTypeConfigDAO = DataTypeConfigDAO(database)
         self.batcher = Batcher(database: database)
-        self.uploader = uploader
+        self.bearerToken = bearerToken ?? { keychain.webhookBearerToken }
+        self.submitUpload = submitUpload ?? { uploader.upload(batch: $0, webhookURL: $1, bearerToken: $2) }
         self.keychain = keychain
         // Default throttle; replaced from stored webhook config on first use.
         self.throttle = Throttle(minInterval: 900, forceFlushThreshold: 200)
     }
+
+    private var shortcutIsRunning = false
 
     // MARK: - Forward-only capture floor
 
@@ -100,7 +116,7 @@ actor SyncEngine {
     /// Steps (ARCHITECTURE.md §4.4):
     /// 1. Look up the webhook config and enabled state.
     /// 2. Perform anchored read for the type.
-    /// 3. Enqueue new samples + advance anchor in ONE transaction (§4.4 invariant).
+    /// 3. Commit through `OutboxDAO.ingest`.
     /// 4. Check throttle; if green, build batch and enqueue upload.
     func handleObserverWake(typeIdentifier: String) async {
         do {
@@ -152,25 +168,22 @@ actor SyncEngine {
                 captureFloor = nil
             }
 
-            let result = try await reader.read(
-                type: dataType,
-                anchor: anchor,
-                since: captureFloor,
-                includeHeartRateStatistics: try includeHeartRateStatisticsForWorkouts()
+            let result = try await readAnchored(
+                dataType, anchor, captureFloor, HKObjectQueryNoLimit,
+                try includeHeartRateStatisticsForWorkouts()
             )
 
-            // §4.4 critical invariant: anchor advance + sample enqueue in one transaction.
-            // `cap` enforces the configured outbox back-pressure limit: if the
-            // batch would exceed it, ingest stages what fits and leaves the
-            // anchor UNADVANCED so the rest is re-delivered next read (no loss).
-            let inserted = try outboxDAO.ingest(
+            // Persistence and stale-read rejection are owned by `OutboxDAO.ingest`.
+            guard let inserted = try outboxDAO.ingest(
                 samples: result.samples,
                 hkTypeId: typeIdentifier,
                 webhookId: webhookID,
                 anchorBlob: result.newAnchorData,
+                expectedAnchorBlob: typeConfig.anchorBlob,
+                expectedIngestRevision: typeConfig.ingestRevision,
                 deletedUuids: result.deletedUuids,
                 cap: webhook.outboxCap
-            )
+            ) else { return }
             if result.deletedUuids.isEmpty {
                 logger.info("Observer wake for \(typeIdentifier, privacy: .public): \(inserted) new samples staged")
             } else {
@@ -190,7 +203,7 @@ actor SyncEngine {
             }
             throttle.recordFlush()
 
-            try await flush(webhook: webhook, webhookID: webhookID)
+            try await flush()
         } catch {
             logger.error("handleObserverWake(\(typeIdentifier, privacy: .public)) error: \(error.localizedDescription, privacy: .public)")
         }
@@ -198,18 +211,11 @@ actor SyncEngine {
 
     // MARK: - Workout heart-rate privacy gate
 
-    /// Whether a workout read may carry `avg/max/min_heart_rate_bpm`, resolved
-    /// from the user's own Heart Rate data-type toggle — the same per-type
-    /// lookup `captureRecentRoutes` uses for its own route toggle. Turning Heart
-    /// Rate off suppresses these fields even when Workouts stays on, so the
-    /// enrichment never contradicts a promise the app's own toggle already made.
-    /// No row for Heart Rate yet (e.g. before `enableNewlyRegisteredTypes` has
-    /// run) defaults to included, matching Heart Rate's own default-on registry
-    /// convention — this only ever narrows on an explicit opt-out.
+    /// Resolve the read-time Heart Rate toggle for workout enrichment.
+    /// The authoritative staging check is in `OutboxDAO.enqueue`, because
+    /// Settings can change while a HealthKit read suspends.
     ///
-    /// Internal (not `private`) so `AnchoredReaderTests` can verify this gate
-    /// directly — the DB-driven decision, not just its shape, is what actually
-    /// makes the privacy promise true.
+    /// Internal so `AnchoredReaderTests` can verify the read-time DB lookup.
     func includeHeartRateStatisticsForWorkouts() throws -> Bool {
         try dataTypeConfigDAO.find(hkTypeId: HealthDataType.heartRate.identifier)?.enabled ?? true
     }
@@ -230,15 +236,11 @@ actor SyncEngine {
     /// therefore picked up on wake N+1 (workouts wake often, and the
     /// `BGAppRefreshTask` fallback drives it too).
     ///
-    /// The re-scan is cheap and safe to repeat because nothing about it is
-    /// stateful: the outbox's `hk_sample_uuid` UNIQUE + `INSERT OR IGNORE` means a
-    /// re-read route is silently ignored rather than double-staged. Workouts with
-    /// no route (treadmill, strength, GPS off) are the common case — they capture
-    /// nothing and are re-attempted next wake, which costs one bounded query.
+    /// Shared capture/deduplication invariants live with `workoutsWithCapturedRoute`
+    /// and `stageCapturedRoutes`, which Shortcuts also uses.
     ///
-    /// Routes never advance a HealthKit anchor: capture is driven by the workout
-    /// and made idempotent by dedupe, so there is no anchor to keep. That's why
-    /// this stages via `stageImport` (enqueue-only) and not `ingest`.
+    /// Routes have no forward anchor, so this stages via `stageImport`
+    /// (enqueue-only) rather than `ingest`.
     private func captureRecentRoutes(webhookID: Int64, cap: Int?) async {
         do {
             guard
@@ -254,7 +256,7 @@ actor SyncEngine {
                 value: -WorkoutRouteReader.rescanWindowDays,
                 to: Date()
             )
-            let workouts = try await routeReader.workouts(since: since, limit: HKObjectQueryNoLimit)
+            let workouts = try await scanWorkouts(since, nil, HKObjectQueryNoLimit)
 
             var stagedRoutes = 0
             for workout in workouts {
@@ -266,7 +268,7 @@ actor SyncEngine {
                 // wake retries it.
                 let samples: [Conduit_V1_Sample]
                 do {
-                    samples = try await routeReader.routeSamples(for: workout)
+                    samples = try await readRoutes(workout)
                 } catch {
                     logger.error("Route read failed for workout \(workoutUUID, privacy: .public): \(error.localizedDescription, privacy: .public)")
                     continue
@@ -276,17 +278,8 @@ actor SyncEngine {
                 // finished attaching one yet.
                 guard !samples.isEmpty else { continue }
 
-                let staged = try outboxDAO.stageImport(
-                    samples: samples,
-                    hkTypeId: HealthDataType.workoutRoute.identifier,
-                    webhookId: webhookID,
-                    cap: cap
-                )
+                let staged = try stageCapturedRoutes(samples, for: workout, webhookID: webhookID, cap: cap)
                 stagedRoutes += staged.inserted
-                // The route exists and is now ours — a re-read would only ever be
-                // deduped away, so stop asking for it. Memoize even when the row
-                // was a duplicate (staged 0): that also means we already have it.
-                workoutsWithCapturedRoute.insert(workoutUUID)
                 if staged.hitCap {
                     logger.info("Route capture paused: outbox at cap")
                     break
@@ -300,6 +293,18 @@ actor SyncEngine {
             // committed — never let it fail the wake.
             logger.error("captureRecentRoutes error: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    private func stageCapturedRoutes(
+        _ samples: [Conduit_V1_Sample], for workout: HKWorkout, webhookID: Int64, cap: Int?
+    ) throws -> (inserted: Int, hitCap: Bool) {
+        guard !samples.isEmpty, !workoutsWithCapturedRoute.contains(workout.uuid.uuidString) else {
+            return (0, false)
+        }
+        let staged = try outboxDAO.stageImport(samples: samples,
+            hkTypeId: HealthDataType.workoutRoute.identifier, webhookId: webhookID, cap: cap)
+        if !staged.hitCap { workoutsWithCapturedRoute.insert(workout.uuid.uuidString) }
+        return staged
     }
 
     // MARK: - Import history (explicit opt-in)
@@ -326,9 +331,8 @@ actor SyncEngine {
     /// - **The forward anchor is never touched.** The read walks a local date
     ///   cursor (`before: nil` on the first page) and results are staged via
     ///   `OutboxDAO.stageImport`, which does not advance `data_type_config`'s
-    ///   anchor. Ongoing incremental capture is therefore unaffected, and UUID
-    ///   dedupe prevents any overlap between the import and the live stream from
-    ///   double-staging.
+    ///   anchor. Ongoing incremental capture is therefore unaffected;
+    ///   deduplication follows `OutboxDAO.enqueue`'s contract.
     /// - **Newest-first, and self-resuming past the cap.** The read is paged
     ///   `endDate`-descending (`AnchoredReader.readImportPage`) so recent days
     ///   stage/upload first, and when a page hits `outboxCap` the loop drains the
@@ -475,11 +479,7 @@ actor SyncEngine {
                 return HistoryImporter.Summary(staged: staged, hitCap: false, cancelled: true, cursor: cursor)
             }
 
-            let workouts = try await routeReader.workouts(
-                since: since,
-                before: cursor,
-                limit: pageSize
-            )
+            let workouts = try await scanWorkouts(since, cursor, pageSize)
             guard !workouts.isEmpty else {
                 return HistoryImporter.Summary(
                     staged: staged, hitCap: false, cancelled: false, cursor: cursor, exhausted: true
@@ -492,7 +492,7 @@ actor SyncEngine {
                 }
                 let samples: [Conduit_V1_Sample]
                 do {
-                    samples = try await routeReader.routeSamples(for: workout)
+                    samples = try await readRoutes(workout)
                 } catch {
                     logger.error("Route read failed for workout \(workout.uuid.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)")
                     continue
@@ -506,10 +506,9 @@ actor SyncEngine {
                     cap: webhook.outboxCap
                 )
                 if result.hitCap {
-                    // Wait for uploads to free room, then re-stage this same
-                    // workout — dedupe skips whatever already landed, so the
-                    // retry can't duplicate. A queue that never drains means a
-                    // stuck upload, and we stop rather than spin.
+                    // Wait for room, then retry this workout under the replay
+                    // contract documented at `OutboxDAO.enqueue`. Stop if the
+                    // queue never drains rather than spin.
                     guard await drainBelowCap(
                         webhook: webhook,
                         webhookID: webhookID,
@@ -529,15 +528,16 @@ actor SyncEngine {
                         cap: webhook.outboxCap
                     )
                     result.inserted += retried.inserted
+                    result.hitCap = retried.hitCap
                 }
                 staged += result.inserted
-                workoutsWithCapturedRoute.insert(workout.uuid.uuidString)
+                if !result.hitCap { workoutsWithCapturedRoute.insert(workout.uuid.uuidString) }
                 onProgress(staged)
             }
 
             // Newest-first paging cursor: continue from the oldest workout of
-            // this page. Inclusive bounds mean that workout is re-read once and
-            // deduped, which is safer than risking a same-timestamp sibling.
+            // this page. Inclusive bounds preserve same-timestamp siblings;
+            // re-reads follow `OutboxDAO.enqueue`'s replay contract.
             guard let oldest = workouts.last?.endDate, oldest != cursor else {
                 return HistoryImporter.Summary(
                     staged: staged, hitCap: false, cancelled: false, cursor: cursor, exhausted: true
@@ -570,7 +570,7 @@ actor SyncEngine {
         let deadline = Date().addingTimeInterval(SyncEngine.importDrainTimeout)
         while Date() < deadline {
             if isCancelled() { return false }
-            try? await flush(webhook: webhook, webhookID: webhookID)
+            _ = try? await flush()
             try? await Task.sleep(nanoseconds: UInt64(SyncEngine.importDrainPollInterval * 1_000_000_000))
             let total = (try? outboxDAO.totalCount()) ?? webhook.outboxCap
             if total <= resumeThreshold { return true }
@@ -582,10 +582,87 @@ actor SyncEngine {
     /// Bypasses the time gate but still respects count-empty guard.
     func flushNow() async {
         do {
-            guard let webhook = try webhookConfigDAO.first(), let webhookID = webhook.id else { return }
-            try await flush(webhook: webhook, webhookID: webhookID)
+            try await flush()
         } catch {
             logger.error("flushNow error: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// A bounded read must never establish a type's initial forward anchor:
+    /// later anchored reads drop the date floor and could upload pre-existing
+    /// backdated records. Initialization stays on the normal observer path.
+    func syncFromShortcut() async -> String {
+        guard !shortcutIsRunning else { return "A Shortcuts sync is already running. Try again after it finishes." }
+        shortcutIsRunning = true
+        defer { shortcutIsRunning = false }
+        do {
+            guard let webhook = try webhookConfigDAO.first(), let webhookID = webhook.id else {
+                return "Open Conduit and configure your destination first. Nothing was captured or queued."
+            }
+            guard let token = await bearerToken(), !token.isEmpty else {
+                return "The destination token is unavailable. Unlock your device and check Conduit setup. Nothing was captured or queued."
+            }
+            let enabled = try dataTypeConfigDAO.enabled().map(\.hkTypeId).sorted()
+            guard !enabled.isEmpty else { return "No Health types are enabled. Enable types in Conduit first. Nothing was captured or queued." }
+            let deadline = Date().addingTimeInterval(ShortcutSync.timeBudget)
+            let summary = await ShortcutSync.run(
+                identifiers: enabled,
+                shouldStop: { Task.isCancelled || Date() >= deadline },
+                capture: { identifier in
+                    // Re-check the toggle after actor reentrancy during each read.
+                    guard let config = try self.dataTypeConfigDAO.find(hkTypeId: identifier), config.enabled,
+                          let type = HealthTypeRegistry.shared.type(forIdentifier: identifier), type.sampleType != nil else {
+                        return ShortcutSync.Capture()
+                    }
+                    if type.stream == .route {
+                        let since = Calendar.current.date(byAdding: .day, value: -WorkoutRouteReader.rescanWindowDays, to: Date())
+                        let workouts = try await self.scanWorkouts(since, nil, ShortcutSync.workoutLimit)
+                        var capture = ShortcutSync.Capture(limited: workouts.count == ShortcutSync.workoutLimit)
+                        for workout in workouts {
+                            if Task.isCancelled || Date() >= deadline { capture.limited = true; break }
+                            guard !self.workoutsWithCapturedRoute.contains(workout.uuid.uuidString) else { continue }
+                            do {
+                                let samples = try await self.readRoutes(workout)
+                                capture.captured += samples.count
+                                guard try self.dataTypeConfigDAO.find(hkTypeId: identifier)?.enabled == true else { capture.limited = true; break }
+                                let staged = try self.stageCapturedRoutes(samples, for: workout, webhookID: webhookID, cap: webhook.outboxCap)
+                                capture.queued += staged.inserted
+                                if staged.hitCap { capture.limited = true; break }
+                            } catch {
+                                capture.notice = ShortcutSync.failureMessage(error)
+                                break
+                            }
+                        }
+                        return capture
+                    }
+                    guard let anchor = AnchoredReader.unarchiveAnchor(config.anchorBlob) else {
+                        return ShortcutSync.Capture(limited: true, uninitializedType: type.displayName)
+                    }
+                    let result = try await self.readAnchored(type, anchor, nil, ShortcutSync.pageSize,
+                        try self.includeHeartRateStatisticsForWorkouts())
+                    guard try self.dataTypeConfigDAO.find(hkTypeId: identifier)?.enabled == true else {
+                        return ShortcutSync.Capture(captured: result.samples.count, limited: true)
+                    }
+                    do {
+                        guard let inserted = try self.outboxDAO.ingest(samples: result.samples, hkTypeId: identifier,
+                            webhookId: webhookID, anchorBlob: result.newAnchorData,
+                            expectedAnchorBlob: config.anchorBlob,
+                            expectedIngestRevision: config.ingestRevision,
+                            deletedUuids: result.deletedUuids, cap: webhook.outboxCap) else {
+                            return ShortcutSync.Capture(captured: result.samples.count, limited: true)
+                        }
+                        return ShortcutSync.Capture(captured: result.samples.count, queued: inserted,
+                            deletions: result.deletedUuids.count,
+                            limited: result.samples.count + result.deletedUuids.count >= ShortcutSync.pageSize || inserted < result.samples.count)
+                    } catch {
+                        return ShortcutSync.Capture(captured: result.samples.count, notice: ShortcutSync.failureMessage(error))
+                    }
+                },
+                flush: { try await self.flush() }
+            )
+            return summary.message
+        } catch {
+            return "Could not read Conduit configuration. Unlock your device and open Conduit, then retry. Nothing was captured or queued by this action."
         }
     }
 
@@ -668,7 +745,19 @@ actor SyncEngine {
 
     // MARK: - Private
 
-    private func flush(webhook: WebhookConfig, webhookID: Int64) async throws {
+    /// Capture destination and token together on MainActor, then revalidate both
+    /// there immediately before submission, without an intervening await.
+    /// Settings saves on that actor; mixing snapshots can disclose a new token
+    /// to the old endpoint.
+    @discardableResult
+    private func flush() async throws -> Int {
+        let destinationDAO = webhookConfigDAO
+        let token = self.bearerToken
+        guard let (webhook, bearerToken) = try await MainActor.run(body: {
+            guard let webhook = try destinationDAO.first(), webhook.id != nil,
+                  let credential = token(), !credential.isEmpty else { return nil as (WebhookConfig, String)? }
+            return (webhook, credential)
+        }), let webhookID = webhook.id else { return 0 }
         // Reclaim any batch that's been `.inflight` long enough to be stuck
         // rather than genuinely still uploading (see `staleInflightTimeout`),
         // BEFORE draining — so a reclaimed row is immediately eligible for the
@@ -707,18 +796,30 @@ actor SyncEngine {
             if drained {
                 try SyncStateDAO(database).setLastSyncedAt()
             }
-            return
+            return 0
         }
 
-        guard let bearerToken = keychain.webhookBearerToken else {
-            logger.error("No bearer token in keychain — cannot upload")
-            return
+        let submitUpload = self.submitUpload
+        let submitted: Bool?
+        do {
+            submitted = try await MainActor.run { () -> Bool? in
+                guard try destinationDAO.first() == webhook, token() == bearerToken else { return nil }
+                guard !Task.isCancelled else { return nil }
+                return submitUpload(batch, webhook.url, bearerToken)
+            }
+        } catch {
+            try outboxDAO.releaseUnsubmittedBatch(batchID: batch.batchID)
+            throw error
         }
-
-        uploader.upload(batch: batch, webhookURL: webhook.url, bearerToken: bearerToken)
+        guard let submitted else {
+            try outboxDAO.releaseUnsubmittedBatch(batchID: batch.batchID)
+            return 0
+        }
+        guard submitted else { return 0 }
 
         // Keep a background-refresh request pending so the outbox still drains if
         // the app is suspended before the next observer wake or foreground open.
         scheduleBackgroundFlush()
+        return batch.rowIDs.count
     }
 }

@@ -4,18 +4,8 @@ import HealthKit
 /// Performs an incremental (anchored) read of a single HealthKit type and maps
 /// the results into wire-format `Conduit_V1_Sample` values.
 ///
-/// ## Critical invariant (ARCHITECTURE.md §4.4)
-///
-/// The `newAnchor` returned here marks "everything up to this point has been
-/// read". The caller MUST persist that anchor **and** enqueue the returned
-/// `samples` in the **same** SQLite transaction. If the anchor is saved without
-/// the samples (e.g. a crash between two separate writes), the next read starts
-/// *after* those samples and they are **permanently lost** — HealthKit will
-/// never hand them to us again.
-///
-/// `OutboxDAO.ingest(samples:hkTypeId:webhookId:anchorBlob:)` is the supported
-/// way to satisfy this: it enqueues and advances the anchor atomically. Do not
-/// save `result.newAnchorData` through any other path.
+/// Forward-capture persistence, stale-read rejection and back-pressure are owned
+/// by `OutboxDAO.ingest`. Commit `result.newAnchorData` only through that boundary.
 struct AnchoredReader {
     /// Result of one anchored read.
     struct Result {
@@ -131,9 +121,9 @@ struct AnchoredReader {
     /// **oldest** sample returned by the previous page (available as
     /// `Result.oldestEndDate`). The window is boundary-**inclusive** (default
     /// predicate options), so a sample sitting exactly on the cursor is re-read
-    /// on the next page and harmlessly skipped by `OutboxDAO.stageImport`'s UUID
-    /// dedupe — this avoids ever dropping same-timestamp siblings that a fixed
-    /// page limit split across two pages.
+    /// on the next page under `OutboxDAO.enqueue`'s replay contract. This avoids
+    /// dropping same-timestamp siblings that a fixed page limit split across
+    /// two pages.
     ///
     /// Like the anchored import it replaced, this NEVER touches the live
     /// forward-capture anchor in `data_type_config`; results are staged via
@@ -193,9 +183,9 @@ struct AnchoredReader {
     /// samples between `since` (lower) and `before` (upper). Both `nil` → no
     /// predicate (all history, up to now). Uses default (non-strict) options so
     /// the bounds are inclusive for point samples — a sample exactly on the
-    /// `before` cursor is re-read on the next page and deduped, which is safer
-    /// than a strict/exclusive bound that could drop same-timestamp samples a
-    /// page split apart. Static + `HKHealthStore`-free so it is unit-testable.
+    /// `before` cursor is re-read on the next page. See `readImportPage` for the
+    /// boundary rationale and replay contract. Static + `HKHealthStore`-free
+    /// so it is unit-testable.
     static func importWindowPredicate(since: Date?, before: Date?) -> NSPredicate? {
         guard since != nil || before != nil else { return nil }
         return HKQuery.predicateForSamples(withStart: since, end: before, options: [])

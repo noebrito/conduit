@@ -106,6 +106,10 @@
 		CE0000000000000000000B041 /* ReviewPromptCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000B040 /* ReviewPromptCoordinatorTests.swift */; };
 		CE0000000000000000000B051 /* ReviewReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000B050 /* ReviewReadinessTests.swift */; };
 		CE0000000000000000000B061 /* ReviewSettingsEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000B060 /* ReviewSettingsEvidenceTests.swift */; };
+		CD000000000000000000C002 /* SyncHealthIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000C001 /* SyncHealthIntent.swift */; };
+		CD000000000000000000C012 /* ShortcutSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000C011 /* ShortcutSync.swift */; };
+		CD000000000000000000C022 /* ShortcutSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000C021 /* ShortcutSyncTests.swift */; };
+		CD000000000000000000C032 /* ShortcutEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000C031 /* ShortcutEvidenceTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -239,6 +243,10 @@
 		CE0000000000000000000B040 /* ReviewPromptCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ReviewPromptCoordinatorTests.swift"; sourceTree = "<group>"; };
 		CE0000000000000000000B050 /* ReviewReadinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ReviewReadinessTests.swift"; sourceTree = "<group>"; };
 		CE0000000000000000000B060 /* ReviewSettingsEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSettingsEvidenceTests.swift; sourceTree = "<group>"; };
+		CD000000000000000000C001 /* SyncHealthIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncHealthIntent.swift; sourceTree = "<group>"; };
+		CD000000000000000000C011 /* ShortcutSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutSync.swift; sourceTree = "<group>"; };
+		CD000000000000000000C021 /* ShortcutSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutSyncTests.swift; sourceTree = "<group>"; };
+		CD000000000000000000C031 /* ShortcutEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutEvidenceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -341,6 +349,7 @@
 			children = (
 				CD0000000000000000000100 /* ConduitApp.swift */,
 				CD0000000000000000000102 /* AppDelegate.swift */,
+				CD000000000000000000C001 /* SyncHealthIntent.swift */,
 				CD0000000000000000000104 /* Conduit.entitlements */,
 				CD00000000000000000001A0 /* AppState.swift */,
 			);
@@ -406,6 +415,7 @@
 			isa = PBXGroup;
 			children = (
 				CD0000000000000000000162 /* SyncEngine.swift */,
+				CD000000000000000000C011 /* ShortcutSync.swift */,
 				CD00000000000000000001F0 /* HistoryImporter.swift */,
 				CD0000000000000000000705 /* ImportRunner.swift */,
 				CD0000000000000000000801 /* ImportBackgroundCoordinator.swift */,
@@ -516,6 +526,8 @@
 				CD0000000000000000000707 /* ImportResumeTests.swift */,
 				CD0000000000000000000803 /* ImportBackgroundTests.swift */,
 				CD00000000000000000001F4 /* ForwardCaptureFloorTests.swift */,
+				CD000000000000000000C021 /* ShortcutSyncTests.swift */,
+				CD000000000000000000C031 /* ShortcutEvidenceTests.swift */,
 				CD00000000000000000002A0 /* RegistryReconcileTests.swift */,
 				CD0000000000000000000156 /* StorageDAOTests.swift */,
 				CD00000000000000000AC03 /* HistoryAccessProbeTests.swift */,
@@ -694,6 +706,7 @@
 				CE0000000000000000000B011 /* ReviewReadiness.swift in Sources */,
 				CE0000000000000000000B001 /* ReviewEligibility.swift in Sources */,
 				CD0000000000000000000103 /* AppDelegate.swift in Sources */,
+				CD000000000000000000C002 /* SyncHealthIntent.swift in Sources */,
 				CD0000000000000000000107 /* HomeView.swift in Sources */,
 				CD0000000000000000000109 /* KeychainStore.swift in Sources */,
 				CD000000000000000000010B /* sync.pb.swift in Sources */,
@@ -711,6 +724,7 @@
 				CD0000000000000000000133 /* OutboxDAO.swift in Sources */,
 				CD0000000000000000000161 /* ObserverCoordinator.swift in Sources */,
 				CD0000000000000000000163 /* SyncEngine.swift in Sources */,
+				CD000000000000000000C012 /* ShortcutSync.swift in Sources */,
 				CD00000000000000000001F1 /* HistoryImporter.swift in Sources */,
 				CD0000000000000000000165 /* Throttle.swift in Sources */,
 				CD0000000000000000000167 /* Batcher.swift in Sources */,
@@ -765,6 +779,8 @@
 				CD0000000000000000000708 /* ImportResumeTests.swift in Sources */,
 				CD0000000000000000000804 /* ImportBackgroundTests.swift in Sources */,
 				CD00000000000000000001F5 /* ForwardCaptureFloorTests.swift in Sources */,
+				CD000000000000000000C022 /* ShortcutSyncTests.swift in Sources */,
+				CD000000000000000000C032 /* ShortcutEvidenceTests.swift in Sources */,
 				CD00000000000000000002A1 /* RegistryReconcileTests.swift in Sources */,
 				CD0000000000000000000157 /* StorageDAOTests.swift in Sources */,
 				CD000000000000000000F0F4 /* SyncStateTests.swift in Sources */,

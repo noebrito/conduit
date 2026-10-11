@@ -5,12 +5,8 @@ import SwiftProtobuf
 /// CRUD for `outbox` rows (ARCHITECTURE.md §4.7).
 ///
 /// The outbox is the durable staging area between HealthKit reads and webhook
-/// delivery. Its two correctness-critical behaviours both live here:
-///
-/// 1. **Dedupe** — `enqueue` is `INSERT OR IGNORE` on the UNIQUE
-///    `hk_sample_uuid`, so re-observed samples never produce duplicate rows.
-/// 2. **Atomic ingest** — `ingest(...)` enqueues a batch of samples *and*
-///    advances the type's HealthKit anchor in a single transaction (§4.4).
+/// delivery. See `enqueue` for deduplication and replay scope, and `ingest`
+/// for atomic persistence, stale-read rejection and capacity invariants.
 struct OutboxDAO {
     let database: AppDatabase
 
@@ -24,14 +20,16 @@ struct OutboxDAO {
     ///
     /// Uses `INSERT OR IGNORE` on `hk_sample_uuid`; returns `true` if a new row
     /// was inserted, `false` if it was a duplicate that was ignored.
+    /// Dedupe covers rows still in the outbox: `Uploader.commitSent` removes
+    /// delivered rows. Receiver replay requirements live in
+    /// `docs/webhook/HTTP_CONTRACT.md` (Idempotency).
     ///
     /// When a *new* row is inserted this also bumps the persisted
     /// `staged_daily_count` tally for `createdAt`'s local day, in the SAME
     /// transaction. This is the single choke point through which every staging
     /// path (`ingest`, `stageImport`, the convenience `enqueue`) flows, so the
-    /// "Staged today" counter can never drift from what was actually staged, and
-    /// — because duplicates return early without incrementing — it never
-    /// double-counts a re-observed sample. See `StagedDailyCountDAO`.
+    /// tally follows newly inserted rows; ignored duplicates add nothing.
+    /// See `StagedDailyCountDAO` for tally semantics.
     ///
     /// `bumpTally` lets a batch caller (`ingest`/`stageImport`) suppress the
     /// per-sample tally upsert and instead bump the day bucket **once** by the
@@ -41,6 +39,11 @@ struct OutboxDAO {
     /// by-1. The increment stays inside the same transaction, preserving the
     /// no-drift invariant. The convenience single-sample `enqueue` keeps
     /// `bumpTally: true`.
+    ///
+    /// Workout heart-rate statistics are filtered against the current Heart Rate
+    /// toggle in this transaction, before serialization. Settings can change while
+    /// a HealthKit read suspends, so read-time filtering alone cannot enforce the
+    /// opt-out. A missing toggle retains the registry's default-on convention.
     @discardableResult
     static func enqueue(
         _ db: Database,
@@ -50,6 +53,14 @@ struct OutboxDAO {
         createdAt: Date,
         bumpTally: Bool = true
     ) throws -> Bool {
+        var sample = sample
+        if case .workout(var workout)? = sample.value,
+           try DataTypeConfig.fetchOne(db, key: HealthDataType.heartRate.identifier)?.enabled == false {
+            workout.clearAvgHeartRateBpm()
+            workout.clearMaxHeartRateBpm()
+            workout.clearMinHeartRateBpm()
+            sample.workout = workout
+        }
         let payload = try sample.jsonUTF8Data()
         try db.execute(
             sql: """
@@ -147,8 +158,9 @@ struct OutboxDAO {
 
     // MARK: - Atomic ingest (§4.4 critical invariant)
 
-    /// Persist the result of an `AnchoredReader.read(...)`: enqueue every sample
-    /// **and** advance the type's anchor in **one** transaction.
+    /// Commit a current `AnchoredReader.read(...)` result: enqueue samples and
+    /// tombstones, update the anchor when capacity permits, and increment the
+    /// type's ingest revision in **one** transaction.
     ///
     /// This is the single most important correctness property of Phase I2.
     /// Persisting the anchor without the samples (or vice versa, across two
@@ -157,7 +169,18 @@ struct OutboxDAO {
     /// is one SQLite transaction, so either everything here commits or nothing
     /// does.
     ///
+    /// Reject a read if its starting anchor or ingest revision has changed.
+    /// Every committed ingest increments the revision, including empty reads and
+    /// cap-limited reads that leave the anchor unchanged. An anchor comparison
+    /// alone cannot prevent a delayed read from resurrecting a deleted sample
+    /// after a cap-limited ingest's tombstone has been delivered and purged.
+    /// The revision also distinguishes commits with identical sync timestamps.
+    /// Regression coverage:
+    /// `ShortcutSyncTests.testDelayedObserverCannotRestoreDeletionAfterCapLimitedShortcutAndInflightDelivery`.
+    ///
     /// - Parameters:
+    ///   - expectedAnchorBlob: stored anchor captured before starting the read.
+    ///   - expectedIngestRevision: revision from that same pre-read config snapshot.
     ///   - deletedUuids: UUIDs HealthKit reported as DELETED for this type since
     ///     the last read (`AnchoredReader.Result.deletedUuids`). Each is staged
     ///     as a **tombstone** (`op == .delete`) in this same transaction so the
@@ -170,20 +193,28 @@ struct OutboxDAO {
     ///     the anchor is **NOT** advanced (see below) so nothing is lost. `nil`
     ///     disables the guard. Tombstones are tiny and correctness-critical, so
     ///     they are staged regardless of the cap (a dropped tombstone would
-    ///     re-create the ghost problem); an over-cap tombstone is re-delivered +
-    ///     deduped on the next read anyway if the anchor didn't advance.
-    /// - Returns: the number of *newly* inserted (non-duplicate) rows.
+    ///     re-create the ghost problem). If the anchor stays put, a later read
+    ///     may replay the tombstone; deduplication follows `enqueue`'s contract.
+    /// - Returns: the number of newly inserted sample rows, excluding tombstones,
+    ///   or `nil` for a stale read rejected without changing persisted state.
     @discardableResult
     func ingest(
         samples: [Conduit_V1_Sample],
         hkTypeId: String,
         webhookId: Int64,
         anchorBlob: Data?,
+        expectedAnchorBlob: Data?,
+        expectedIngestRevision: Int64,
         deletedUuids: [String] = [],
         cap: Int? = nil,
         syncedAt: Date = Date()
-    ) throws -> Int {
+    ) throws -> Int? {
         try database.dbWriter.write { db in
+            let config = try DataTypeConfig.fetchOne(db, key: hkTypeId)
+            guard config?.anchorBlob == expectedAnchorBlob,
+                  (config?.ingestRevision ?? 0) == expectedIngestRevision else {
+                return nil
+            }
             var insertedCount = 0
             var currentTotal = cap != nil ? try OutboxRow.fetchCount(db) : 0
             var droppedForCap = false
@@ -236,20 +267,26 @@ struct OutboxDAO {
                     syncedAt: syncedAt
                 )
             }
+            try db.execute(
+                sql: """
+                    INSERT INTO data_type_config (hk_type_id, enabled, ingest_revision)
+                    VALUES (?, ?, 1)
+                    ON CONFLICT(hk_type_id) DO UPDATE SET
+                        ingest_revision = ingest_revision + 1
+                    """,
+                arguments: [hkTypeId, true]
+            )
             return insertedCount
         }
     }
 
     // MARK: - Import staging (enqueue-only, forward anchor untouched)
 
-    /// Enqueue a page of samples from an **explicit historical import** WITHOUT
-    /// advancing any HealthKit anchor (ARCHITECTURE.md §4.4, "Import history"
-    /// opt-in). This is the deliberate sibling to `ingest(...)`: the live
+    /// Enqueue samples for historical import or workout-route capture WITHOUT
+    /// advancing any HealthKit anchor. This is the sibling to `ingest(...)`: the live
     /// forward-capture anchor in `data_type_config` is left completely untouched,
-    /// so importing history never rewinds ongoing incremental capture. UUID
-    /// dedupe (`INSERT OR IGNORE`) means samples the forward stream already
-    /// staged are silently skipped, so the import and the live stream can't
-    /// double-stage the same sample.
+    /// so importing history never rewinds ongoing incremental capture.
+    /// Deduplication follows `enqueue`'s contract.
     ///
     /// `cap` enforces the same outbox back-pressure guard as `ingest`: once the
     /// outbox is at/over `cap`, staging stops and `hitCap` is `true` so the
@@ -394,6 +431,22 @@ struct OutboxDAO {
             try OutboxRow
                 .filter(Column("hk_sample_uuid") == hkSampleUuid)
                 .fetchOne(db)
+        }
+    }
+
+    /// Release a batch rejected before submission, preserving its retry metadata.
+    /// Once `Uploader.upload` is called, its failure transitions own the rows and
+    /// must not be rolled back here.
+    func releaseUnsubmittedBatch(batchID: String) throws {
+        try database.dbWriter.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE outbox
+                    SET state = ?, batch_id = NULL, inflight_at = NULL
+                    WHERE batch_id = ? AND state = ?
+                    """,
+                arguments: [OutboxState.pending.rawValue, batchID, OutboxState.inflight.rawValue]
+            )
         }
     }
 

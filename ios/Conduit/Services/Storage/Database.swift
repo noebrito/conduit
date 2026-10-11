@@ -301,6 +301,12 @@ final class AppDatabase {
             }
         }
 
+        migrator.registerMigration("v12-ingest-revision") { db in
+            try db.alter(table: "data_type_config") { t in
+                t.add(column: "ingest_revision", .integer).notNull().defaults(to: 0)
+            }
+        }
+
         return migrator
     }
 }
