@@ -88,7 +88,7 @@ final class ShortcutSyncTests: XCTestCase {
         let result = await SyncHealthIntent.execute(protectedDataAvailable: false,
             isConfigured: { XCTFail("Locked preflight must not open the database"); return true },
             sync: { XCTFail("Locked preflight must not capture or upload"); return "" })
-        XCTAssertTrue(result.contains("Unlock your iPhone"))
+        XCTAssertTrue(result.contains("Unlock your device"))
     }
 
     @MainActor
@@ -106,6 +106,28 @@ final class ShortcutSyncTests: XCTestCase {
         XCTAssertEqual(SyncHealthIntent.authenticationPolicy, .requiresLocalDeviceAuthentication)
         XCTAssertFalse(SyncHealthIntent.openAppWhenRun)
         XCTAssertEqual(ConduitShortcuts.appShortcuts.count, 1)
+    }
+
+    func testPackagedIntentStringsAvoidDeviceNames() throws {
+        // Xcode's generated export is the Siri-facing contract, not Swift source.
+        let url = Bundle.main.bundleURL.appendingPathComponent("Metadata.appintents/extract.actionsdata")
+        let metadata = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+        var localizedStrings: [String] = []
+        func collect(_ value: Any) {
+            if let object = value as? [String: Any] {
+                if let key = object["key"] as? String { localizedStrings.append(key) }
+                for child in object.values { collect(child) }
+            } else if let array = value as? [Any] {
+                for child in array { collect(child) }
+            }
+        }
+        collect(metadata)
+        XCTAssertGreaterThanOrEqual(localizedStrings.count, 4, "Expected intent title, description, shortcut title and phrase")
+        XCTAssertTrue(localizedStrings.contains { $0.contains("Unlock your device first") && $0.contains("Receiver acceptance is reported later in Activity Log") })
+        let deviceName = try NSRegularExpression(pattern: #"\b(?:iphone|ipad|ipod|apple\s+watch|homepod|macbook|imac|apple\s+tv|apple\s+vision\s+pro)\b"#, options: .caseInsensitive)
+        for string in localizedStrings {
+            XCTAssertNil(deviceName.firstMatch(in: string, range: NSRange(string.startIndex..., in: string)), "Device name in exported intent string: \(string)")
+        }
     }
 
     private func configure(_ database: AppDatabase, type: HealthDataType, initialized: Bool = true, cap: Int = 50_000) throws -> WebhookConfig {

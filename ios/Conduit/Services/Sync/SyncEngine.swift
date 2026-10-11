@@ -600,7 +600,7 @@ actor SyncEngine {
                 return "Open Conduit and configure your destination first. Nothing was captured or queued."
             }
             guard let token = await bearerToken(), !token.isEmpty else {
-                return "The destination token is unavailable. Unlock your iPhone and check Conduit setup. Nothing was captured or queued."
+                return "The destination token is unavailable. Unlock your device and check Conduit setup. Nothing was captured or queued."
             }
             let enabled = try dataTypeConfigDAO.enabled().map(\.hkTypeId).sorted()
             guard !enabled.isEmpty else { return "No Health types are enabled. Enable types in Conduit first. Nothing was captured or queued." }
@@ -662,7 +662,7 @@ actor SyncEngine {
             )
             return summary.message
         } catch {
-            return "Could not read Conduit configuration. Unlock your iPhone and open Conduit, then retry. Nothing was captured or queued by this action."
+            return "Could not read Conduit configuration. Unlock your device and open Conduit, then retry. Nothing was captured or queued by this action."
         }
     }
 

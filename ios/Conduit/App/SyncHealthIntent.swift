@@ -3,7 +3,7 @@ import UIKit
 
 struct SyncHealthIntent: AppIntent {
     static var title: LocalizedStringResource = "Sync Health Data"
-    static var description = IntentDescription("Capture a bounded page of fresh data for your enabled Health types and start uploading to your existing Conduit destination. Unlock your iPhone first. Receiver acceptance is reported later in Activity Log.")
+    static var description = IntentDescription("Capture a bounded page of fresh data for your enabled Health types and start uploading to your existing Conduit destination. Unlock your device first. Receiver acceptance is reported later in Activity Log.")
     static var openAppWhenRun = false
     static var authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
 
@@ -30,7 +30,7 @@ struct SyncHealthIntent: AppIntent {
         sync: () async -> String
     ) async -> String {
         guard protectedDataAvailable else {
-            return "Health data is unavailable while the device is locked. Unlock your iPhone and run again. Nothing was captured or queued by this action."
+            return "Health data is unavailable while the device is locked. Unlock your device and run again. Nothing was captured or queued by this action."
         }
         guard isConfigured() else {
             return "Open Conduit and finish setup before syncing. Nothing was captured or queued by this action."

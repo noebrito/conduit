@@ -32,7 +32,7 @@ enum ShortcutSync {
     static func failureMessage(_ error: Error) -> String {
         let nsError = error as NSError
         if nsError.domain == HKErrorDomain && nsError.code == HKError.Code.errorDatabaseInaccessible.rawValue {
-            return "Health data is unavailable while the device is locked. Unlock your iPhone and run again."
+            return "Health data is unavailable while the device is locked. Unlock your device and run again."
         }
         return "Capture or queueing failed for an enabled type. Open Conduit to check Health access and storage, then retry."
     }
