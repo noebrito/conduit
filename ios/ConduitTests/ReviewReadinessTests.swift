@@ -113,7 +113,7 @@ final class ReviewReadinessTests: XCTestCase {
 // Executable URL contracts: public destinations, no automatic attachments or credentials.
 final class ReviewLinkTests: XCTestCase {
     @MainActor
-    func testPublicReviewAndHelpDestinations() throws {
+    func testPublicReviewHelpAndPayloadDocsDestinations() throws {
         let review = try XCTUnwrap(URLComponents(url: ReviewHelpLinks.reviewURL, resolvingAgainstBaseURL: false))
         XCTAssertEqual(review.scheme, "https")
         XCTAssertEqual(review.host, "apps.apple.com")
@@ -126,5 +126,12 @@ final class ReviewLinkTests: XCTestCase {
         XCTAssertNil(help.query)
         XCTAssertNil(help.user)
         XCTAssertNil(help.password)
+        let docs = try XCTUnwrap(URLComponents(url: ReviewHelpLinks.payloadDocsURL, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(docs.scheme, "https")
+        XCTAssertEqual(docs.host, "github.com")
+        XCTAssertEqual(docs.path, "/noebrito/conduit/blob/main/docs/webhook/README.md")
+        XCTAssertNil(docs.query)
+        XCTAssertNil(docs.user)
+        XCTAssertNil(docs.password)
     }
 }
