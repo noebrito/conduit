@@ -178,9 +178,10 @@ Keychain review identity. Clock anomalies, corrupt state and missing versions
 defer requests. A clock change across a terminated process cannot be independently
 verified without an external time source; future stored timestamps still defer.
 
-Settings → About always offers the explicit App Store write-review link and a
-clearly identified public GitHub Help & Feedback link, with no automatic data
-attachments. See Apple's [RequestReviewAction documentation](https://developer.apple.com/documentation/storekit/requestreviewaction):
+Settings → About always offers the explicit App Store write-review link, a
+clearly identified public GitHub Help & Feedback link, and a Webhook Payload
+Format link to [`docs/webhook/README.md`](../docs/webhook/README.md), with no
+automatic data attachments. See Apple's [RequestReviewAction documentation](https://developer.apple.com/documentation/storekit/requestreviewaction):
 development rendering and TestFlight behavior do not establish production prompt
 display or review submission.
 
