@@ -250,6 +250,7 @@ private struct SettingsContent: View {
 struct ReviewHelpLinks: View {
     static let reviewURL = URL(string: "https://apps.apple.com/app/id6786544769?action=write-review")!
     static let helpURL = URL(string: "https://github.com/noebrito/conduit/issues")!
+    static let payloadDocsURL = URL(string: "https://github.com/noebrito/conduit/blob/main/docs/webhook/README.md")!
     @Environment(\.openURL) private var openURL
     var onHelp: () -> Void
 
@@ -269,6 +270,15 @@ struct ReviewHelpLinks: View {
             }
         }
         .accessibilityHint("Opens the public Conduit issue tracker on GitHub. No data is attached.")
+        Link(destination: Self.payloadDocsURL) {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Webhook Payload Format", systemImage: "doc.text")
+                Text("Opens the public webhook docs on GitHub")
+                    .font(.caption)
+                    .foregroundStyle(Color.secondary)
+            }
+        }
+        .accessibilityHint("Opens the webhook payload documentation on GitHub, including the schema your endpoint receives.")
     }
 }
 
