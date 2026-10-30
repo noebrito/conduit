@@ -179,6 +179,10 @@ private struct SettingsContent: View {
                     }
                 }
 
+                if viewModel.sensitiveTypesBlockedByDemoReceiver {
+                    DemoReceiverNotice()
+                }
+
                 NavigationLink(destination: HKPermissionsDetailView(viewModel: viewModel)) {
                     Label("Health Permissions", systemImage: "heart.fill")
                 }
@@ -284,26 +288,53 @@ struct ReviewHelpLinks: View {
 
 // MARK: - Per-category type toggle list
 
-private struct DataTypesCategoryView: View {
+struct DataTypesCategoryView: View {
     let category: HealthCategory
     @Bindable var viewModel: SettingsViewModel
 
     var body: some View {
         let enabledIDs = viewModel.enabledTypeIDs
         List {
-            ForEach(HealthTypeRegistry.shared.types(in: category)) { type in
-                let isEnabled = enabledIDs.contains(type.identifier)
-                Toggle(isOn: Binding(
-                    get: { viewModel.enabledTypeIDs.contains(type.identifier) },
-                    set: { _ in viewModel.toggleType(type.identifier) }
-                )) {
-                    Text(type.displayName)
+            Section {
+                ForEach(HealthTypeRegistry.shared.types(in: category)) { type in
+                    let isEnabled = enabledIDs.contains(type.identifier)
+                    Toggle(isOn: Binding(
+                        get: { viewModel.enabledTypeIDs.contains(type.identifier) },
+                        set: { _ in viewModel.toggleType(type.identifier) }
+                    )) {
+                        Text(type.displayName)
+                    }
+                    .accessibilityLabel(type.displayName)
+                    .accessibilityHint(isEnabled ? "Enabled. Tap to disable." : "Disabled. Tap to enable.")
                 }
-                .accessibilityLabel(type.displayName)
-                .accessibilityHint(isEnabled ? "Enabled. Tap to disable." : "Disabled. Tap to enable.")
+            } footer: {
+                if category.isSensitive {
+                    Text(DemoReceiver.sensitiveConsentFooter)
+                }
+            }
+
+            if category.isSensitive && viewModel.sensitiveTypesBlockedByDemoReceiver {
+                Section {
+                    DemoReceiverNotice()
+                }
             }
         }
         .navigationTitle(category.rawValue)
+    }
+}
+
+/// Shown while the webhook URL is the public demo receiver and a sensitive type
+/// is enabled: those types are held back, not sent (`DemoReceiver`).
+struct DemoReceiverNotice: View {
+    var body: some View {
+        Label {
+            Text(DemoReceiver.refusalMessage)
+                .font(.subheadline)
+        } icon: {
+            Image(systemName: "hand.raised.fill")
+                .foregroundStyle(.orange)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -572,13 +603,16 @@ private struct ImportHistoryView: View {
         // Honest about what leaving the app does: a clean pause that resumes
         // itself — NOT "it keeps importing in the background".
         let keepOpen = "You can leave the app: the import pauses at a clean point and picks itself back up when you return, or in background time iOS grants it."
+        // An explicit bulk upload of reproductive-health history is named, not
+        // implied by "the data types you've enabled".
+        let sensitive = viewModel.hasSensitiveTypesEnabled ? " This includes your Cycle Tracking history." : ""
         if viewModel.canResumeImport {
-            return "This discards the paused import's progress and re-reads \(viewModel.importRange.label) from the most recent data. \(keepOpen)"
+            return "This discards the paused import's progress and re-reads \(viewModel.importRange.label) from the most recent data.\(sensitive) \(keepOpen)"
         }
         if viewModel.importNeedsVolumeWarning {
-            return "This can stage a large amount of data — potentially hundreds of thousands to millions of samples for a multi-year range. It's paged and capped so it won't overwhelm the queue, but it may take a while and use significant network to upload. \(keepOpen) Continue?"
+            return "This can stage a large amount of data — potentially hundreds of thousands to millions of samples for a multi-year range. It's paged and capped so it won't overwhelm the queue, but it may take a while and use significant network to upload.\(sensitive) \(keepOpen) Continue?"
         }
-        return "Conduit will read past Health data for the selected range and queue it for upload. \(keepOpen) Continue?"
+        return "Conduit will read past Health data for the selected range and queue it for upload.\(sensitive) \(keepOpen) Continue?"
     }
 }
 

@@ -86,15 +86,45 @@ final class SettingsViewModel {
 
     private let importCoordinator: ImportRunCoordinator
     private let historyAccessProbe: HistoryAccessProbing
+    private let startNewlyEnabledTypes: @MainActor (_ types: [HealthDataType]) async -> Void
 
+    /// The work `save()` kicks off for newly enabled types (authorization, then
+    /// capture). Exposed so tests can await it.
+    private(set) var enableTask: Task<Void, Never>?
+
+    /// - Parameter startNewlyEnabledTypes: what `save()` does with types the
+    ///   user just turned on. Defaults to `startCapture(for:appState:)`;
+    ///   injectable so tests never touch a live `HKHealthStore`.
     init(
         appState: AppState,
         importCoordinator: ImportRunCoordinator = .shared,
-        historyAccessProbe: HistoryAccessProbing = HealthKitHistoryAccessProbe()
+        historyAccessProbe: HistoryAccessProbing = HealthKitHistoryAccessProbe(),
+        startNewlyEnabledTypes: (@MainActor (_ types: [HealthDataType]) async -> Void)? = nil
     ) {
         self.appState = appState
         self.importCoordinator = importCoordinator
         self.historyAccessProbe = historyAccessProbe
+        self.startNewlyEnabledTypes = startNewlyEnabledTypes ?? { [appState] types in
+            await SettingsViewModel.startCapture(for: types, appState: appState)
+        }
+    }
+
+    /// Lazy authorization: request HealthKit read access for types the user just
+    /// turned on (cycle tracking is default off and outside the launch-time
+    /// re-prompt, so this is where it is first asked for), then start capturing
+    /// them without waiting for a relaunch. Types already decided resolve
+    /// without a sheet. Capture starts even if the request fails: a type
+    /// without access simply reads nothing.
+    @MainActor
+    static func startCapture(for types: [HealthDataType], appState: AppState) async {
+        appState.reviewPrompt.beginSensitiveActivity()
+        defer { appState.reviewPrompt.endSensitiveActivity() }
+        do {
+            try await HealthKitAuthorizer(store: appState.healthStore).request(for: types)
+        } catch {
+            logger.error("Authorization for newly enabled types failed: \(error.localizedDescription, privacy: .public)")
+        }
+        appState.startDataCapture()
     }
 
     func load() {
@@ -262,6 +292,7 @@ final class SettingsViewModel {
         }
 
         let typeDAO = DataTypeConfigDAO(appState.database)
+        let previouslyEnabled = Set(try typeDAO.enabled().map(\.hkTypeId))
         for type in HealthTypeRegistry.shared.all {
             let enabled = enabledTypeIDs.contains(type.identifier)
             try typeDAO.setEnabled(enabled, hkTypeId: type.identifier)
@@ -269,6 +300,32 @@ final class SettingsViewModel {
                 recordTypeEnabledDate(type.identifier)
             }
         }
+        let configs = try typeDAO.all()
+        dataTypeConfigsByID = Dictionary(uniqueKeysWithValues: configs.map { ($0.hkTypeId, $0) })
+
+        // Types turned on by this save get authorized and captured now (see
+        // `startCapture(for:appState:)`).
+        let newlyEnabled = HealthTypeRegistry.shared.all.filter {
+            enabledTypeIDs.contains($0.identifier) && !previouslyEnabled.contains($0.identifier)
+        }
+        guard !newlyEnabled.isEmpty else { return }
+        let start = startNewlyEnabledTypes
+        enableTask = Task { @MainActor in
+            await start(newlyEnabled)
+        }
+    }
+
+    /// Whether the edited (unsaved or saved) webhook URL is the public demo
+    /// receiver while a sensitive type is enabled — the case Settings explains
+    /// with `DemoReceiver.refusalMessage`.
+    var sensitiveTypesBlockedByDemoReceiver: Bool {
+        !DemoReceiver.blockedTypeIDs(forURL: webhookURL).isDisjoint(with: enabledTypeIDs)
+    }
+
+    /// Whether any sensitive type is enabled, so the import confirmation can
+    /// name it before an explicit bulk upload of reproductive-health history.
+    var hasSensitiveTypesEnabled: Bool {
+        HealthTypeRegistry.shared.all.contains { $0.isSensitive && enabledTypeIDs.contains($0.identifier) }
     }
 
     @MainActor

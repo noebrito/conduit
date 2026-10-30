@@ -191,9 +191,39 @@ public nonisolated struct Conduit_V1_CategoryValue: Sendable {
   /// human-readable, e.g. "asleepREM"
   public var valueName: String = String()
 
+  /// HKMetadataKeyHeartRateEventThreshold, in count/min. Set only on
+  /// HKCategoryTypeIdentifierHighHeartRateEvent and LowHeartRateEvent samples:
+  /// it is the threshold the user configured, NOT the measured heart rate that
+  /// crossed it. Correlate HKQuantityTypeIdentifierHeartRate samples inside the
+  /// event's [start_unix_ms, end_unix_ms] window for the measured readings.
+  /// `optional` so absent stays distinct from 0.
+  public var heartRateEventThresholdBpm: Double {
+    get {_heartRateEventThresholdBpm ?? 0}
+    set {_heartRateEventThresholdBpm = newValue}
+  }
+  /// Returns true if `heartRateEventThresholdBpm` has been explicitly set.
+  public var hasHeartRateEventThresholdBpm: Bool {self._heartRateEventThresholdBpm != nil}
+  /// Clears the value of `heartRateEventThresholdBpm`. Subsequent reads from it will return its default value.
+  public mutating func clearHeartRateEventThresholdBpm() {self._heartRateEventThresholdBpm = nil}
+
+  /// HKMetadataKeyMenstrualCycleStart. Set only on
+  /// HKCategoryTypeIdentifierMenstrualFlow samples. `optional` because false
+  /// ("not the first day of a cycle") and absent ("not reported") differ.
+  public var menstrualCycleStart: Bool {
+    get {_menstrualCycleStart ?? false}
+    set {_menstrualCycleStart = newValue}
+  }
+  /// Returns true if `menstrualCycleStart` has been explicitly set.
+  public var hasMenstrualCycleStart: Bool {self._menstrualCycleStart != nil}
+  /// Clears the value of `menstrualCycleStart`. Subsequent reads from it will return its default value.
+  public mutating func clearMenstrualCycleStart() {self._menstrualCycleStart = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _heartRateEventThresholdBpm: Double? = nil
+  fileprivate var _menstrualCycleStart: Bool? = nil
 }
 
 public nonisolated struct Conduit_V1_WorkoutValue: Sendable {
@@ -670,7 +700,7 @@ nonisolated extension Conduit_V1_QuantityValue: SwiftProtobuf.Message, SwiftProt
 
 nonisolated extension Conduit_V1_CategoryValue: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CategoryValue"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}value\0\u{3}value_name\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}value\0\u{3}value_name\0\u{3}heart_rate_event_threshold_bpm\0\u{3}menstrual_cycle_start\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -680,24 +710,38 @@ nonisolated extension Conduit_V1_CategoryValue: SwiftProtobuf.Message, SwiftProt
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt32Field(value: &self.value) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.valueName) }()
+      case 3: try { try decoder.decodeSingularDoubleField(value: &self._heartRateEventThresholdBpm) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self._menstrualCycleStart) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.value != 0 {
       try visitor.visitSingularInt32Field(value: self.value, fieldNumber: 1)
     }
     if !self.valueName.isEmpty {
       try visitor.visitSingularStringField(value: self.valueName, fieldNumber: 2)
     }
+    try { if let v = self._heartRateEventThresholdBpm {
+      try visitor.visitSingularDoubleField(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._menstrualCycleStart {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Conduit_V1_CategoryValue, rhs: Conduit_V1_CategoryValue) -> Bool {
     if lhs.value != rhs.value {return false}
     if lhs.valueName != rhs.valueName {return false}
+    if lhs._heartRateEventThresholdBpm != rhs._heartRateEventThresholdBpm {return false}
+    if lhs._menstrualCycleStart != rhs._menstrualCycleStart {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

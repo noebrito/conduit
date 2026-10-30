@@ -42,10 +42,16 @@ struct Batcher {
     ///
     /// Returns `nil` when there are no rows ready to send (outbox is empty or
     /// all rows are still in backoff).
+    ///
+    /// - Parameter excludingTypeIDs: `hk_type_id`s that must not go to this
+    ///   destination (sensitive types bound for the public demo receiver — see
+    ///   `DemoReceiver`). Their rows are skipped, not dropped: they stay
+    ///   `pending` and drain once the destination changes.
     func buildBatch(
         webhookID: Int64,
         limit: Int,
         deviceID: String,
+        excludingTypeIDs: Set<String> = [],
         now: Date = Date()
     ) throws -> BatchResult? {
         let batchID = UUID().uuidString
@@ -61,9 +67,13 @@ struct Batcher {
             // taken even when it alone exceeds the ceiling — sending it alone is
             // the only way it ever drains, and skipping it would wedge every row
             // behind it. Rows left behind stay `pending` for the next batch.
-            let cursor = try OutboxRow
+            var request = OutboxRow
                 .filter(Column("state") == OutboxState.pending.rawValue)
                 .filter(Column("next_attempt_at") == nil || Column("next_attempt_at") <= now)
+            if !excludingTypeIDs.isEmpty {
+                request = request.filter(!excludingTypeIDs.contains(Column("hk_type_id")))
+            }
+            let cursor = try request
                 .order(Column("created_at").asc)
                 .limit(limit)
                 .fetchCursor(db)
