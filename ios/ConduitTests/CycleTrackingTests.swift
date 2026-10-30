@@ -1,6 +1,7 @@
 import XCTest
 import HealthKit
 import GRDB
+import SwiftUI
 @testable import Conduit
 
 /// The cycle-tracking core set, the heart-rate event threshold, and the
@@ -449,5 +450,90 @@ final class DemoReceiverTests: XCTestCase {
         value.valueName = "light"
         sample.category = value
         return sample
+    }
+}
+
+// MARK: - Screen evidence
+
+/// Opt-in capture (`CONDUIT_EVIDENCE_DIR`) of the Cycle Tracking surfaces from
+/// the real simulator renderer over an in-memory fixture: the consent footer on
+/// both pickers, and the demo-receiver refusal shown only while the configured
+/// URL is the public demo receiver and a cycle type is on. No HealthKit sheet,
+/// no network.
+@MainActor
+final class CycleTrackingScreenEvidenceTests: XCTestCase {
+    private let demoURL = "https://health.noebrito.dev/webhook-test"
+    private let ownURL = "https://example.com/hook"
+
+    override func setUpWithError() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["CONDUIT_EVIDENCE_DIR"] != nil)
+    }
+
+    func testSettingsCycleTrackingPicker() throws {
+        for (name, url) in [("demo-receiver", demoURL), ("own-receiver", ownURL)] {
+            let viewModel = SettingsViewModel(appState: makeSnapshotAppState(), startNewlyEnabledTypes: { _ in })
+            viewModel.webhookURL = url
+            viewModel.enabledTypeIDs = [HealthDataType.heartRate.identifier, HealthDataType.menstrualFlow.identifier]
+            XCTAssertEqual(viewModel.sensitiveTypesBlockedByDemoReceiver, url == demoURL)
+            let view = NavigationStack { DataTypesCategoryView(category: .cycleTracking, viewModel: viewModel) }
+            try capture(view, named: "settings-cycle-tracking-\(name).png") { _ in }
+        }
+    }
+
+    func testSettingsDataTypesSectionWithDemoReceiver() throws {
+        let app = makeSnapshotAppState()
+        var webhook = WebhookConfig.makeDefault(url: demoURL, bearerTokenKeychainRef: "test")
+        try WebhookConfigDAO(app.database).save(&webhook)
+        try AppState.enableNewlyRegisteredTypes(dao: DataTypeConfigDAO(app.database))
+        try DataTypeConfigDAO(app.database).setEnabled(true, hkTypeId: HealthDataType.menstrualFlow.identifier)
+        try capture(SettingsView().environment(app), named: "settings-data-types-demo-receiver.png") { collection in
+            // Webhook, Save, Sync, Data Types.
+            collection.scrollToItem(at: IndexPath(item: 4, section: 3), at: .top, animated: false)
+        }
+    }
+
+    func testOnboardingPickerCycleTrackingSection() throws {
+        for (name, url, enableFlow) in [("default-off", ownURL, false), ("demo-receiver", demoURL, true)] {
+            let viewModel = OnboardingViewModel(appState: makeSnapshotAppState())
+            viewModel.webhookURL = url
+            XCTAssertTrue(viewModel.enabledTypeIDs.isDisjoint(with: CycleTrackingReadings.identifiers))
+            if enableFlow { viewModel.toggle(typeID: HealthDataType.menstrualFlow.identifier) }
+            XCTAssertEqual(viewModel.sensitiveTypesBlockedByDemoReceiver, enableFlow)
+            let section = 1 + HealthCategory.allCases
+                .filter { !HealthTypeRegistry.shared.types(in: $0).isEmpty }
+                .firstIndex(of: .cycleTracking)!
+            try capture(DataTypePickerStepView(viewModel: viewModel), named: "onboarding-cycle-tracking-\(name).png") { collection in
+                collection.scrollToItem(at: IndexPath(item: 0, section: section), at: .top, animated: false)
+            }
+        }
+    }
+
+    private func capture<V: View>(_ view: V, named name: String, scroll: (UICollectionView) -> Void) throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let host = UIHostingController(rootView: view)
+        let window = UIWindow(windowScene: scene)
+        window.overrideUserInterfaceStyle = .light
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        settle()
+        host.view.layoutIfNeeded()
+        if let collection = collections(host.view).max(by: { $0.contentSize.height < $1.contentSize.height }) {
+            scroll(collection)
+            settle()
+        }
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        try writeArtifact(try XCTUnwrap(image.pngData()), named: name)
+    }
+
+    private func settle() {
+        let deadline = Date().addingTimeInterval(1)
+        while Date() < deadline { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
+    }
+
+    private func collections(_ view: UIView) -> [UICollectionView] {
+        (view as? UICollectionView).map { [$0] } ?? view.subviews.flatMap(collections)
     }
 }
