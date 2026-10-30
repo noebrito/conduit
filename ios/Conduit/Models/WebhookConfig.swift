@@ -95,10 +95,10 @@ enum DemoReceiver {
         return Set(registry.all.filter(\.isSensitive).map(\.identifier))
     }
 
-    /// In-app copy shown wherever sensitive types are toggled or saved while the
-    /// demo receiver is the destination.
     /// Consent copy for sensitive picker groups (Settings and onboarding).
     static let sensitiveConsentFooter = "Cycle tracking entries describe your reproductive health. They stay off until you turn them on, iOS asks for permission when you do, and Conduit sends them only to the webhook you configured, never to the public demo receiver."
 
+    /// In-app copy shown wherever sensitive types are toggled or saved while the
+    /// demo receiver is the destination.
     static let refusalMessage = "Cycle Tracking isn't sent to the public demo receiver, because it shows everything it receives on a public page. Point Conduit at a webhook you control to send it."
 }

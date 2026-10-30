@@ -107,6 +107,8 @@ is `isSensitive` in `HealthTypeRegistry`, which means:
   another receiver are held in the outbox instead of drained to it, and an
   import of a sensitive type fails with the same explanation the app shows in
   Settings and onboarding. The demo receiver also drops these types server-side.
+  Held rows still count as pending (in the pending count, and they keep "last
+  synced" from advancing) until the webhook URL changes.
 - The Import History confirmation names Cycle Tracking when it is enabled.
 
 | Type | `hkTypeId` | Shape | `valueName` or unit |
