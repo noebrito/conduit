@@ -129,6 +129,29 @@ activity, contraception, pregnancy, lactation, pregnancy and progesterone tests,
 the menopause types, and cycle symptoms are deliberately not exported. All types
 are available on every supported iOS version.
 
+## ECG recordings
+
+Apple Watch ECG recordings (`HKDataTypeIdentifierElectrocardiogram`) are in the
+**Heart Events** group, on by default like other new types: on upgrade the
+toggle defaults on and the grown read set triggers one HealthKit authorization
+request. Each recording is one sample in its own `electrocardiogram` shape (see
+[`docs/webhook/PAYLOADS.md`](../docs/webhook/PAYLOADS.md#electrocardiogram--an-ecg-recording-summary)):
+
+| Field | Source |
+| --- | --- |
+| `classification` | Apple's classification, unchanged: `sinusRhythm`, `atrialFibrillation`, `inconclusiveLowHeartRate`, `inconclusiveHighHeartRate`, `inconclusivePoorReading`, `inconclusiveOther`, `notSet`, `unrecognized`, or `classification<N>` |
+| `averageHeartRateBpm` | Average heart rate during the recording; absent (not `0`) when HealthKit has none |
+| `symptomsStatus` | `notSet`, `none`, `present`, or `symptomsStatus<N>` |
+| `samplingFrequencyHz`, `numberOfVoltageMeasurements` | Recording details; the frequency is absent when HealthKit has none |
+| `appleEcgAlgorithmVersion` | `HKMetadataKeyAppleECGAlgorithmVersion`, when present |
+
+The waveform is never read or sent, and neither are the symptoms a user logs
+with a recording (separate HealthKit types). Conduit adds no interpretation.
+`HKElectrocardiogram` cannot be constructed in a test, so the mapping is
+unit-tested through `AnchoredReader.makeElectrocardiogramValue`; whether a real
+recording wakes the app in the background is not yet verified on a device (if
+not, it is picked up on the next sync of any other type).
+
 ## Dependencies (Swift Package Manager)
 
 Declared in the project; Xcode resolves them on first open / build:

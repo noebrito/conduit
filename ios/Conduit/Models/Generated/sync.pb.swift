@@ -132,6 +132,22 @@ public nonisolated struct Conduit_V1_Sample: Sendable {
     set {value = .route(newValue)}
   }
 
+  public var electrocardiogram: Conduit_V1_ElectrocardiogramValue {
+    get {
+      if case .electrocardiogram(let v)? = value {return v}
+      return Conduit_V1_ElectrocardiogramValue()
+    }
+    set {value = .electrocardiogram(newValue)}
+  }
+
+  public var medicationDose: Conduit_V1_MedicationDoseValue {
+    get {
+      if case .medicationDose(let v)? = value {return v}
+      return Conduit_V1_MedicationDoseValue()
+    }
+    set {value = .medicationDose(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Value: Equatable, Sendable {
@@ -140,6 +156,8 @@ public nonisolated struct Conduit_V1_Sample: Sendable {
     case workout(Conduit_V1_WorkoutValue)
     case correlation(Conduit_V1_CorrelationValue)
     case route(Conduit_V1_RouteValue)
+    case electrocardiogram(Conduit_V1_ElectrocardiogramValue)
+    case medicationDose(Conduit_V1_MedicationDoseValue)
 
   }
 
@@ -391,6 +409,126 @@ public nonisolated struct Conduit_V1_RoutePoint: Sendable {
   public init() {}
 }
 
+/// One HKElectrocardiogram (Apple Watch ECG app), as a summary only. Never the
+/// waveform: voltages need a separate HKElectrocardiogramQuery that Conduit does
+/// not run. Sample.start_unix_ms/end_unix_ms are the recording window. Values
+/// are Apple's own, passed through without interpretation.
+public nonisolated struct Conduit_V1_ElectrocardiogramValue: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// "sinusRhythm"|"atrialFibrillation"|"inconclusiveLowHeartRate"|
+  public var classification: String = String()
+
+  /// "inconclusiveHighHeartRate"|"inconclusivePoorReading"|
+  /// "inconclusiveOther"|"notSet"|"unrecognized"|"classification<N>"
+  public var averageHeartRateBpm: Double {
+    get {_averageHeartRateBpm ?? 0}
+    set {_averageHeartRateBpm = newValue}
+  }
+  /// Returns true if `averageHeartRateBpm` has been explicitly set.
+  public var hasAverageHeartRateBpm: Bool {self._averageHeartRateBpm != nil}
+  /// Clears the value of `averageHeartRateBpm`. Subsequent reads from it will return its default value.
+  public mutating func clearAverageHeartRateBpm() {self._averageHeartRateBpm = nil}
+
+  /// "notSet"|"none"|"present"|"symptomsStatus<N>"
+  public var symptomsStatus: String = String()
+
+  /// absent when HealthKit has none
+  public var samplingFrequencyHz: Double {
+    get {_samplingFrequencyHz ?? 0}
+    set {_samplingFrequencyHz = newValue}
+  }
+  /// Returns true if `samplingFrequencyHz` has been explicitly set.
+  public var hasSamplingFrequencyHz: Bool {self._samplingFrequencyHz != nil}
+  /// Clears the value of `samplingFrequencyHz`. Subsequent reads from it will return its default value.
+  public mutating func clearSamplingFrequencyHz() {self._samplingFrequencyHz = nil}
+
+  public var numberOfVoltageMeasurements: Int32 = 0
+
+  /// HKMetadataKeyAppleECGAlgorithmVersion
+  public var appleEcgAlgorithmVersion: Int32 {
+    get {_appleEcgAlgorithmVersion ?? 0}
+    set {_appleEcgAlgorithmVersion = newValue}
+  }
+  /// Returns true if `appleEcgAlgorithmVersion` has been explicitly set.
+  public var hasAppleEcgAlgorithmVersion: Bool {self._appleEcgAlgorithmVersion != nil}
+  /// Clears the value of `appleEcgAlgorithmVersion`. Subsequent reads from it will return its default value.
+  public mutating func clearAppleEcgAlgorithmVersion() {self._appleEcgAlgorithmVersion = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _averageHeartRateBpm: Double? = nil
+  fileprivate var _samplingFrequencyHz: Double? = nil
+  fileprivate var _appleEcgAlgorithmVersion: Int32? = nil
+}
+
+/// One HKMedicationDoseEvent (iOS 26+): a scheduled reminder slot or a logged
+/// dose. Sample.start_unix_ms/end_unix_ms are the event's own dates (the log
+/// time). The medication is identified by name and form only, joined on-device
+/// from HKUserAnnotatedMedication; no nickname or clinical codes are sent.
+public nonisolated struct Conduit_V1_MedicationDoseValue: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// HKMedicationConcept.displayText
+  public var medicationName: String = String()
+
+  /// "tablet"|"capsule"|...|"unknown" (HKMedicationGeneralForm)
+  public var generalForm: String = String()
+
+  /// "schedule"|"asNeeded"|"scheduleType<N>"
+  public var scheduleType: String = String()
+
+  /// "taken"|"skipped"|"snoozed"|"notInteracted"|
+  public var logStatus: String = String()
+
+  /// "notificationNotSent"|"notLogged"|"logStatus<N>"
+  public var scheduledUnixMs: Int64 {
+    get {_scheduledUnixMs ?? 0}
+    set {_scheduledUnixMs = newValue}
+  }
+  /// Returns true if `scheduledUnixMs` has been explicitly set.
+  public var hasScheduledUnixMs: Bool {self._scheduledUnixMs != nil}
+  /// Clears the value of `scheduledUnixMs`. Subsequent reads from it will return its default value.
+  public mutating func clearScheduledUnixMs() {self._scheduledUnixMs = nil}
+
+  /// absent for an as-needed dose
+  public var scheduledDoseQuantity: Double {
+    get {_scheduledDoseQuantity ?? 0}
+    set {_scheduledDoseQuantity = newValue}
+  }
+  /// Returns true if `scheduledDoseQuantity` has been explicitly set.
+  public var hasScheduledDoseQuantity: Bool {self._scheduledDoseQuantity != nil}
+  /// Clears the value of `scheduledDoseQuantity`. Subsequent reads from it will return its default value.
+  public mutating func clearScheduledDoseQuantity() {self._scheduledDoseQuantity = nil}
+
+  /// absent (not 0) when HealthKit has none; 0 is a real answer
+  public var doseQuantity: Double {
+    get {_doseQuantity ?? 0}
+    set {_doseQuantity = newValue}
+  }
+  /// Returns true if `doseQuantity` has been explicitly set.
+  public var hasDoseQuantity: Bool {self._doseQuantity != nil}
+  /// Clears the value of `doseQuantity`. Subsequent reads from it will return its default value.
+  public mutating func clearDoseQuantity() {self._doseQuantity = nil}
+
+  /// HKUnit string for the quantities, e.g. "count", "mg"
+  public var unit: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _scheduledUnixMs: Int64? = nil
+  fileprivate var _scheduledDoseQuantity: Double? = nil
+  fileprivate var _doseQuantity: Double? = nil
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 fileprivate nonisolated let _protobuf_package = "conduit.v1"
@@ -487,7 +625,7 @@ nonisolated extension Conduit_V1_SampleBatch: SwiftProtobuf.Message, SwiftProtob
 
 nonisolated extension Conduit_V1_Sample: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Sample"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}uuid\0\u{3}start_unix_ms\0\u{3}end_unix_ms\0\u{1}source\0\u{2}\u{6}quantity\0\u{1}category\0\u{1}workout\0\u{1}correlation\0\u{1}route\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}uuid\0\u{3}start_unix_ms\0\u{3}end_unix_ms\0\u{1}source\0\u{2}\u{6}quantity\0\u{1}category\0\u{1}workout\0\u{1}correlation\0\u{1}route\0\u{1}electrocardiogram\0\u{3}medication_dose\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -564,6 +702,32 @@ nonisolated extension Conduit_V1_Sample: SwiftProtobuf.Message, SwiftProtobuf._M
           self.value = .route(v)
         }
       }()
+      case 15: try {
+        var v: Conduit_V1_ElectrocardiogramValue?
+        var hadOneofValue = false
+        if let current = self.value {
+          hadOneofValue = true
+          if case .electrocardiogram(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.value = .electrocardiogram(v)
+        }
+      }()
+      case 16: try {
+        var v: Conduit_V1_MedicationDoseValue?
+        var hadOneofValue = false
+        if let current = self.value {
+          hadOneofValue = true
+          if case .medicationDose(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.value = .medicationDose(v)
+        }
+      }()
       default: break
       }
     }
@@ -606,6 +770,14 @@ nonisolated extension Conduit_V1_Sample: SwiftProtobuf.Message, SwiftProtobuf._M
     case .route?: try {
       guard case .route(let v)? = self.value else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 14)
+    }()
+    case .electrocardiogram?: try {
+      guard case .electrocardiogram(let v)? = self.value else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 15)
+    }()
+    case .medicationDose?: try {
+      guard case .medicationDose(let v)? = self.value else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 16)
     }()
     case nil: break
     }
@@ -996,6 +1168,134 @@ nonisolated extension Conduit_V1_RoutePoint: SwiftProtobuf.Message, SwiftProtobu
     if lhs.verticalAccuracyM != rhs.verticalAccuracyM {return false}
     if lhs.speedMps != rhs.speedMps {return false}
     if lhs.courseDeg != rhs.courseDeg {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Conduit_V1_ElectrocardiogramValue: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ElectrocardiogramValue"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}classification\0\u{3}average_heart_rate_bpm\0\u{3}symptoms_status\0\u{3}sampling_frequency_hz\0\u{3}number_of_voltage_measurements\0\u{3}apple_ecg_algorithm_version\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.classification) }()
+      case 2: try { try decoder.decodeSingularDoubleField(value: &self._averageHeartRateBpm) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.symptomsStatus) }()
+      case 4: try { try decoder.decodeSingularDoubleField(value: &self._samplingFrequencyHz) }()
+      case 5: try { try decoder.decodeSingularInt32Field(value: &self.numberOfVoltageMeasurements) }()
+      case 6: try { try decoder.decodeSingularInt32Field(value: &self._appleEcgAlgorithmVersion) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.classification.isEmpty {
+      try visitor.visitSingularStringField(value: self.classification, fieldNumber: 1)
+    }
+    try { if let v = self._averageHeartRateBpm {
+      try visitor.visitSingularDoubleField(value: v, fieldNumber: 2)
+    } }()
+    if !self.symptomsStatus.isEmpty {
+      try visitor.visitSingularStringField(value: self.symptomsStatus, fieldNumber: 3)
+    }
+    try { if let v = self._samplingFrequencyHz {
+      try visitor.visitSingularDoubleField(value: v, fieldNumber: 4)
+    } }()
+    if self.numberOfVoltageMeasurements != 0 {
+      try visitor.visitSingularInt32Field(value: self.numberOfVoltageMeasurements, fieldNumber: 5)
+    }
+    try { if let v = self._appleEcgAlgorithmVersion {
+      try visitor.visitSingularInt32Field(value: v, fieldNumber: 6)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Conduit_V1_ElectrocardiogramValue, rhs: Conduit_V1_ElectrocardiogramValue) -> Bool {
+    if lhs.classification != rhs.classification {return false}
+    if lhs._averageHeartRateBpm != rhs._averageHeartRateBpm {return false}
+    if lhs.symptomsStatus != rhs.symptomsStatus {return false}
+    if lhs._samplingFrequencyHz != rhs._samplingFrequencyHz {return false}
+    if lhs.numberOfVoltageMeasurements != rhs.numberOfVoltageMeasurements {return false}
+    if lhs._appleEcgAlgorithmVersion != rhs._appleEcgAlgorithmVersion {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Conduit_V1_MedicationDoseValue: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".MedicationDoseValue"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}medication_name\0\u{3}general_form\0\u{3}schedule_type\0\u{3}log_status\0\u{3}scheduled_unix_ms\0\u{3}scheduled_dose_quantity\0\u{3}dose_quantity\0\u{1}unit\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.medicationName) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.generalForm) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.scheduleType) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.logStatus) }()
+      case 5: try { try decoder.decodeSingularInt64Field(value: &self._scheduledUnixMs) }()
+      case 6: try { try decoder.decodeSingularDoubleField(value: &self._scheduledDoseQuantity) }()
+      case 7: try { try decoder.decodeSingularDoubleField(value: &self._doseQuantity) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.unit) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.medicationName.isEmpty {
+      try visitor.visitSingularStringField(value: self.medicationName, fieldNumber: 1)
+    }
+    if !self.generalForm.isEmpty {
+      try visitor.visitSingularStringField(value: self.generalForm, fieldNumber: 2)
+    }
+    if !self.scheduleType.isEmpty {
+      try visitor.visitSingularStringField(value: self.scheduleType, fieldNumber: 3)
+    }
+    if !self.logStatus.isEmpty {
+      try visitor.visitSingularStringField(value: self.logStatus, fieldNumber: 4)
+    }
+    try { if let v = self._scheduledUnixMs {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 5)
+    } }()
+    try { if let v = self._scheduledDoseQuantity {
+      try visitor.visitSingularDoubleField(value: v, fieldNumber: 6)
+    } }()
+    try { if let v = self._doseQuantity {
+      try visitor.visitSingularDoubleField(value: v, fieldNumber: 7)
+    } }()
+    if !self.unit.isEmpty {
+      try visitor.visitSingularStringField(value: self.unit, fieldNumber: 8)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Conduit_V1_MedicationDoseValue, rhs: Conduit_V1_MedicationDoseValue) -> Bool {
+    if lhs.medicationName != rhs.medicationName {return false}
+    if lhs.generalForm != rhs.generalForm {return false}
+    if lhs.scheduleType != rhs.scheduleType {return false}
+    if lhs.logStatus != rhs.logStatus {return false}
+    if lhs._scheduledUnixMs != rhs._scheduledUnixMs {return false}
+    if lhs._scheduledDoseQuantity != rhs._scheduledDoseQuantity {return false}
+    if lhs._doseQuantity != rhs._doseQuantity {return false}
+    if lhs.unit != rhs.unit {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

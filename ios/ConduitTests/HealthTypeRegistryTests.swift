@@ -129,7 +129,7 @@ final class HealthTypeRegistryTests: XCTestCase {
             switch type.stream {
             case .quantity:
                 XCTAssertNotNil(type.defaultUnit, "Quantity type missing unit: \(type.identifier)")
-            case .category, .workout, .correlation, .route:
+            case .category, .workout, .correlation, .route, .electrocardiogram:
                 XCTAssertNil(type.defaultUnit, "Non-quantity type should not carry a unit: \(type.identifier)")
             }
         }
