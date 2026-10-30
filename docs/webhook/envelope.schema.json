@@ -2,6 +2,14 @@
   "$defs": {
     "CategoryValue": {
       "properties": {
+        "heartRateEventThresholdBpm": {
+          "description": "HKMetadataKeyHeartRateEventThreshold in count/min, set only on HKCategoryTypeIdentifierHighHeartRateEvent and LowHeartRateEvent samples. It is the threshold the user configured, not the measured heart rate: correlate HKQuantityTypeIdentifierHeartRate samples inside the event window for the readings. Absent when HealthKit did not report a threshold.",
+          "type": "number"
+        },
+        "menstrualCycleStart": {
+          "description": "HKMetadataKeyMenstrualCycleStart, set only on HKCategoryTypeIdentifierMenstrualFlow samples: true marks the first day of a cycle. Present as false when HealthKit reported false; absent means not reported.",
+          "type": "boolean"
+        },
         "value": {
           "description": "The raw HealthKit category enum integer. Absent entirely (not 0) when it is 0 — see valueName for the trap this causes in practice (e.g. AppleStandHour's \"stood\" value is 0).",
           "type": "integer"

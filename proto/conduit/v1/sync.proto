@@ -54,6 +54,21 @@ message QuantityValue {
 message CategoryValue {
   int32 value = 1;                        // raw HK enum int
   string value_name = 2;                  // human-readable, e.g. "asleepREM"
+
+  // --- additive category metadata (an older ingester DiscardUnknown-drops these) ---
+
+  // HKMetadataKeyHeartRateEventThreshold, in count/min. Set only on
+  // HKCategoryTypeIdentifierHighHeartRateEvent and LowHeartRateEvent samples:
+  // it is the threshold the user configured, NOT the measured heart rate that
+  // crossed it. Correlate HKQuantityTypeIdentifierHeartRate samples inside the
+  // event's [start_unix_ms, end_unix_ms] window for the measured readings.
+  // `optional` so absent stays distinct from 0.
+  optional double heart_rate_event_threshold_bpm = 3;
+
+  // HKMetadataKeyMenstrualCycleStart. Set only on
+  // HKCategoryTypeIdentifierMenstrualFlow samples. `optional` because false
+  // ("not the first day of a cycle") and absent ("not reported") differ.
+  optional bool menstrual_cycle_start = 4;
 }
 
 message WorkoutValue {

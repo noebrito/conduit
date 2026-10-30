@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "v1",
+  "batchId": "3c7e1a94-8b25-4f6d-a0c3-5e9b2d4f1a87",
+  "deviceId": "6d2f9b0c-7a41-4e58-b0d3-9c1e4f7a2b66",
+  "sentAtUnixMs": "1756664500000",
+  "batches": [
+    {
+      "hkTypeId": "HKCategoryTypeIdentifierHighHeartRateEvent",
+      "samples": [
+        {
+          "uuid": "a1d4f7b2-3c58-4e9a-b6d0-2f8e5c1a9b37",
+          "startUnixMs": "1756663200000",
+          "endUnixMs": "1756663800000",
+          "source": {
+            "name": "Noe's Apple Watch",
+            "bundleId": "com.apple.health.9E1F2C3D-4A5B-6C7D-8E9F-0A1B2C3D4E5F",
+            "productType": "Watch7,1"
+          },
+          "category": { "valueName": "highHeartRateEvent", "heartRateEventThresholdBpm": 120 }
+        }
+      ]
+    },
+    {
+      "hkTypeId": "HKQuantityTypeIdentifierHeartRate",
+      "samples": [
+        {
+          "uuid": "b2e5a8c3-4d69-4fab-87e1-3a9f6d2b0c48",
+          "startUnixMs": "1756663260000",
+          "endUnixMs": "1756663260000",
+          "source": {
+            "name": "Noe's Apple Watch",
+            "bundleId": "com.apple.health.9E1F2C3D-4A5B-6C7D-8E9F-0A1B2C3D4E5F",
+            "productType": "Watch7,1"
+          },
+          "quantity": { "value": 124, "unit": "count/min" }
+        },
+        {
+          "uuid": "c3f6b9d4-5e7a-40bc-98f2-4b0a7e3c1d59",
+          "startUnixMs": "1756663500000",
+          "endUnixMs": "1756663500000",
+          "source": {
+            "name": "Noe's Apple Watch",
+            "bundleId": "com.apple.health.9E1F2C3D-4A5B-6C7D-8E9F-0A1B2C3D4E5F",
+            "productType": "Watch7,1"
+          },
+          "quantity": { "value": 131, "unit": "count/min" }
+        },
+        {
+          "uuid": "d4a7c0e5-6f8b-41cd-a903-5c1b8f4d2e60",
+          "startUnixMs": "1756663740000",
+          "endUnixMs": "1756663740000",
+          "source": {
+            "name": "Noe's Apple Watch",
+            "bundleId": "com.apple.health.9E1F2C3D-4A5B-6C7D-8E9F-0A1B2C3D4E5F",
+            "productType": "Watch7,1"
+          },
+          "quantity": { "value": 127, "unit": "count/min" }
+        }
+      ]
+    }
+  ]
+}

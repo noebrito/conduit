@@ -46,6 +46,11 @@ here is just that "the docs match the wire" is a build-time guarantee, not a pro
    > endpoint. Leaving it configured is not a private test — once sync runs, your real HealthKit
    > samples (heart rate, sleep, weight, workout GPS) get uploaded there and rendered on a
    > world-readable page.
+   >
+   > The demo receiver drops sensitive categories before storing or showing anything: cycle
+   > tracking and other reproductive health types, medications, and ECG recordings (see
+   > [SUPPORTED_TYPES.md](./SUPPORTED_TYPES.md#sensitive-categories)). Everything else you send is
+   > shown as received.
 
 ## What's in this directory
 
@@ -53,8 +58,9 @@ here is just that "the docs match the wire" is a build-time guarantee, not a pro
 |---|---|
 | [`HTTP_CONTRACT.md`](./HTTP_CONTRACT.md) | Auth, status codes, retries, idempotency, deletion tombstones — read this before writing any code |
 | [`PAYLOADS.md`](./PAYLOADS.md) | The reference: the canonical-JSON rules, and one section per sample shape with a field table |
+| [`SUPPORTED_TYPES.md`](./SUPPORTED_TYPES.md) | Every HealthKit type the app sends today, with its `hkTypeId`, shape, and unit or value names, plus what is planned and what is not supported |
 | [`envelope.schema.json`](./envelope.schema.json) | The wire format as a JSON Schema (draft 2020-12), generated from the proto — feed it to any JSON Schema validator |
-| [`examples/`](./examples/) | Seven real, tested envelopes (one per sample shape, plus the Test Connection probe) and a ~70-line reference receiver |
+| [`examples/`](./examples/) | Eight real, tested envelopes (one per sample shape, a heart-rate notification with the readings inside its window, and the Test Connection probe) and a ~70-line reference receiver |
 
 ## Five things that will bite you
 
@@ -67,8 +73,9 @@ fixture under `examples/`.
    sample's JSON has no `value` key at all (see `examples/02-category.json`). Code that does
    `sample["category"]["value"]` will crash on it; code that does `.get("value")` and treats
    `None`/missing as "no data" will silently drop it. Read a missing scalar as its zero value, not
-   as absent data. (The one deliberate exception is `workout.isIndoor`, which is declared `optional`
-   precisely so `false` and absent stay distinguishable — see the `workout` section of
+   as absent data. (The deliberate exceptions are the fields declared `optional` precisely so
+   `false` or `0` and absent stay distinguishable: `workout.isIndoor`, the workout heart-rate
+   statistics, and `category.heartRateEventThresholdBpm` / `category.menstrualCycleStart` — see
    [PAYLOADS.md](./PAYLOADS.md).)
 2. **64-bit integers are JSON strings**, e.g. `"startUnixMs": "1756660800000"`, not a bare number —
    this is how the wire survives JavaScript's 53-bit safe-integer limit. Parse them as integers

@@ -95,7 +95,7 @@ Full example: `examples/01-quantity.json` (two heart-rate samples).
 
 ### `category` — enumerated states
 
-HealthKit category types: sleep stages, Stand Hour, mindful sessions, heart-rhythm events.
+HealthKit category types: sleep stages, Stand Hour, mindful sessions, heart-rate notifications.
 
 ```json
 { "category": { "value": 5, "valueName": "asleepREM" } }
@@ -105,12 +105,58 @@ HealthKit category types: sleep stages, Stand Hour, mindful sessions, heart-rhyt
 |---|---|
 | `value` | The raw HealthKit category enum integer. **Absent (not `0`) when it's zero** — this is the omitted-zero trap's most common real-world trigger (below). |
 | `valueName` | The **stable, non-localized** HealthKit enum name, e.g. `"asleepREM"`, `"stood"`. Prefer this over the raw integer: it doesn't change across OS locale or version, unlike the exact set and ordering of the integer values, which has changed in practice. |
+| `heartRateEventThresholdBpm` | Optional. `HKMetadataKeyHeartRateEventThreshold` in beats per minute, on high and low heart-rate notifications only. It is the threshold the user set for the notification, **not** the measured heart rate — see [Heart-rate notifications](#heart-rate-notifications) below. The app does not send it yet (see [SUPPORTED_TYPES.md](./SUPPORTED_TYPES.md#planned)); the field is in the schema ahead of it. Absent when not reported. |
+| `menstrualCycleStart` | Optional. `HKMetadataKeyMenstrualCycleStart`, on `HKCategoryTypeIdentifierMenstrualFlow` samples only: `true` marks the first day of a cycle. Present as `false` when HealthKit reported `false`; absent means not reported. The app does not send cycle tracking yet (see [SUPPORTED_TYPES.md](./SUPPORTED_TYPES.md#planned)); the field is in the schema ahead of it. |
+
+Both optional fields survive the omitted-zero rule: they are declared `optional` in the proto, so a
+present `false` is sent as `false`, and a field that was not reported has no key.
 
 **The zero trap, worked:** `HKCategoryTypeIdentifierAppleStandHour` represents "stood this hour" as
 enum value `0` (`"stood"`) and "didn't stand" as `1` (`"idle"`). A stood hour's sample therefore
 serializes with **no `value` key at all** — `{"valueName": "stood"}` — since `0` is the proto3
 default and gets omitted. See `examples/02-category.json` for both a normal non-zero category
 (`asleepREM`) and this exact zero case side by side.
+
+### Heart-rate notifications
+
+The Apple Watch high, low and irregular rhythm notifications arrive as `category` samples, one batch
+per type:
+
+| `hkTypeId` | `valueName` | What the sample carries |
+|---|---|---|
+| `HKCategoryTypeIdentifierHighHeartRateEvent` | `highHeartRateEvent` | The event window; `heartRateEventThresholdBpm` once the app sends it (planned) |
+| `HKCategoryTypeIdentifierLowHeartRateEvent` | `lowHeartRateEvent` | The event window; `heartRateEventThresholdBpm` once the app sends it (planned) |
+| `HKCategoryTypeIdentifierIrregularHeartRhythmEvent` | `irregularHeartRhythmEvent` | The event window only |
+
+`value` is always `0` for these three, so it is absent on the wire (the zero trap above); read
+`hkTypeId` or `valueName` instead.
+
+**The measured heart rate is not on the event sample.** HealthKit stores only the window
+(`startUnixMs` to `endUnixMs`) and, for high and low events, the threshold the user set in the
+Watch app. The correlation below works today; the threshold field is planned. To get the readings behind a notification, take the
+`HKQuantityTypeIdentifierHeartRate` samples whose `startUnixMs` falls inside the event's window:
+
+```sql
+-- every heart-rate reading inside each high/low/irregular event window
+SELECT e.uuid AS event_uuid, e.hk_type_id, h.start_ms, json_extract(h.payload, '$.value') AS bpm
+FROM samples e
+JOIN samples h
+  ON h.hk_type_id = 'HKQuantityTypeIdentifierHeartRate'
+ AND h.start_ms BETWEEN e.start_ms AND e.end_ms
+WHERE e.hk_type_id IN ('HKCategoryTypeIdentifierHighHeartRateEvent',
+                       'HKCategoryTypeIdentifierLowHeartRateEvent',
+                       'HKCategoryTypeIdentifierIrregularHeartRhythmEvent');
+```
+
+(That query runs against the `samples` table `examples/receiver.py` writes.) For high and low
+events, the readings inside the window are the ones that stayed past the threshold. An irregular
+rhythm event has no single triggering reading; the readings in its window are context, not a
+cause. Both joins need the user to have Heart Rate enabled in the app, and the readings can arrive
+in a different envelope from the event, so join on stored data rather than within one delivery.
+
+Full example: `examples/08-heart-rate-event.json` (a high heart-rate event and three readings
+inside its window). Its 120 bpm `heartRateEventThresholdBpm` shows the planned field; until the app
+sends it, the event arrives without that key.
 
 ### `workout` — a workout summary
 
@@ -123,7 +169,7 @@ default and gets omitted. See `examples/02-category.json` for both a normal non-
 | `activityType` | A compact name from a curated set (`"running"`, `"cycling"`, `"swimming"`, `"yoga"`, ...), or `"activityType<N>"` — the raw `HKWorkoutActivityType` integer — for a value not in that curated set. Stable, but not exhaustive: don't assume every workout has a friendly name. |
 | `durationSeconds`, `totalEnergyKcal`, `totalDistanceM` | Workout totals. `totalDistanceM` is `0` (and therefore absent on the wire) for a non-distance workout like yoga. |
 | `brandName` | `HKMetadataKeyWorkoutBrandName`. **HealthKit has no user-entered workout name** — this is the closest thing it exposes, and only some third-party / gym-class / Fitness+ writers set it. Absent for most Apple Watch workouts: that's the steady state, not missing data. |
-| `isIndoor` | `HKMetadataKeyIndoorWorkout`. **Absent and `false` mean different things here**: absent is "the writer never said", `false` is "the writer said outdoor". This one field is genuinely present as `false` on the wire — it's `optional` in the proto, so presence survives the omitted-zero rule. |
+| `isIndoor` | `HKMetadataKeyIndoorWorkout`. **Absent and `false` mean different things here**: absent is "the writer never said", `false` is "the writer said outdoor". This field is genuinely present as `false` on the wire — it's `optional` in the proto, so presence survives the omitted-zero rule (as do `category.menstrualCycleStart` and `category.heartRateEventThresholdBpm`). |
 | `avgHeartRateBpm`, `maxHeartRateBpm`, `minHeartRateBpm` | Heart-rate statistics **HealthKit itself computed over the samples it associates with this workout** — not a time-window guess. Absent entirely (not `0`) when the workout carries no heart-rate samples. |
 | `events` | `HKWorkout.workoutEvents`, oldest to newest. Absent for most workouts; laps, segments and pause/resume activity are what produce entries. Each entry is `{"type", "startUnixMs", "endUnixMs"}`, where `type` is `"pause"`, `"resume"`, `"lap"`, `"marker"`, `"motionPaused"`, `"motionResumed"`, `"segment"`, `"pauseOrResumeRequest"`, or `"eventType<N>"` for a raw type not in that set. **Only `lap` and `segment` span time** — every other type is an instant, where `endUnixMs` equals `startUnixMs`. |
 
