@@ -18,7 +18,8 @@ db.execute("""CREATE TABLE IF NOT EXISTS samples(
     uuid TEXT PRIMARY KEY, hk_type_id TEXT, start_ms INTEGER, end_ms INTEGER,
     shape TEXT, payload TEXT)""")
 
-SHAPES = ("quantity", "category", "workout", "correlation", "route")
+SHAPES = ("quantity", "category", "workout", "correlation", "route",
+          "electrocardiogram", "medicationDose")
 
 
 class Handler(BaseHTTPRequestHandler):

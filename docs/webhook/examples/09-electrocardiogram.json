@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "v1",
+  "batchId": "5e8a2c17-9d43-4b6f-a1e0-7c4d3b9f2a58",
+  "deviceId": "6d2f9b0c-7a41-4e58-b0d3-9c1e4f7a2b66",
+  "sentAtUnixMs": "1756668000000",
+  "batches": [
+    {
+      "hkTypeId": "HKDataTypeIdentifierElectrocardiogram",
+      "samples": [
+        {
+          "uuid": "c3f6b9d4-5e7a-4b1c-98f2-4b0a7e3c1d59",
+          "startUnixMs": "1756666800000",
+          "endUnixMs": "1756666830000",
+          "source": {
+            "name": "Noe's Apple Watch",
+            "bundleId": "com.apple.health.9E1F2C3D-4A5B-6C7D-8E9F-0A1B2C3D4E5F",
+            "productType": "Watch7,1"
+          },
+          "electrocardiogram": {
+            "classification": "sinusRhythm",
+            "averageHeartRateBpm": 68,
+            "symptomsStatus": "none",
+            "samplingFrequencyHz": 512,
+            "numberOfVoltageMeasurements": 15360,
+            "appleEcgAlgorithmVersion": 2
+          }
+        },
+        {
+          "uuid": "d4a7c0e5-6f8b-4c2d-a903-5c1b8f4d2e60",
+          "startUnixMs": "1756667400000",
+          "endUnixMs": "1756667430000",
+          "source": {
+            "name": "Noe's Apple Watch",
+            "bundleId": "com.apple.health.9E1F2C3D-4A5B-6C7D-8E9F-0A1B2C3D4E5F",
+            "productType": "Watch7,1"
+          },
+          "electrocardiogram": {
+            "classification": "inconclusivePoorReading",
+            "symptomsStatus": "notSet",
+            "samplingFrequencyHz": 512,
+            "numberOfVoltageMeasurements": 15360,
+            "appleEcgAlgorithmVersion": 2
+          }
+        }
+      ]
+    }
+  ]
+}

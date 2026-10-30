@@ -34,23 +34,7 @@ here is just that "the docs match the wire" is a build-time guarantee, not a pro
    [HTTP_CONTRACT.md](./HTTP_CONTRACT.md#idempotency)).
 
 3. To see it from a real device: in the Conduit app, point your webhook at a URL that reaches your
-   receiver, then tap **Test Connection**. If you don't have a public URL yet and just want to see
-   *something* arrive with zero setup, point the app at
-   `https://health.noebrito.dev/webhook-test` instead — it's a permanent, public demo receiver
-   (any bearer token works) that renders the last 50 requests it received, auto-refreshing, for 30
-   minutes each.
-
-   > ⚠️ **The demo receiver is public and unauthenticated: whatever you send it is readable by
-   > anyone who opens that URL, for 30 minutes.** Use it to tap **Test Connection** (a probe that
-   > carries no samples) or for a brief look at the wire format, then point the app back at your own
-   > endpoint. Leaving it configured is not a private test — once sync runs, your real HealthKit
-   > samples (heart rate, sleep, weight, workout GPS) get uploaded there and rendered on a
-   > world-readable page.
-   >
-   > The demo receiver drops sensitive categories before storing or showing anything: cycle
-   > tracking and other reproductive health types, medications, and ECG recordings (see
-   > [SUPPORTED_TYPES.md](./SUPPORTED_TYPES.md#sensitive-categories)). Everything else you send is
-   > shown as received.
+   receiver, then tap **Test Connection**.
 
 ## What's in this directory
 
@@ -60,7 +44,7 @@ here is just that "the docs match the wire" is a build-time guarantee, not a pro
 | [`PAYLOADS.md`](./PAYLOADS.md) | The reference: the canonical-JSON rules, and one section per sample shape with a field table |
 | [`SUPPORTED_TYPES.md`](./SUPPORTED_TYPES.md) | Every HealthKit type the app sends today, with its `hkTypeId`, shape, and unit or value names, plus what is planned and what is not supported |
 | [`envelope.schema.json`](./envelope.schema.json) | The wire format as a JSON Schema (draft 2020-12), generated from the proto — feed it to any JSON Schema validator |
-| [`examples/`](./examples/) | Eight real, tested envelopes (one per sample shape, a heart-rate notification with the readings inside its window, and the Test Connection probe) and a ~70-line reference receiver |
+| [`examples/`](./examples/) | Ten real, tested envelopes (one per sample shape, a heart-rate notification with the readings inside its window, and the Test Connection probe) and a ~70-line reference receiver |
 
 ## Five things that will bite you
 
@@ -75,7 +59,8 @@ fixture under `examples/`.
    `None`/missing as "no data" will silently drop it. Read a missing scalar as its zero value, not
    as absent data. (The deliberate exceptions are the fields declared `optional` precisely so
    `false` or `0` and absent stay distinguishable: `workout.isIndoor`, the workout heart-rate
-   statistics, and `category.heartRateEventThresholdBpm` / `category.menstrualCycleStart` — see
+   statistics, `category.heartRateEventThresholdBpm` / `category.menstrualCycleStart`, the optional
+   `electrocardiogram` measurements, and the `medicationDose` schedule and quantities — see
    [PAYLOADS.md](./PAYLOADS.md).)
 2. **64-bit integers are JSON strings**, e.g. `"startUnixMs": "1756660800000"`, not a bare number —
    this is how the wire survives JavaScript's 53-bit safe-integer limit. Parse them as integers

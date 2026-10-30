@@ -33,6 +33,35 @@
       },
       "type": "object"
     },
+    "ElectrocardiogramValue": {
+      "properties": {
+        "appleEcgAlgorithmVersion": {
+          "description": "HKMetadataKeyAppleECGAlgorithmVersion: the version of Apple's ECG algorithm that classified the recording. Absent when HealthKit did not report it.",
+          "type": "integer"
+        },
+        "averageHeartRateBpm": {
+          "description": "Average heart rate during the recording, count/min. Absent entirely (not 0) when HealthKit has none.",
+          "type": "number"
+        },
+        "classification": {
+          "description": "Apple's classification, passed through unchanged: \"sinusRhythm\", \"atrialFibrillation\", \"inconclusiveLowHeartRate\", \"inconclusiveHighHeartRate\", \"inconclusivePoorReading\", \"inconclusiveOther\", \"notSet\", \"unrecognized\", or \"classification\u003cN\u003e\" for a raw value not in that set. Conduit adds no interpretation.",
+          "type": "string"
+        },
+        "numberOfVoltageMeasurements": {
+          "description": "How many voltage measurements the recording holds. The measurements themselves (the waveform) are never sent.",
+          "type": "integer"
+        },
+        "samplingFrequencyHz": {
+          "description": "The recording's sampling frequency, hertz. Absent when HealthKit has none.",
+          "type": "number"
+        },
+        "symptomsStatus": {
+          "description": "Whether the user logged symptoms with the recording: \"notSet\", \"none\", \"present\", or \"symptomsStatus\u003cN\u003e\" for a raw value not in that set. The symptoms themselves are separate HealthKit samples Conduit does not send.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "Envelope": {
       "properties": {
         "batchId": {
@@ -65,6 +94,44 @@
       "required": [
         "schemaVersion"
       ],
+      "type": "object"
+    },
+    "MedicationDoseValue": {
+      "properties": {
+        "doseQuantity": {
+          "description": "The logged dose amount, in unit. Absent when HealthKit has none; 0 is a real answer, for example a skipped dose.",
+          "type": "number"
+        },
+        "generalForm": {
+          "description": "The medication's general form, e.g. \"tablet\", \"capsule\", \"liquid\", \"injection\", or \"unknown\".",
+          "type": "string"
+        },
+        "logStatus": {
+          "description": "\"taken\", \"skipped\", \"snoozed\", \"notInteracted\", \"notificationNotSent\", \"notLogged\", or \"logStatus\u003cN\u003e\" for a raw value not in that set. notInteracted and notificationNotSent are system placeholders for reminder slots and are most of the rows for a scheduled medication: filter on this field.",
+          "type": "string"
+        },
+        "medicationName": {
+          "description": "The medication's name as the user picked it in the Health app (HKMedicationConcept.displayText). The medication is identified by name and form only: no nickname or clinical codes are sent.",
+          "type": "string"
+        },
+        "scheduleType": {
+          "description": "\"schedule\" for a dose from a medication schedule, \"asNeeded\" for an as-needed dose, or \"scheduleType\u003cN\u003e\" for a raw value not in that set.",
+          "type": "string"
+        },
+        "scheduledDoseQuantity": {
+          "description": "The scheduled dose amount, in unit. Absent for an as-needed dose.",
+          "type": "number"
+        },
+        "scheduledUnixMs": {
+          "description": "When the dose was scheduled, Unix milliseconds. Absent for an as-needed dose.",
+          "pattern": "^-?[0-9]+$",
+          "type": "string"
+        },
+        "unit": {
+          "description": "The HealthKit unit string for both quantities, e.g. \"count\", \"mg\".",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "QuantityValue": {
@@ -176,6 +243,22 @@
         {
           "not": {
             "required": [
+              "quantity",
+              "electrocardiogram"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "quantity",
+              "medicationDose"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
               "category",
               "workout"
             ]
@@ -200,6 +283,22 @@
         {
           "not": {
             "required": [
+              "category",
+              "electrocardiogram"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "category",
+              "medicationDose"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
               "workout",
               "correlation"
             ]
@@ -216,8 +315,64 @@
         {
           "not": {
             "required": [
+              "workout",
+              "electrocardiogram"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "workout",
+              "medicationDose"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
               "correlation",
               "route"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "correlation",
+              "electrocardiogram"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "correlation",
+              "medicationDose"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "route",
+              "electrocardiogram"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "route",
+              "medicationDose"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "electrocardiogram",
+              "medicationDose"
             ]
           }
         }
@@ -229,7 +384,7 @@
               "$ref": "#/$defs/CategoryValue"
             }
           ],
-          "description": "Present when this sample is a HealthKit category value (sleep stage, stand hour, ...). Exactly one of quantity/category/workout/correlation/route is ever present."
+          "description": "Present when this sample is a HealthKit category value (sleep stage, stand hour, ...). Exactly one of quantity/category/workout/correlation/route/electrocardiogram/medicationDose is ever present."
         },
         "correlation": {
           "allOf": [
@@ -237,12 +392,28 @@
               "$ref": "#/$defs/CorrelationValue"
             }
           ],
-          "description": "Present when this sample is a HealthKit correlation (v1: blood pressure). Exactly one of quantity/category/workout/correlation/route is ever present."
+          "description": "Present when this sample is a HealthKit correlation (v1: blood pressure). Exactly one of quantity/category/workout/correlation/route/electrocardiogram/medicationDose is ever present."
+        },
+        "electrocardiogram": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/ElectrocardiogramValue"
+            }
+          ],
+          "description": "Present when this sample is an Apple Watch ECG recording (hkTypeId HKDataTypeIdentifierElectrocardiogram), as a summary without the waveform. Exactly one of quantity/category/workout/correlation/route/electrocardiogram/medicationDose is ever present."
         },
         "endUnixMs": {
           "description": "Sample end time, Unix milliseconds. Equal to startUnixMs for an instantaneous sample.",
           "pattern": "^-?[0-9]+$",
           "type": "string"
+        },
+        "medicationDose": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/MedicationDoseValue"
+            }
+          ],
+          "description": "Present when this sample is a medication dose event (hkTypeId HKMedicationDoseEventTypeIdentifierMedicationDoseEvent, iOS 26 or later). Exactly one of quantity/category/workout/correlation/route/electrocardiogram/medicationDose is ever present."
         },
         "quantity": {
           "allOf": [
@@ -250,7 +421,7 @@
               "$ref": "#/$defs/QuantityValue"
             }
           ],
-          "description": "Present when this sample is a scalar measurement (heart rate, steps, weight, ...). Exactly one of quantity/category/workout/correlation/route is ever present."
+          "description": "Present when this sample is a scalar measurement (heart rate, steps, weight, ...). Exactly one of quantity/category/workout/correlation/route/electrocardiogram/medicationDose is ever present."
         },
         "route": {
           "allOf": [
@@ -258,7 +429,7 @@
               "$ref": "#/$defs/RouteValue"
             }
           ],
-          "description": "Present when this sample is a workout's GPS route. Exactly one of quantity/category/workout/correlation/route is ever present."
+          "description": "Present when this sample is a workout's GPS route. Exactly one of quantity/category/workout/correlation/route/electrocardiogram/medicationDose is ever present."
         },
         "source": {
           "allOf": [
@@ -284,7 +455,7 @@
               "$ref": "#/$defs/WorkoutValue"
             }
           ],
-          "description": "Present when this sample is a workout summary. Exactly one of quantity/category/workout/correlation/route is ever present."
+          "description": "Present when this sample is a workout summary. Exactly one of quantity/category/workout/correlation/route/electrocardiogram/medicationDose is ever present."
         }
       },
       "type": "object"

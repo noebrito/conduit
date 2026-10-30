@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "v1",
+  "batchId": "6f9b3d28-0e54-4c7a-b2f1-8d5e4c0a3b69",
+  "deviceId": "6d2f9b0c-7a41-4e58-b0d3-9c1e4f7a2b66",
+  "sentAtUnixMs": "1756674000000",
+  "batches": [
+    {
+      "hkTypeId": "HKMedicationDoseEventTypeIdentifierMedicationDoseEvent",
+      "samples": [
+        {
+          "uuid": "e5b8d1f6-7a9c-4d3e-b014-6d2c9a5e3f71",
+          "startUnixMs": "1756656300000",
+          "endUnixMs": "1756656300000",
+          "source": {
+            "name": "Noe's iPhone",
+            "bundleId": "com.apple.Health",
+            "productType": "iPhone17,1"
+          },
+          "medicationDose": {
+            "medicationName": "Lisinopril 10 mg",
+            "generalForm": "tablet",
+            "scheduleType": "schedule",
+            "logStatus": "taken",
+            "scheduledUnixMs": "1756656000000",
+            "scheduledDoseQuantity": 1,
+            "doseQuantity": 1,
+            "unit": "count"
+          }
+        },
+        {
+          "uuid": "f6c9e2a7-8b0d-4e4f-8125-7e3d0b6f4a82",
+          "startUnixMs": "1756699200000",
+          "endUnixMs": "1756699200000",
+          "source": {
+            "name": "Noe's iPhone",
+            "bundleId": "com.apple.Health",
+            "productType": "iPhone17,1"
+          },
+          "medicationDose": {
+            "medicationName": "Lisinopril 10 mg",
+            "generalForm": "tablet",
+            "scheduleType": "schedule",
+            "logStatus": "skipped",
+            "scheduledUnixMs": "1756699200000",
+            "scheduledDoseQuantity": 1,
+            "doseQuantity": 0,
+            "unit": "count"
+          }
+        },
+        {
+          "uuid": "a7d0f3b8-9c1e-4f5a-9236-8f4e1c7a5b93",
+          "startUnixMs": "1756670400000",
+          "endUnixMs": "1756670400000",
+          "source": {
+            "name": "Noe's iPhone",
+            "bundleId": "com.apple.Health",
+            "productType": "iPhone17,1"
+          },
+          "medicationDose": {
+            "medicationName": "Ibuprofen 200 mg",
+            "generalForm": "capsule",
+            "scheduleType": "asNeeded",
+            "logStatus": "taken",
+            "doseQuantity": 2,
+            "unit": "count"
+          }
+        }
+      ]
+    }
+  ]
+}

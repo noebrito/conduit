@@ -36,9 +36,9 @@ zero value, not as absent data.** The same rule applies to `startUnixMs`/`endUni
 an empty `source`, and the `batches` key being entirely absent on a Test Connection probe (see
 HTTP_CONTRACT.md).
 
-**4. A `oneof` serializes only its active variant.** `Sample.value` is a `oneof` of five shapes
-(`quantity`/`category`/`workout`/`correlation`/`route`); the wire carries exactly one of those five
-keys, never a null placeholder for the other four.
+**4. A `oneof` serializes only its active variant.** `Sample.value` is a `oneof` of seven shapes
+(`quantity`/`category`/`workout`/`correlation`/`route`/`electrocardiogram`/`medicationDose`); the
+wire carries exactly one of those keys, never a null placeholder for the others.
 
 ## Envelope anatomy
 
@@ -50,6 +50,7 @@ Envelope
     ├── samples: Sample[]
     │   ├── uuid, startUnixMs, endUnixMs, source
     │   └── oneof value: quantity | category | workout | correlation | route
+    │                    | electrocardiogram | medicationDose
     └── deletedUuids: string[]      (tombstones — see HTTP_CONTRACT.md)
 ```
 
@@ -105,8 +106,8 @@ HealthKit category types: sleep stages, Stand Hour, mindful sessions, heart-rate
 |---|---|
 | `value` | The raw HealthKit category enum integer. **Absent (not `0`) when it's zero** — this is the omitted-zero trap's most common real-world trigger (below). |
 | `valueName` | The **stable, non-localized** HealthKit enum name, e.g. `"asleepREM"`, `"stood"`. Prefer this over the raw integer: it doesn't change across OS locale or version, unlike the exact set and ordering of the integer values, which has changed in practice. |
-| `heartRateEventThresholdBpm` | Optional. `HKMetadataKeyHeartRateEventThreshold` in beats per minute, on high and low heart-rate notifications only. It is the threshold the user set for the notification, **not** the measured heart rate — see [Heart-rate notifications](#heart-rate-notifications) below. The app does not send it yet (see [SUPPORTED_TYPES.md](./SUPPORTED_TYPES.md#planned)); the field is in the schema ahead of it. Absent when not reported. |
-| `menstrualCycleStart` | Optional. `HKMetadataKeyMenstrualCycleStart`, on `HKCategoryTypeIdentifierMenstrualFlow` samples only: `true` marks the first day of a cycle. Present as `false` when HealthKit reported `false`; absent means not reported. The app does not send cycle tracking yet (see [SUPPORTED_TYPES.md](./SUPPORTED_TYPES.md#planned)); the field is in the schema ahead of it. |
+| `heartRateEventThresholdBpm` | Optional. `HKMetadataKeyHeartRateEventThreshold` in beats per minute, on high and low heart-rate notifications only. It is the threshold the user set for the notification, **not** the measured heart rate — see [Heart-rate notifications](#heart-rate-notifications) below. Absent when not reported. |
+| `menstrualCycleStart` | Optional. `HKMetadataKeyMenstrualCycleStart`, on `HKCategoryTypeIdentifierMenstrualFlow` samples only: `true` marks the first day of a cycle. Present as `false` when HealthKit reported `false`; absent means not reported. |
 
 Both optional fields survive the omitted-zero rule: they are declared `optional` in the proto, so a
 present `false` is sent as `false`, and a field that was not reported has no key.
@@ -124,8 +125,8 @@ per type:
 
 | `hkTypeId` | `valueName` | What the sample carries |
 |---|---|---|
-| `HKCategoryTypeIdentifierHighHeartRateEvent` | `highHeartRateEvent` | The event window; `heartRateEventThresholdBpm` once the app sends it (planned) |
-| `HKCategoryTypeIdentifierLowHeartRateEvent` | `lowHeartRateEvent` | The event window; `heartRateEventThresholdBpm` once the app sends it (planned) |
+| `HKCategoryTypeIdentifierHighHeartRateEvent` | `highHeartRateEvent` | The event window and `heartRateEventThresholdBpm` |
+| `HKCategoryTypeIdentifierLowHeartRateEvent` | `lowHeartRateEvent` | The event window and `heartRateEventThresholdBpm` |
 | `HKCategoryTypeIdentifierIrregularHeartRhythmEvent` | `irregularHeartRhythmEvent` | The event window only |
 
 `value` is always `0` for these three, so it is absent on the wire (the zero trap above); read
@@ -133,7 +134,7 @@ per type:
 
 **The measured heart rate is not on the event sample.** HealthKit stores only the window
 (`startUnixMs` to `endUnixMs`) and, for high and low events, the threshold the user set in the
-Watch app. The correlation below works today; the threshold field is planned. To get the readings behind a notification, take the
+Watch app. To get the readings behind a notification, take the
 `HKQuantityTypeIdentifierHeartRate` samples whose `startUnixMs` falls inside the event's window:
 
 ```sql
@@ -155,8 +156,7 @@ cause. Both joins need the user to have Heart Rate enabled in the app, and the r
 in a different envelope from the event, so join on stored data rather than within one delivery.
 
 Full example: `examples/08-heart-rate-event.json` (a high heart-rate event and three readings
-inside its window). Its 120 bpm `heartRateEventThresholdBpm` shows the planned field; until the app
-sends it, the event arrives without that key.
+inside its window). Its 120 bpm `heartRateEventThresholdBpm` is the user's threshold, not a reading.
 
 ### `workout` — a workout summary
 
@@ -233,6 +233,80 @@ or average a negative value in these three fields; treat it the same as missing.
 
 Full example: `examples/05-route.json`, whose `workoutUuid` points back at `examples/03-workout.json`'s
 sample.
+
+### `electrocardiogram` — an ECG recording summary
+
+In the schema; the app does not send it yet (see
+[SUPPORTED_TYPES.md](./SUPPORTED_TYPES.md#planned)). One sample per Apple Watch ECG recording, in a
+batch whose `hkTypeId` is `"HKDataTypeIdentifierElectrocardiogram"`. `startUnixMs`/`endUnixMs` are
+the recording window, usually 30 seconds.
+
+```json
+{
+  "electrocardiogram": {
+    "classification": "sinusRhythm",
+    "averageHeartRateBpm": 68,
+    "symptomsStatus": "none",
+    "samplingFrequencyHz": 512,
+    "numberOfVoltageMeasurements": 15360,
+    "appleEcgAlgorithmVersion": 2
+  }
+}
+```
+
+| Field | Notes |
+|---|---|
+| `classification` | Apple's own classification, passed through unchanged: `"sinusRhythm"`, `"atrialFibrillation"`, `"inconclusiveLowHeartRate"`, `"inconclusiveHighHeartRate"`, `"inconclusivePoorReading"`, `"inconclusiveOther"`, `"notSet"`, `"unrecognized"`, or `"classification<N>"` for a raw value not in that set. Conduit adds no interpretation. |
+| `averageHeartRateBpm` | Average heart rate during the recording, count/min. `optional`: **absent, not `0`**, when HealthKit has none, which is common for inconclusive readings. |
+| `symptomsStatus` | `"notSet"`, `"none"`, `"present"`, or `"symptomsStatus<N>"`. The symptoms themselves are separate HealthKit samples Conduit does not send. |
+| `samplingFrequencyHz` | `optional`; absent when HealthKit has none. |
+| `numberOfVoltageMeasurements` | How many voltage measurements the recording holds. **The waveform itself is never sent.** |
+| `appleEcgAlgorithmVersion` | `HKMetadataKeyAppleECGAlgorithmVersion`, the version of Apple's algorithm that classified the recording. `optional`; absent when HealthKit did not report it. |
+
+Full example: `examples/09-electrocardiogram.json` (a sinus rhythm recording with an average heart
+rate, and an inconclusive one without).
+
+### `medicationDose` — one medication dose event
+
+In the schema; the app does not send it yet (see
+[SUPPORTED_TYPES.md](./SUPPORTED_TYPES.md#planned)). One sample per HealthKit medication dose event
+(iOS 26 or later), in a batch whose `hkTypeId` is
+`"HKMedicationDoseEventTypeIdentifierMedicationDoseEvent"`. `startUnixMs`/`endUnixMs` are the event's
+own time: when it was logged, or when the reminder slot fired.
+
+```json
+{
+  "medicationDose": {
+    "medicationName": "Lisinopril 10 mg",
+    "generalForm": "tablet",
+    "scheduleType": "schedule",
+    "logStatus": "taken",
+    "scheduledUnixMs": "1756656000000",
+    "scheduledDoseQuantity": 1,
+    "doseQuantity": 1,
+    "unit": "count"
+  }
+}
+```
+
+| Field | Notes |
+|---|---|
+| `medicationName` | The name the user picked in the Health app. **The medication is identified by name and form only**: no nickname and no clinical codes (RxNorm or similar) are sent. Use `medicationName` plus `generalForm` as the key for "the same medication". |
+| `generalForm` | `"tablet"`, `"capsule"`, `"liquid"`, `"injection"`, and so on, or `"unknown"`. |
+| `scheduleType` | `"schedule"` (from a medication schedule) or `"asNeeded"`, or `"scheduleType<N>"`. |
+| `logStatus` | `"taken"`, `"skipped"`, `"snoozed"`, `"notInteracted"`, `"notificationNotSent"`, `"notLogged"`, or `"logStatus<N>"`. **Filter on this field**: `notInteracted` and `notificationNotSent` are placeholders HealthKit writes for reminder slots nobody answered, and they are most of the rows for a scheduled medication. |
+| `scheduledUnixMs` | When the dose was due (a string, like every 64-bit field). `optional`: absent for an as-needed dose. |
+| `scheduledDoseQuantity` | The scheduled amount, in `unit`. Absent for an as-needed dose. |
+| `doseQuantity` | The logged amount, in `unit`. `optional`, so **`0` and absent differ**: a skipped dose arrives as `"doseQuantity": 0`, while absent means HealthKit recorded no amount. |
+| `unit` | The HealthKit unit string for both quantities, e.g. `"count"`, `"mg"`. |
+
+**Honour tombstones for this shape or you will double-count.** HealthKit records a status change
+(logging a dose against an unanswered reminder, editing a past dose) as a delete plus a new event
+with a new `uuid`, so the old row arrives in `deletedUuids` alongside the new one. See
+[Deletions](#deletions).
+
+Full example: `examples/10-medication-dose.json` (a scheduled dose taken, a scheduled dose skipped
+with `doseQuantity` `0`, and an as-needed dose with no schedule).
 
 ## Deletions
 

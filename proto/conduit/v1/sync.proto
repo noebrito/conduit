@@ -37,6 +37,8 @@ message Sample {
     WorkoutValue     workout     = 12;
     CorrelationValue correlation = 13;
     RouteValue       route       = 14;
+    ElectrocardiogramValue electrocardiogram = 15;
+    MedicationDoseValue    medication_dose   = 16;
   }
 }
 
@@ -133,4 +135,35 @@ message RoutePoint {
   double vertical_accuracy_m = 6;         // CLLocation.verticalAccuracy (metres, <0 = invalid)
   double speed_mps = 7;                   // CLLocation.speed (m/s, <0 = invalid)
   double course_deg = 8;                  // CLLocation.course (degrees, <0 = invalid)
+}
+
+// One HKElectrocardiogram (Apple Watch ECG app), as a summary only. Never the
+// waveform: voltages need a separate HKElectrocardiogramQuery that Conduit does
+// not run. Sample.start_unix_ms/end_unix_ms are the recording window. Values
+// are Apple's own, passed through without interpretation.
+message ElectrocardiogramValue {
+  string classification = 1;               // "sinusRhythm"|"atrialFibrillation"|"inconclusiveLowHeartRate"|
+                                           // "inconclusiveHighHeartRate"|"inconclusivePoorReading"|
+                                           // "inconclusiveOther"|"notSet"|"unrecognized"|"classification<N>"
+  optional double average_heart_rate_bpm = 2;   // absent (not 0) when HealthKit has none
+  string symptoms_status = 3;              // "notSet"|"none"|"present"|"symptomsStatus<N>"
+  optional double sampling_frequency_hz = 4;    // absent when HealthKit has none
+  int32 number_of_voltage_measurements = 5;
+  optional int32 apple_ecg_algorithm_version = 6; // HKMetadataKeyAppleECGAlgorithmVersion
+}
+
+// One HKMedicationDoseEvent (iOS 26+): a scheduled reminder slot or a logged
+// dose. Sample.start_unix_ms/end_unix_ms are the event's own dates (the log
+// time). The medication is identified by name and form only, joined on-device
+// from HKUserAnnotatedMedication; no nickname or clinical codes are sent.
+message MedicationDoseValue {
+  string medication_name = 1;              // HKMedicationConcept.displayText
+  string general_form = 2;                 // "tablet"|"capsule"|...|"unknown" (HKMedicationGeneralForm)
+  string schedule_type = 3;                // "schedule"|"asNeeded"|"scheduleType<N>"
+  string log_status = 4;                   // "taken"|"skipped"|"snoozed"|"notInteracted"|
+                                           // "notificationNotSent"|"notLogged"|"logStatus<N>"
+  optional int64 scheduled_unix_ms = 5;    // scheduledDate; absent for an as-needed dose
+  optional double scheduled_dose_quantity = 6;  // absent for an as-needed dose
+  optional double dose_quantity = 7;       // absent (not 0) when HealthKit has none; 0 is a real answer
+  string unit = 8;                         // HKUnit string for the quantities, e.g. "count", "mg"
 }

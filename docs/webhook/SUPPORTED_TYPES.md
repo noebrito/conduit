@@ -2,7 +2,8 @@
 
 This page lists every HealthKit type the Conduit app sends to your webhook, how each one looks on
 the wire, and what is planned or deliberately left out. For the shapes themselves (`quantity`,
-`category`, `workout`, `correlation`, `route`), see [PAYLOADS.md](./PAYLOADS.md).
+`category`, `workout`, `correlation`, `route`, and the planned `electrocardiogram` and
+`medicationDose`), see [PAYLOADS.md](./PAYLOADS.md).
 
 ## What "supported" means
 
@@ -27,8 +28,8 @@ or app (the notes column says which); with no writer on the user's phone, the se
 | Min iOS | The lowest iOS version where HealthKit offers the type. The app itself requires iOS 17, so `17` means "every supported device". On an older iOS the type is skipped. |
 | Notes | What has to record it, and anything unusual. |
 
-Every type below is on by default when the app first sets up or when an update adds it. The user
-can turn any of them off. The tables follow the app's picker order.
+Every type below except [Cycle Tracking](#cycle-tracking) is on by default when the app first sets
+up or when an update adds it. The user can turn any of them off. The tables follow the app's picker order.
 
 ## Activity & Fitness
 
@@ -106,10 +107,9 @@ can turn any of them off. The tables follow the app's picker order.
 
 **These notifications do not carry the measured heart rate.** Each sample is a time window; the
 readings behind it are the Heart Rate samples whose start falls inside that window. PAYLOADS.md
-shows the join: [Heart-rate notifications](./PAYLOADS.md#heart-rate-notifications). For high and
-low events, the schema already has `heartRateEventThresholdBpm` for the threshold the user set in
-the Watch app; the app does not send it yet (see [Planned](#planned)). Irregular rhythm events have
-no threshold.
+shows the join: [Heart-rate notifications](./PAYLOADS.md#heart-rate-notifications). High and low
+events carry `heartRateEventThresholdBpm`, the threshold the user set in the Watch app. Irregular
+rhythm events have no threshold.
 
 ## Workouts
 
@@ -135,6 +135,23 @@ Written to Health by a food-logging app. With no such app, these series stay emp
 | Cholesterol | `HKQuantityTypeIdentifierDietaryCholesterol` | quantity | `mg` | 17 | |
 | Water | `HKQuantityTypeIdentifierDietaryWater` | quantity | `mL` | 17 | Some food loggers do not write water. |
 
+## Cycle Tracking
+
+Reproductive health, so these are off by default, including on upgrade, and iOS asks for permission
+only when the user turns one on (see [Sensitive categories](#sensitive-categories)).
+
+| Name | `hkTypeId` | Shape | Unit or `valueName` | Min iOS | Notes |
+|---|---|---|---|---|---|
+| Menstrual Flow | `HKCategoryTypeIdentifierMenstrualFlow` | category | `unspecified`, `light`, `medium`, `heavy`, `none` | 17 | Carries `menstrualCycleStart` when HealthKit reports it. |
+| Spotting | `HKCategoryTypeIdentifierIntermenstrualBleeding` | category | `notApplicable` | 17 | The type itself is the meaning; `notApplicable` is value 0, so there is no `value` key. |
+| Infrequent Periods | `HKCategoryTypeIdentifierInfrequentMenstrualCycles` | category | `notApplicable` | 17 | A cycle deviation Health records. |
+| Irregular Cycles | `HKCategoryTypeIdentifierIrregularMenstrualCycles` | category | `notApplicable` | 17 | A cycle deviation Health records. |
+| Persistent Spotting | `HKCategoryTypeIdentifierPersistentIntermenstrualBleeding` | category | `notApplicable` | 17 | A cycle deviation Health records. |
+| Prolonged Periods | `HKCategoryTypeIdentifierProlongedMenstrualPeriods` | category | `notApplicable` | 17 | A cycle deviation Health records. |
+| Cervical Mucus Quality | `HKCategoryTypeIdentifierCervicalMucusQuality` | category | `dry`, `sticky`, `creamy`, `watery`, `eggWhite` | 17 | |
+| Ovulation Test Result | `HKCategoryTypeIdentifierOvulationTestResult` | category | `negative`, `luteinizingHormoneSurge`, `indeterminate`, `estrogenSurge` | 17 | |
+| Basal Body Temperature | `HKQuantityTypeIdentifierBasalBodyTemperature` | quantity | `degC` | 17 | Separate from Body Temperature. |
+
 ## `valueName` notes
 
 - A category type the app does not have names for arrives as `value<N>`, where `N` is the raw
@@ -150,8 +167,9 @@ HealthKit attaches metadata to samples. Conduit sends only these keys:
 |---|---|---|
 | `HKMetadataKeyWorkoutBrandName` | `workout.brandName` | Sent today |
 | `HKMetadataKeyIndoorWorkout` | `workout.isIndoor` | Sent today |
-| `HKMetadataKeyHeartRateEventThreshold` | `category.heartRateEventThresholdBpm` | In the schema; the app does not send it yet |
-| `HKMetadataKeyMenstrualCycleStart` | `category.menstrualCycleStart` | In the schema, for cycle tracking; the app does not send it yet |
+| `HKMetadataKeyHeartRateEventThreshold` | `category.heartRateEventThresholdBpm` | Sent today, on high and low heart-rate events |
+| `HKMetadataKeyMenstrualCycleStart` | `category.menstrualCycleStart` | Sent today, on menstrual flow |
+| `HKMetadataKeyAppleECGAlgorithmVersion` | `electrocardiogram.appleEcgAlgorithmVersion` | In the schema, for ECG; the app does not send it yet |
 
 All other sample metadata is left out, including device-specific keys and any keys a writing app
 adds of its own.
@@ -161,18 +179,19 @@ adds of its own.
 These are not sent today. Each will be listed in the tables above, and in the change log below,
 in the app version that starts sending it.
 
-- **Heart-rate notification threshold.** `heartRateEventThresholdBpm` on high and low heart-rate
-  events.
-- **Cycle tracking.** Menstrual flow (with `menstrualCycleStart`), spotting, the cycle-deviation
-  flags HealthKit records, cervical mucus quality, ovulation test results, and basal body
-  temperature, as `category` samples (basal body temperature as a `quantity`). These will be off
-  by default and only sent once the user turns them on.
 - **ECG.** The classification and average heart rate of Apple Watch ECG recordings, without the
-  waveform.
-- **Medications.** Logged doses (taken or skipped, and when) for the medications the user chooses
-  to share. These will be off by default.
+  waveform, as `electrocardiogram` samples under `hkTypeId`
+  `HKDataTypeIdentifierElectrocardiogram`. On by default, like the other Heart Events types.
+- **Medications.** Dose events (taken, skipped, or an unanswered reminder, and when each was due)
+  for the medications the user chooses to share, as `medicationDose` samples under `hkTypeId`
+  `HKMedicationDoseEventTypeIdentifierMedicationDoseEvent`. Each medication is identified by its
+  name and form only. iOS 26 or later. Off by default: the user turns them on by picking which
+  medications to share, in a separate system sheet.
 
-The payload shape for ECG and medications is not final, so it is not in the schema yet.
+The ECG and medication shapes are in the schema and documented in [PAYLOADS.md](./PAYLOADS.md), so
+a receiver can handle them before the app sends them. Two things to build in from the start: filter
+dose events on `logStatus`, since unanswered reminder slots are most of the rows, and honour
+`deletedUuids`, since HealthKit records a dose status change as a delete plus a new event.
 
 ## Not supported, by design
 
@@ -180,7 +199,7 @@ The payload shape for ECG and medications is not final, so it is not in the sche
   recording. The planned ECG support sends the summary only.
 - **Clinical health records.** These need a separate Apple entitlement and a different API.
 - **Symptoms** (headache, cramps, and similar). HealthKit stores them separately from the types
-  above, and they are not part of the planned cycle tracking.
+  above, and they are not part of cycle tracking.
 - **State of mind.** Not part of the current or planned scope.
 - **Characteristics** (date of birth, biological sex, blood type). These are fixed profile values,
   not samples, so they do not fit the webhook's sample stream.
@@ -189,13 +208,7 @@ The payload shape for ECG and medications is not final, so it is not in the sche
 ## Sensitive categories
 
 Cycle tracking (and any other reproductive health type), medications, and ECG are treated as
-sensitive:
-
-- The planned cycle tracking and medications support is off by default.
-- The public demo receiver at `https://health.noebrito.dev/webhook-test` drops these types before
-  storing or showing anything, and says so on its page. It drops a whole batch when its `hkTypeId`
-  is a reproductive health, medication, or ECG type. Point the app at a receiver you control for
-  these.
+sensitive. Cycle tracking is off by default; the planned medications support will be too.
 
 ## Requesting a type
 
