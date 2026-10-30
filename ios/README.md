@@ -101,12 +101,12 @@ is `isSensitive` in `HealthTypeRegistry`, which means:
   "Reproductive Health" sheet. HealthKit is asked when the user turns a type on:
   onboarding's permission step, or Settings → Save Changes, which also starts
   capturing newly enabled types right away.
-- **Held back from a public test endpoint.** While the destination is a public
-  test endpoint, sensitive types are not read or staged (their anchors stay put,
-  so nothing is lost), rows already staged for another receiver are held in the
-  outbox instead of drained to it, and an import of a sensitive type fails with
-  the same explanation the app shows in Settings and onboarding. The endpoint
-  also drops these types server-side.
+- **Held back from the one public test endpoint the app recognizes.** While it
+  is the destination, sensitive types are not read or staged (their anchors stay
+  put, so nothing is lost), rows already staged for another receiver are held in
+  the outbox instead of drained to it, and an import of a sensitive type fails
+  with the same explanation the app shows in Settings and onboarding. That
+  endpoint also drops these types server-side.
   Held rows still count as pending (in the pending count, and they keep "last
   synced" from advancing) until the webhook URL changes.
 - The Import History confirmation names Cycle Tracking when it is enabled.
