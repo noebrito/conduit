@@ -143,6 +143,14 @@ actor SyncEngine {
                 return
             }
 
+            // Sensitive types are never staged for the public demo receiver.
+            // Returning before the read leaves the anchor where it is, so the
+            // samples are captured, not lost, once the destination changes.
+            guard !DemoReceiver.blockedTypeIDs(forURL: webhook.url).contains(typeIdentifier) else {
+                logger.info("Type \(typeIdentifier, privacy: .public) is not sent to the public demo receiver — skipping")
+                return
+            }
+
             let anchor = AnchoredReader.unarchiveAnchor(typeConfig.anchorBlob)
 
             // Forward-only default: on the very first (anchor-less) read, seed a
@@ -379,6 +387,9 @@ actor SyncEngine {
             logger.debug("importHistory: unknown type \(typeIdentifier, privacy: .public) — skipping")
             return HistoryImporter.Summary(staged: 0, hitCap: false, cancelled: false, exhausted: true)
         }
+        if DemoReceiver.blockedTypeIDs(forURL: webhook.url).contains(typeIdentifier) {
+            throw ImportError.sensitiveTypeBlockedForDemoReceiver
+        }
 
         // Routes can't be imported by the generic anchored/sample read — they
         // are found FROM their workout — so the route type's import is its own
@@ -611,7 +622,8 @@ actor SyncEngine {
                 capture: { identifier in
                     // Re-check the toggle after actor reentrancy during each read.
                     guard let config = try self.dataTypeConfigDAO.find(hkTypeId: identifier), config.enabled,
-                          let type = HealthTypeRegistry.shared.type(forIdentifier: identifier), type.sampleType != nil else {
+                          let type = HealthTypeRegistry.shared.type(forIdentifier: identifier), type.sampleType != nil,
+                          !DemoReceiver.blockedTypeIDs(forURL: webhook.url).contains(identifier) else {
                         return ShortcutSync.Capture()
                     }
                     if type.stream == .route {
@@ -772,10 +784,13 @@ actor SyncEngine {
         }
 
         let deviceID = keychain.deviceID
+        // `webhook` is the snapshot the submit step below revalidates, so the
+        // exclusion always matches the URL the batch is actually sent to.
         guard let batch = try batcher.buildBatch(
             webhookID: webhookID,
             limit: webhook.batchMaxSize,
-            deviceID: deviceID
+            deviceID: deviceID,
+            excludingTypeIDs: DemoReceiver.blockedTypeIDs(forURL: webhook.url)
         ) else {
             logger.debug("Nothing to upload")
             // An empty flush is still a successful sync only when the outbox

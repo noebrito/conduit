@@ -40,8 +40,9 @@ final class OnboardingViewModel {
     var testResult: WebhookTester.Result? = nil
     var isTesting = false
 
-    // Data type selection — all enabled by default
-    var enabledTypeIDs: Set<String> = Set(HealthTypeRegistry.shared.all.map(\.identifier))
+    // Data type selection — every type enabled by default except sensitive ones
+    // (cycle tracking), which the user must turn on deliberately.
+    var enabledTypeIDs: Set<String> = Set(HealthTypeRegistry.shared.all.filter(\.defaultEnabled).map(\.identifier))
 
     // Optional: import existing history after setup. OFF by default — the
     // default is forward-only capture. When enabled the user picks how far back.
@@ -99,6 +100,12 @@ final class OnboardingViewModel {
     }
 
     // MARK: - Data Types
+
+    /// The webhook entered in step 1 is the public demo receiver while a
+    /// sensitive type is picked: those types will be held back (`DemoReceiver`).
+    var sensitiveTypesBlockedByDemoReceiver: Bool {
+        !DemoReceiver.blockedTypeIDs(forURL: webhookURL).isDisjoint(with: enabledTypeIDs)
+    }
 
     func toggle(typeID: String) {
         if enabledTypeIDs.contains(typeID) {

@@ -25,6 +25,13 @@ enum HealthCategory: String, Codable, CaseIterable, Sendable {
     case heartEvents = "Heart Events"
     case workouts = "Workouts"
     case nutrition = "Nutrition"
+    case cycleTracking = "Cycle Tracking"
+
+    /// Whether this group holds sensitive types (see `HealthDataType.isSensitive`).
+    /// Drives the consent footer and the demo-receiver notice in the pickers.
+    var isSensitive: Bool {
+        HealthTypeRegistry.shared.types(in: self).contains(where: \.isSensitive)
+    }
 }
 
 /// A single supported HealthKit data type and everything Conduit needs to know
@@ -43,6 +50,19 @@ struct HealthDataType: Identifiable, Hashable, Sendable {
     let defaultUnit: String?
     /// Value shape / destination stream.
     let stream: HealthStream
+    /// Reproductive-health (and future medical) types that need explicit consent:
+    /// - **default off** — onboarding and the upgrade reconcile never turn one on
+    ///   (`defaultEnabled`);
+    /// - **lazy authorization** — never part of the launch-time re-prompt
+    ///   signature (`AppState.authorizedTypesSignature`); HealthKit is asked only
+    ///   once the user turns the type on (`SettingsViewModel.save`, or onboarding's
+    ///   permission step when picked there);
+    /// - **never sent to the public demo receiver** (`DemoReceiver`).
+    var isSensitive: Bool = false
+
+    /// The toggle state a type gets when no `data_type_config` row exists yet
+    /// (fresh onboarding and the upgrade reconcile).
+    var defaultEnabled: Bool { !isSensitive }
 
     var id: String { identifier }
 
@@ -125,7 +145,8 @@ struct HealthTypeRegistry: Sendable {
             HealthDataType.sleepMindfulness +
             HealthDataType.heartEvents +
             HealthDataType.workouts +
-            HealthDataType.nutrition
+            HealthDataType.nutrition +
+            HealthDataType.cycleTracking
     }
 
     /// Look up a type by its HK identifier string.
@@ -144,6 +165,14 @@ struct HealthTypeRegistry: Sendable {
     /// identifier isn't available on the current OS are skipped.
     var readTypes: Set<HKObjectType> {
         Set(all.flatMap { $0.authorizationTypes })
+    }
+
+    /// `readTypes` minus sensitive types, which are authorized lazily when the
+    /// user turns one on. This is the set the launch-time re-prompt signature
+    /// covers, so registering a sensitive type never shows an existing user a
+    /// permission sheet for data they did not ask Conduit to send.
+    var defaultReadTypes: Set<HKObjectType> {
+        Set(all.filter(\.defaultEnabled).flatMap { $0.authorizationTypes })
     }
 }
 
@@ -196,8 +225,8 @@ extension HealthDataType {
     //     recorded by Apple Watch after/during a workout. Physical effort
     //     carries an HK metadata key distinguishing activityLookup vs
     //     deviceSensed readings, but Conduit's `AnchoredReader.makeSample`
-    //     reads no sample metadata at all, so that distinction never reaches
-    //     the wire — not a defect, out of scope.
+    //     reads only the few metadata keys it documents (none for quantities),
+    //     so that distinction never reaches the wire — not a defect, out of scope.
     //   - Cycling power/cadence/speed/FTP: iOS 17, produced only when a
     //     Bluetooth cycling power/cadence/speed accessory is paired. No
     //     accessory ⇒ a permanently empty series, same as `dietaryWater`.
@@ -320,5 +349,31 @@ extension HealthDataType {
         .dietaryEnergyConsumed, .dietaryProtein, .dietaryCarbohydrates,
         .dietaryFatTotal, .dietaryFatSaturated, .dietaryFiber, .dietarySugar,
         .dietarySodium, .dietaryCholesterol, .dietaryWater,
+    ]
+
+    // Cycle Tracking → conduit-category (+ basal body temperature → conduit-quantity).
+    // The core set only: menstrual flow, spotting, the four cycle-deviation flags
+    // HealthKit records, cervical mucus, ovulation tests, basal body temperature.
+    // Sexual activity, contraception, pregnancy, lactation, pregnancy/progesterone
+    // tests and the menopause types are deliberately NOT registered, and neither
+    // are cycle symptoms (cramps, bloating, ...), which HealthKit stores as
+    // separate symptom types. Every entry is `isSensitive` — default off, lazy
+    // authorization, never sent to the public demo receiver. All are available
+    // at the iOS 17 deployment target (the deviation flags since iOS 16).
+    static let menstrualFlow = HealthDataType(identifier: HKCategoryTypeIdentifier.menstrualFlow.rawValue, displayName: "Menstrual Flow", category: .cycleTracking, defaultUnit: nil, stream: .category, isSensitive: true)
+    static let intermenstrualBleeding = HealthDataType(identifier: HKCategoryTypeIdentifier.intermenstrualBleeding.rawValue, displayName: "Spotting", category: .cycleTracking, defaultUnit: nil, stream: .category, isSensitive: true)
+    static let infrequentMenstrualCycles = HealthDataType(identifier: HKCategoryTypeIdentifier.infrequentMenstrualCycles.rawValue, displayName: "Infrequent Periods", category: .cycleTracking, defaultUnit: nil, stream: .category, isSensitive: true)
+    static let irregularMenstrualCycles = HealthDataType(identifier: HKCategoryTypeIdentifier.irregularMenstrualCycles.rawValue, displayName: "Irregular Cycles", category: .cycleTracking, defaultUnit: nil, stream: .category, isSensitive: true)
+    static let persistentIntermenstrualBleeding = HealthDataType(identifier: HKCategoryTypeIdentifier.persistentIntermenstrualBleeding.rawValue, displayName: "Persistent Spotting", category: .cycleTracking, defaultUnit: nil, stream: .category, isSensitive: true)
+    static let prolongedMenstrualPeriods = HealthDataType(identifier: HKCategoryTypeIdentifier.prolongedMenstrualPeriods.rawValue, displayName: "Prolonged Periods", category: .cycleTracking, defaultUnit: nil, stream: .category, isSensitive: true)
+    static let cervicalMucusQuality = HealthDataType(identifier: HKCategoryTypeIdentifier.cervicalMucusQuality.rawValue, displayName: "Cervical Mucus Quality", category: .cycleTracking, defaultUnit: nil, stream: .category, isSensitive: true)
+    static let ovulationTestResult = HealthDataType(identifier: HKCategoryTypeIdentifier.ovulationTestResult.rawValue, displayName: "Ovulation Test Result", category: .cycleTracking, defaultUnit: nil, stream: .category, isSensitive: true)
+    static let basalBodyTemperature = HealthDataType(identifier: HKQuantityTypeIdentifier.basalBodyTemperature.rawValue, displayName: "Basal Body Temperature", category: .cycleTracking, defaultUnit: "degC", stream: .quantity, isSensitive: true)
+
+    static let cycleTracking: [HealthDataType] = [
+        .menstrualFlow, .intermenstrualBleeding,
+        .infrequentMenstrualCycles, .irregularMenstrualCycles,
+        .persistentIntermenstrualBleeding, .prolongedMenstrualPeriods,
+        .cervicalMucusQuality, .ovulationTestResult, .basalBodyTemperature,
     ]
 }

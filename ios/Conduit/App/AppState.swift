@@ -564,12 +564,14 @@ final class AppState {
     /// read returns nothing:
     ///
     /// 1. **Auto-enable newly-registered types.** Every registry type with no
-    ///    `data_type_config` row yet is inserted **enabled** (default-on),
-    ///    matching fresh-install onboarding and the registry's "enabled by
-    ///    default" convention. Existing rows (enabled *or* disabled) are left
-    ///    untouched, so a user's deliberate opt-outs are preserved.
+    ///    `data_type_config` row yet is inserted with its `defaultEnabled` state:
+    ///    **enabled** for ordinary types, matching fresh-install onboarding, and
+    ///    **disabled** for sensitive ones (cycle tracking), which an update must
+    ///    never silently turn on. Existing rows (enabled *or* disabled) are left
+    ///    untouched, so a user's deliberate choices are preserved.
     /// 2. **Re-request HealthKit authorization when the authorized set grew.**
-    ///    Gated on a persisted signature of `HealthTypeRegistry.readTypes`, so an
+    ///    Gated on a persisted signature of `HealthTypeRegistry.defaultReadTypes`
+    ///    (sensitive types are authorized lazily, on enable), so an
     ///    existing user gets exactly **one** system permission sheet for the new
     ///    type(s) — not a sheet on every launch. The signature is persisted only
     ///    after a successful request, so a failure (e.g. HK unavailable) retries
@@ -632,20 +634,25 @@ final class AppState {
         }
     }
 
-    /// Stable signature of the registry's authorization read set. When a newly
-    /// registered type grows `HealthTypeRegistry.readTypes`, this string changes,
-    /// which is the trigger for `reconcileRegistry` to re-request authorization.
+    /// Stable signature of the registry's default authorization read set. When a
+    /// newly registered default-on type grows `HealthTypeRegistry.defaultReadTypes`,
+    /// this string changes, which is the trigger for `reconcileRegistry` to
+    /// re-request authorization. Sensitive types are deliberately outside it: they
+    /// ship default-off, so registering one must not show an existing user a
+    /// permission sheet ("Reproductive Health") for data they never turned on.
+    /// They are requested when the user enables them (`SettingsViewModel.save`).
     static func authorizedTypesSignature(registry: HealthTypeRegistry = .shared) -> String {
-        registry.readTypes.map(\.identifier).sorted().joined(separator: ",")
+        registry.defaultReadTypes.map(\.identifier).sorted().joined(separator: ",")
     }
 
-    /// Insert a default-on `data_type_config` row for every registry type that
-    /// has no row yet. Existing rows are left untouched. Pure DB work, injectable
-    /// so the reconcile behavior is unit-testable without a HealthKit store.
+    /// Insert a `data_type_config` row, in the type's `defaultEnabled` state, for
+    /// every registry type that has no row yet. Existing rows are left untouched.
+    /// Pure DB work, injectable so the reconcile behavior is unit-testable
+    /// without a HealthKit store.
     static func enableNewlyRegisteredTypes(registry: HealthTypeRegistry = .shared, dao: DataTypeConfigDAO) throws {
         let savedIDs = Set(try dao.all().map(\.hkTypeId))
         for type in registry.all where !savedIDs.contains(type.identifier) {
-            try dao.setEnabled(true, hkTypeId: type.identifier)
+            try dao.setEnabled(type.defaultEnabled, hkTypeId: type.identifier)
         }
     }
 

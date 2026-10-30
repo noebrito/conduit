@@ -273,10 +273,11 @@ struct AnchoredReader {
 
         case .category:
             guard let categorySample = hkSample as? HKCategorySample else { return nil }
-            var value = Conduit_V1_CategoryValue()
-            value.value = Int32(categorySample.value)
-            value.valueName = categoryValueName(type: type, rawValue: categorySample.value)
-            sample.category = value
+            sample.category = Self.makeCategoryValue(
+                type: type,
+                rawValue: categorySample.value,
+                metadata: categorySample.metadata
+            )
 
         case .workout:
             guard let workout = hkSample as? HKWorkout else { return nil }
@@ -343,6 +344,49 @@ struct AnchoredReader {
         value.unit = unitString
         sample.quantity = value
         return sample
+    }
+
+    // MARK: - Category metadata
+
+    /// `.category` mapping: the raw value, its stable name, and the two metadata
+    /// keys Conduit carries — each read ONLY for the type HealthKit documents it
+    /// on, so a writer that sets a key elsewhere never leaks it onto the wire.
+    ///
+    /// - `HKMetadataKeyHeartRateEventThreshold` (high/low heart-rate events) →
+    ///   `heart_rate_event_threshold_bpm`. The threshold the user configured in
+    ///   the Watch app, NOT the measured rate (that is the Heart Rate samples in
+    ///   the event window). Irregular-rhythm events carry no threshold.
+    /// - `HKMetadataKeyMenstrualCycleStart` (menstrual flow) →
+    ///   `menstrual_cycle_start`.
+    ///
+    /// Both wire fields are `optional`: set only when HealthKit reported the key,
+    /// so `false` / absent stay distinct. Takes the metadata dictionary rather
+    /// than a sample so it is testable with any writer's shape.
+    static func makeCategoryValue(
+        type: HealthDataType,
+        rawValue: Int,
+        metadata: [String: Any]?
+    ) -> Conduit_V1_CategoryValue {
+        var value = Conduit_V1_CategoryValue()
+        value.value = Int32(rawValue)
+        value.valueName = categoryValueName(type: type, rawValue: rawValue)
+        switch type.identifier {
+        case HKCategoryTypeIdentifier.highHeartRateEvent.rawValue,
+             HKCategoryTypeIdentifier.lowHeartRateEvent.rawValue:
+            // Same unit string as the heartRate registry entry's `defaultUnit`.
+            let bpmUnit = HKUnit(from: "count/min")
+            if let threshold = metadata?[HKMetadataKeyHeartRateEventThreshold] as? HKQuantity,
+               threshold.is(compatibleWith: bpmUnit) {
+                value.heartRateEventThresholdBpm = threshold.doubleValue(for: bpmUnit)
+            }
+        case HKCategoryTypeIdentifier.menstrualFlow.rawValue:
+            if let cycleStart = metadata?[HKMetadataKeyMenstrualCycleStart] as? NSNumber {
+                value.menstrualCycleStart = cycleStart.boolValue
+            }
+        default:
+            break
+        }
+        return value
     }
 
     // MARK: - Workout enrichment (pure)
@@ -440,7 +484,7 @@ struct AnchoredReader {
         Int64((date.timeIntervalSince1970 * 1000).rounded())
     }
 
-    /// Human-readable name for a sleep / heart-event category value. Falls back
+    /// Human-readable name for a sleep / heart-event / cycle category value. Falls back
     /// to the raw integer for types without a named mapping.
     static func categoryValueName(type: HealthDataType, rawValue: Int) -> String {
         switch type.identifier {
@@ -474,6 +518,44 @@ struct AnchoredReader {
             return "lowHeartRateEvent"
         case HKCategoryTypeIdentifier.irregularHeartRhythmEvent.rawValue:
             return "irregularHeartRhythmEvent"
+        // Cycle tracking. Integer literals, not enum cases: menstrual flow's
+        // `HKCategoryValueVaginalBleeding` is iOS 18+ (unreferenceable at the
+        // iOS 17 target) and replaced the deprecated `HKCategoryValueMenstrualFlow`
+        // with identical raw values, so the literals are right on every OS.
+        case HKCategoryTypeIdentifier.menstrualFlow.rawValue:
+            switch rawValue {
+            case 1: return "unspecified"
+            case 2: return "light"
+            case 3: return "medium"
+            case 4: return "heavy"
+            case 5: return "none"
+            default: return "value\(rawValue)"
+            }
+        case HKCategoryTypeIdentifier.cervicalMucusQuality.rawValue:
+            switch rawValue {
+            case 1: return "dry"
+            case 2: return "sticky"
+            case 3: return "creamy"
+            case 4: return "watery"
+            case 5: return "eggWhite"
+            default: return "value\(rawValue)"
+            }
+        case HKCategoryTypeIdentifier.ovulationTestResult.rawValue:
+            switch rawValue {
+            case 1: return "negative"
+            case 2: return "luteinizingHormoneSurge"
+            case 3: return "indeterminate"
+            case 4: return "estrogenSurge"
+            default: return "value\(rawValue)"
+            }
+        // Spotting and the cycle-deviation flags are `HKCategoryValueNotApplicable`
+        // (0): the type itself is the meaning, carried by `hk_type_id`.
+        case HKCategoryTypeIdentifier.intermenstrualBleeding.rawValue,
+             HKCategoryTypeIdentifier.infrequentMenstrualCycles.rawValue,
+             HKCategoryTypeIdentifier.irregularMenstrualCycles.rawValue,
+             HKCategoryTypeIdentifier.persistentIntermenstrualBleeding.rawValue,
+             HKCategoryTypeIdentifier.prolongedMenstrualPeriods.rawValue:
+            return rawValue == 0 ? "notApplicable" : "value\(rawValue)"
         default:
             return "value\(rawValue)"
         }

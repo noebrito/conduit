@@ -23,7 +23,7 @@ struct DataTypePickerStepView: View {
             ForEach(HealthCategory.allCases, id: \.self) { category in
                 let types = HealthTypeRegistry.shared.types(in: category)
                 if !types.isEmpty {
-                    Section(category.rawValue) {
+                    Section {
                         ForEach(types) { type in
                             let isEnabled = enabledIDs.contains(type.identifier)
                             Toggle(isOn: Binding(
@@ -35,6 +35,15 @@ struct DataTypePickerStepView: View {
                             }
                             .accessibilityLabel(type.displayName)
                             .accessibilityHint(isEnabled ? "Enabled. Tap to disable." : "Disabled. Tap to enable.")
+                        }
+                        if category.isSensitive && viewModel.sensitiveTypesBlockedByDemoReceiver {
+                            DemoReceiverNotice()
+                        }
+                    } header: {
+                        Text(category.rawValue)
+                    } footer: {
+                        if category.isSensitive {
+                            Text(DemoReceiver.sensitiveConsentFooter)
                         }
                     }
                 }

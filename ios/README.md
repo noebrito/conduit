@@ -82,6 +82,51 @@ another request. This follows
 the athlete-metrics precedent; sensitive-category expansion would need a separate
 consent/default-off decision and is outside this batch.
 
+## Heart-rate notifications and cycle tracking
+
+High and low heart-rate notifications now carry the threshold the user set in the
+Watch app as `category.heartRateEventThresholdBpm` (from
+`HKMetadataKeyHeartRateEventThreshold`). It is the threshold, not the measured
+rate: the readings behind a notification are the Heart Rate samples inside the
+event's window (see [`docs/webhook/PAYLOADS.md`](../docs/webhook/PAYLOADS.md#heart-rate-notifications)).
+Irregular rhythm notifications carry no threshold.
+
+Cycle tracking adds a **Cycle Tracking** group with the core set below. Every type
+is `isSensitive` in `HealthTypeRegistry`, which means:
+
+- **Off by default**, on fresh onboarding and on upgrade. The upgrade writes a
+  disabled row for each new type and never turns one on.
+- **Lazy authorization.** Sensitive types are outside the launch-time re-prompt
+  signature (`HealthTypeRegistry.defaultReadTypes`), so an update shows no
+  "Reproductive Health" sheet. HealthKit is asked when the user turns a type on:
+  onboarding's permission step, or Settings → Save Changes, which also starts
+  capturing newly enabled types right away.
+- **Never sent to the public demo receiver** (`https://health.noebrito.dev/webhook-test`,
+  `DemoReceiver`). While it is the destination, sensitive types are not read or
+  staged (their anchors stay put, so nothing is lost), rows already staged for
+  another receiver are held in the outbox instead of drained to it, and an
+  import of a sensitive type fails with the same explanation the app shows in
+  Settings and onboarding. The demo receiver also drops these types server-side.
+- The Import History confirmation names Cycle Tracking when it is enabled.
+
+| Type | `hkTypeId` | Shape | `valueName` or unit |
+| --- | --- | --- | --- |
+| Menstrual Flow | `HKCategoryTypeIdentifierMenstrualFlow` | category | `unspecified`, `light`, `medium`, `heavy`, `none`; plus `menstrualCycleStart` |
+| Spotting | `HKCategoryTypeIdentifierIntermenstrualBleeding` | category | `notApplicable` |
+| Infrequent Periods | `HKCategoryTypeIdentifierInfrequentMenstrualCycles` | category | `notApplicable` |
+| Irregular Cycles | `HKCategoryTypeIdentifierIrregularMenstrualCycles` | category | `notApplicable` |
+| Persistent Spotting | `HKCategoryTypeIdentifierPersistentIntermenstrualBleeding` | category | `notApplicable` |
+| Prolonged Periods | `HKCategoryTypeIdentifierProlongedMenstrualPeriods` | category | `notApplicable` |
+| Cervical Mucus Quality | `HKCategoryTypeIdentifierCervicalMucusQuality` | category | `dry`, `sticky`, `creamy`, `watery`, `eggWhite` |
+| Ovulation Test Result | `HKCategoryTypeIdentifierOvulationTestResult` | category | `negative`, `luteinizingHormoneSurge`, `indeterminate`, `estrogenSurge` |
+| Basal Body Temperature | `HKQuantityTypeIdentifierBasalBodyTemperature` | quantity | `degC` |
+
+`menstrualCycleStart` (from `HKMetadataKeyMenstrualCycleStart`) is present as
+`true` or `false` when HealthKit reported it and absent otherwise. Sexual
+activity, contraception, pregnancy, lactation, pregnancy and progesterone tests,
+the menopause types, and cycle symptoms are deliberately not exported. All types
+are available on every supported iOS version.
+
 ## Dependencies (Swift Package Manager)
 
 Declared in the project; Xcode resolves them on first open / build:

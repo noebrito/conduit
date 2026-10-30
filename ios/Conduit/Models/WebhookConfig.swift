@@ -61,3 +61,44 @@ extension WebhookConfig {
         )
     }
 }
+
+/// The public demo receiver (`https://health.noebrito.dev/webhook-test`) renders
+/// everything it receives on a world-readable page for 30 minutes
+/// (`docs/webhook/README.md`). Sensitive types (`HealthDataType.isSensitive`,
+/// i.e. cycle tracking) are never sent there: the app neither stages them while
+/// it is the configured destination (`SyncEngine`'s read paths) nor drains
+/// already-staged rows to it (`Batcher.buildBatch`'s exclusion), so rows staged
+/// for the user's own receiver stay queued until the destination changes. The
+/// demo receiver also drops these types server-side; this is the app-side half.
+enum DemoReceiver {
+    static let host = "health.noebrito.dev"
+    static let path = "/webhook-test"
+
+    /// Whether `urlString` points at the demo receiver. Host match is
+    /// case-insensitive and ignores a trailing dot; the path matches with or
+    /// without a trailing slash and any sub-path, query or fragment.
+    static func matches(_ urlString: String) -> Bool {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let components = URLComponents(string: trimmed),
+              var host = components.host?.lowercased()
+        else { return false }
+        if host.hasSuffix(".") { host.removeLast() }
+        guard host == Self.host else { return false }
+        let requestPath = components.path.lowercased()
+        return requestPath == path || requestPath.hasPrefix(path + "/")
+    }
+
+    /// The registry identifiers that must never be sent to `urlString`: every
+    /// sensitive type when it is the demo receiver, otherwise none.
+    static func blockedTypeIDs(forURL urlString: String, registry: HealthTypeRegistry = .shared) -> Set<String> {
+        guard matches(urlString) else { return [] }
+        return Set(registry.all.filter(\.isSensitive).map(\.identifier))
+    }
+
+    /// In-app copy shown wherever sensitive types are toggled or saved while the
+    /// demo receiver is the destination.
+    /// Consent copy for sensitive picker groups (Settings and onboarding).
+    static let sensitiveConsentFooter = "Cycle tracking entries describe your reproductive health. They stay off until you turn them on, iOS asks for permission when you do, and Conduit sends them only to the webhook you configured, never to the public demo receiver."
+
+    static let refusalMessage = "Cycle Tracking isn't sent to the public demo receiver, because it shows everything it receives on a public page. Point Conduit at a webhook you control to send it."
+}
