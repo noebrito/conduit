@@ -109,7 +109,8 @@ is `isSensitive` in `HealthTypeRegistry`, which means:
   endpoint also drops these types server-side.
   Held rows still count as pending (in the pending count, and they keep "last
   synced" from advancing) until the webhook URL changes.
-- The Import History confirmation names Cycle Tracking when it is enabled.
+- The Import History confirmation names each enabled sensitive group (Cycle
+  Tracking, [Medications](#medications)).
 
 | Type | `hkTypeId` | Shape | `valueName` or unit |
 | --- | --- | --- | --- |
