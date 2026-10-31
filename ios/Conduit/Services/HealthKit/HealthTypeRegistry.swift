@@ -69,7 +69,8 @@ struct HealthDataType: Identifiable, Hashable, Sendable {
     /// - **lazy authorization** — never part of the launch-time re-prompt
     ///   signature (`AppState.authorizedTypesSignature`); HealthKit is asked only
     ///   once the user turns the type on (`SettingsViewModel.save`, or onboarding's
-    ///   permission step when picked there);
+    ///   permission step when picked there), except medications, which are asked
+    ///   only through their own sheet (`chooseMedicationsToShare`);
     /// - **never sent to the public demo receiver** (`DemoReceiver`).
     var isSensitive: Bool = false
 

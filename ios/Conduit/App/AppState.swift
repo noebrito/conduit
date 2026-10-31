@@ -640,7 +640,8 @@ final class AppState {
     /// re-request authorization. Sensitive types are deliberately outside it: they
     /// ship default-off, so registering one must not show an existing user a
     /// permission sheet ("Reproductive Health") for data they never turned on.
-    /// They are requested when the user enables them (`SettingsViewModel.save`).
+    /// They are requested when the user enables them (`SettingsViewModel.save`;
+    /// medications through `chooseMedicationsToShare`).
     static func authorizedTypesSignature(registry: HealthTypeRegistry = .shared) -> String {
         registry.defaultReadTypes.map(\.identifier).sorted().joined(separator: ",")
     }

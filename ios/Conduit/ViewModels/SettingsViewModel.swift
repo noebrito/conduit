@@ -89,8 +89,8 @@ final class SettingsViewModel {
     private let startNewlyEnabledTypes: @MainActor (_ types: [HealthDataType]) async -> Void
     private let requestMedicationAccess: @MainActor () async throws -> Void
 
-    /// The work `save()` kicks off for newly enabled types (authorization, then
-    /// capture). Exposed so tests can await it.
+    /// The work `save()` or `chooseMedicationsToShare()` kicks off for newly
+    /// enabled types (authorization, then capture). Exposed so tests can await it.
     private(set) var enableTask: Task<Void, Never>?
 
     /// - Parameters:
