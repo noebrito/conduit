@@ -165,11 +165,10 @@ request (putting the dose-event type there raises an exception that kills the
 whole permission flow). Doses arrive only for the medications picked in that
 sheet, which opens from **Choose Medications to Share…** in onboarding's
 permission step and in Settings → Data Types → Medications (which also turns the
-toggle on), and in Settings from turning the toggle on and tapping Save Changes.
-Allow Health Access never opens it, so turning Medications on in onboarding's
-picker alone shares nothing until a medication is picked. The sheet appears on
-every request, so only those explicit actions open it; tap again to add or
-remove a medication. Below iOS 26 the button is not offered and Medications
+toggle on). Allow Health Access and Save Changes never open it, so turning the
+Medications toggle on alone shares nothing until a medication is picked. The
+sheet appears on every request, so only that button opens it; tap again to add
+or remove a medication. Below iOS 26 the button is not offered and Medications
 cannot be turned on.
 
 Each dose event is one sample in its own `medicationDose` shape (see

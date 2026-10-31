@@ -137,7 +137,7 @@ final class SettingsViewModel {
 
     /// The per-medication sheet (`HealthKitAuthorizer.requestMedicationAccess`).
     /// It is never part of `startCapture`'s request: it prompts on every call,
-    /// so only an explicit tap or toggle shows it.
+    /// so only "Choose Medications to Share…" shows it.
     @MainActor
     static func presentMedicationPicker(appState: AppState) async throws {
         appState.reviewPrompt.beginSensitiveActivity()
@@ -309,8 +309,7 @@ final class SettingsViewModel {
             try dao.save(&config)
         }
 
-        // Below iOS 26 Medications is never saved as on, so its sheet (which
-        // would throw there) is never requested either.
+        // Below iOS 26 Medications is never saved as on: nothing can be read.
         enabledTypeIDs.subtract(HealthTypeRegistry.unreadableMedicationTypeIDs())
         let typeDAO = DataTypeConfigDAO(appState.database)
         let previouslyEnabled = Set(try typeDAO.enabled().map(\.hkTypeId))
@@ -331,17 +330,7 @@ final class SettingsViewModel {
         }
         guard !newlyEnabled.isEmpty else { return }
         let start = startNewlyEnabledTypes
-        // Medications turned on with the toggle get their own sheet first: the
-        // normal request cannot include them, and without a pick nothing is read.
-        let requestMedications = newlyEnabled.contains { $0.stream == .medicationDose } ? requestMedicationAccess : nil
         enableTask = Task { @MainActor in
-            if let requestMedications {
-                do {
-                    try await requestMedications()
-                } catch {
-                    logger.error("Medication authorization failed: \(error.localizedDescription, privacy: .public)")
-                }
-            }
             await start(newlyEnabled)
         }
     }

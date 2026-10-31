@@ -316,10 +316,10 @@ final class MedicationSettingsTests: XCTestCase {
         XCTAssertEqual(started, 0)
     }
 
-    /// Turning Medications on with the toggle shows the sheet before capture
-    /// starts; turning on any other type never shows it.
+    /// Saving never shows the sheet, not even when the toggle turned
+    /// Medications on: only "Choose Medications to Share…" does.
     @MainActor
-    func testSavingTheToggleShowsTheSheetOnlyForMedications() async throws {
+    func testSavingTheToggleNeverShowsTheSheet() async throws {
         var events: [String] = []
         let viewModel = SettingsViewModel(
             appState: AppState(database: appDB),
@@ -336,7 +336,8 @@ final class MedicationSettingsTests: XCTestCase {
         viewModel.toggleType(medicationID)
         try viewModel.save()
         await viewModel.enableTask?.value
-        XCTAssertEqual(events.suffix(2), ["sheet", "start:" + medicationID])
+        XCTAssertEqual(events.last, "start:" + medicationID)
+        XCTAssertFalse(events.contains("sheet"))
     }
 
     @MainActor
