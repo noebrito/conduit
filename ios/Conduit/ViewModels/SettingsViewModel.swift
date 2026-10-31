@@ -309,8 +309,6 @@ final class SettingsViewModel {
             try dao.save(&config)
         }
 
-        // Below iOS 26 Medications is never saved as on: nothing can be read.
-        enabledTypeIDs.subtract(HealthTypeRegistry.unreadableMedicationTypeIDs())
         let typeDAO = DataTypeConfigDAO(appState.database)
         let previouslyEnabled = Set(try typeDAO.enabled().map(\.hkTypeId))
         for type in HealthTypeRegistry.shared.all {

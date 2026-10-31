@@ -389,13 +389,6 @@ final class MedicationSettingsTests: XCTestCase {
         XCTAssertTrue(chosen.hkAuthCompleted)
     }
 
-    /// Below iOS 26 nothing can be read, so Medications is never stored as on;
-    /// on iOS 26+ nothing is held back.
-    func testUnreadableMedicationIsNeverSavedAsOn() {
-        XCTAssertEqual(HealthTypeRegistry.unreadableMedicationTypeIDs(),
-                       MedicationReadings.isAvailableOnThisOS ? [] : [medicationID])
-    }
-
     /// No doses after 24h usually means no medication was picked (an unshared
     /// read is empty, not an error), so the hint points at the sheet.
     @MainActor

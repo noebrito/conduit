@@ -169,7 +169,6 @@ final class OnboardingViewModel {
 
     @MainActor
     func finishOnboarding() throws {
-        enabledTypeIDs.subtract(HealthTypeRegistry.unreadableMedicationTypeIDs())
         // Save enabled types to data_type_config
         let typeDAO = DataTypeConfigDAO(appState.database)
         for type in HealthTypeRegistry.shared.all {
