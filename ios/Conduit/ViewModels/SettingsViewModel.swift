@@ -309,6 +309,9 @@ final class SettingsViewModel {
             try dao.save(&config)
         }
 
+        // Below iOS 26 Medications is never saved as on, so its sheet (which
+        // would throw there) is never requested either.
+        enabledTypeIDs.subtract(HealthTypeRegistry.unreadableMedicationTypeIDs())
         let typeDAO = DataTypeConfigDAO(appState.database)
         let previouslyEnabled = Set(try typeDAO.enabled().map(\.hkTypeId))
         for type in HealthTypeRegistry.shared.all {

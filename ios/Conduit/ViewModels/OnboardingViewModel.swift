@@ -56,7 +56,6 @@ final class OnboardingViewModel {
     var hkAuthCompleted = false
 
     private let requestMedicationAccess: @MainActor () async throws -> Void
-    private var medicationsChosen = false
 
     private let appState: AppState
 
@@ -131,14 +130,11 @@ final class OnboardingViewModel {
             enabledTypeIDs.contains($0.identifier)
         }
         do {
+            // Never the per-medication sheet: it prompts on every call, so it
+            // opens only from "Choose Medications to Share…" below. The normal
+            // request contributes nothing for Medications
+            // (`HealthDataType.authorizationTypes`).
             try await authorizer.request(for: enabledTypes)
-            // Medications picked in step 2 need their own sheet: the normal
-            // request cannot include them (`HealthDataType.authorizationTypes`).
-            // It prompts on every call, so not again once "Choose Medications
-            // to Share…" already showed it.
-            if !medicationsChosen, enabledTypes.contains(where: { $0.stream == .medicationDose }) {
-                try await requestMedicationAccess()
-            }
             hkAuthCompleted = true
         } catch {
             hkAuthError = error.localizedDescription
@@ -163,7 +159,6 @@ final class OnboardingViewModel {
         guard let medication = HealthTypeRegistry.shared.medicationDose else { return }
         do {
             try await requestMedicationAccess()
-            medicationsChosen = true
             enabledTypeIDs.insert(medication.identifier)
         } catch {
             hkAuthError = error.localizedDescription
@@ -174,6 +169,7 @@ final class OnboardingViewModel {
 
     @MainActor
     func finishOnboarding() throws {
+        enabledTypeIDs.subtract(HealthTypeRegistry.unreadableMedicationTypeIDs())
         // Save enabled types to data_type_config
         let typeDAO = DataTypeConfigDAO(appState.database)
         for type in HealthTypeRegistry.shared.all {

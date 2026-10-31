@@ -304,6 +304,7 @@ struct DataTypesCategoryView: View {
                     )) {
                         Text(type.displayName)
                     }
+                    .disabled(type.stream == .medicationDose && !type.isAvailableOnThisOS)
                     .accessibilityLabel(type.displayName)
                     .accessibilityHint(isEnabled ? "Enabled. Tap to disable." : "Disabled. Tap to enable.")
                 }

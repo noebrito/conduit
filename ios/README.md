@@ -162,13 +162,15 @@ default, also on upgrade, and held back from the public test endpoint), with one
 difference: HealthKit grants medications **per medication**, in a system sheet
 listing the medications in the Health app, never through the normal permission
 request (putting the dose-event type there raises an exception that kills the
-whole permission flow). So Medications turn on only through that sheet:
-**Choose Medications to Share…** in onboarding's permission step and in Settings
-→ Data Types → Medications (which also turns the toggle on), or the toggle plus
-Save Changes (in onboarding, the toggle plus Allow Health Access, unless the
-button already showed it), which shows the sheet first. The sheet appears on
-every tap, so it is never shown automatically; tap again to add or remove a
-medication.
+whole permission flow). Doses arrive only for the medications picked in that
+sheet, which opens from **Choose Medications to Share…** in onboarding's
+permission step and in Settings → Data Types → Medications (which also turns the
+toggle on), and in Settings from turning the toggle on and tapping Save Changes.
+Allow Health Access never opens it, so turning Medications on in onboarding's
+picker alone shares nothing until a medication is picked. The sheet appears on
+every request, so only those explicit actions open it; tap again to add or
+remove a medication. Below iOS 26 the button is not offered and Medications
+cannot be turned on.
 
 Each dose event is one sample in its own `medicationDose` shape (see
 [`docs/webhook/PAYLOADS.md`](../docs/webhook/PAYLOADS.md#medicationdose--one-medication-dose-event)).

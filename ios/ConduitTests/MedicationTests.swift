@@ -358,26 +358,34 @@ final class MedicationSettingsTests: XCTestCase {
         XCTAssertEqual(viewModel.canChooseMedications, MedicationReadings.isAvailableOnThisOS)
     }
 
-    /// Medications turned on with the step-2 toggle get the sheet from Allow
-    /// Health Access; once the button already showed it, Allow does not show
-    /// it a second time.
+    /// In onboarding the sheet opens only from "Choose Medications to
+    /// Share…": Allow Health Access never shows it, whether Medications was
+    /// turned on with the step-2 toggle or by the button.
     @MainActor
-    func testOnboardingAllowShowsTheMedicationSheetOnlyIfNotAlreadyChosen() async {
+    func testOnboardingShowsTheMedicationSheetOnlyFromTheButton() async {
         var sheets = 0
         let toggled = OnboardingViewModel(appState: AppState(database: appDB), requestMedicationAccess: { sheets += 1 })
         toggled.enabledTypeIDs = [medicationID]
         await toggled.requestHealthKitPermission()
-        XCTAssertEqual(sheets, 1, "toggle plus Allow shows the sheet")
+        XCTAssertEqual(sheets, 0, "toggle plus Allow does not show the sheet")
+        XCTAssertNil(toggled.hkAuthError)
 
-        sheets = 0
         let chosen = OnboardingViewModel(appState: AppState(database: appDB), requestMedicationAccess: { sheets += 1 })
         chosen.enabledTypeIDs = []
         await chosen.chooseMedicationsToShare()
+        XCTAssertEqual(sheets, 1, "the button shows it")
         XCTAssertTrue(chosen.medicationsEnabled)
         await chosen.requestHealthKitPermission()
-        XCTAssertEqual(sheets, 1, "Allow after Choose does not show the sheet again")
+        XCTAssertEqual(sheets, 1, "Allow after Choose does not show it again")
         XCTAssertNil(chosen.hkAuthError)
         XCTAssertTrue(chosen.hkAuthCompleted)
+    }
+
+    /// Below iOS 26 nothing can be read, so Medications is never stored as on;
+    /// on iOS 26+ nothing is held back.
+    func testUnreadableMedicationIsNeverSavedAsOn() {
+        XCTAssertEqual(HealthTypeRegistry.unreadableMedicationTypeIDs(),
+                       MedicationReadings.isAvailableOnThisOS ? [] : [medicationID])
     }
 
     /// No doses after 24h usually means no medication was picked (an unshared

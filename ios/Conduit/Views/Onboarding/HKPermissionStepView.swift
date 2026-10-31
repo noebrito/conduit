@@ -85,7 +85,7 @@ struct HKPermissionStepView: View {
                     .accessibilityHint("Optional. Opens the iOS sheet where you pick which medications Conduit may read")
 
                     Text(viewModel.medicationsEnabled
-                         ? "Medications are on. Conduit sends doses only for the medications you picked."
+                         ? "Medications are on. Conduit sends doses only for the medications you pick here."
                          : "Optional. Medications stay off unless you choose some to share.")
                         .font(.caption)
                         .foregroundStyle(.secondary)

@@ -33,6 +33,7 @@ struct DataTypePickerStepView: View {
                                 Text(type.displayName)
                                     .font(.body)
                             }
+                            .disabled(type.stream == .medicationDose && !type.isAvailableOnThisOS)
                             .accessibilityLabel(type.displayName)
                             .accessibilityHint(isEnabled ? "Enabled. Tap to disable." : "Disabled. Tap to enable.")
                         }

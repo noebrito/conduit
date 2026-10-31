@@ -223,6 +223,14 @@ struct HealthTypeRegistry: Sendable {
         all.first { $0.stream == .medicationDose }
     }
 
+    /// The medication entry's identifier when this OS cannot read it (below
+    /// iOS 26), else empty. Saving subtracts it, so Medications is never
+    /// stored as on where nothing could ever be read.
+    static func unreadableMedicationTypeIDs(registry: HealthTypeRegistry = .shared) -> Set<String> {
+        guard let medication = registry.medicationDose, !medication.isAvailableOnThisOS else { return [] }
+        return [medication.identifier]
+    }
+
     /// `readTypes` minus sensitive types, which are authorized lazily when the
     /// user turns one on. This is the set the launch-time re-prompt signature
     /// covers, so registering a sensitive type never shows an existing user a
