@@ -102,7 +102,7 @@ enum DemoReceiver {
         case .cycleTracking:
             return "Cycle tracking entries describe your reproductive health. They stay off until you turn them on, iOS asks for permission when you do, and Conduit sends them only to the webhook you configured, never to the public demo receiver."
         case .medications:
-            return "Medication doses describe your health. They stay off until you choose medications to share, and Conduit reads doses only for the medications you pick in that iOS sheet. Conduit sends each dose's medication name and form, when it was scheduled, and whether you took or skipped it, only to the webhook you configured, never to the public demo receiver."
+            return "Medication doses describe your health. They stay off until you choose medications to share, and Conduit reads doses only for the medications you pick in that iOS sheet. Conduit sends each dose's medication name and form, whether it was scheduled or as-needed and when it was due, the amount, and whether you took, skipped, or snoozed it or left the reminder unanswered, only to the webhook you configured, never to the public demo receiver."
         case .activityFitness, .bodyMeasurements, .vitals, .sleepMindfulness, .heartEvents, .workouts, .nutrition:
             return nil
         }

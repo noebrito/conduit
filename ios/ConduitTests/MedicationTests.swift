@@ -125,7 +125,14 @@ final class MedicationRegistryTests: XCTestCase {
         }
         let footer = try XCTUnwrap(DemoReceiver.consentFooter(for: .medications))
         XCTAssertTrue(footer.contains("choose medications to share"))
+        // It names everything a dose carries: every log status, the schedule
+        // type and due time, and the amount (`MedicationDoseValue`).
+        for detail in ["name and form", "scheduled or as-needed", "when it was due", "the amount",
+                       "took, skipped, or snoozed", "left the reminder unanswered"] {
+            XCTAssertTrue(footer.contains(detail), detail)
+        }
         XCTAssertFalse(footer.contains("nickname"))
+        XCTAssertTrue(footer.hasSuffix("never to the public demo receiver."))
     }
 }
 
