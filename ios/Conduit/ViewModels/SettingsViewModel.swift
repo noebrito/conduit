@@ -87,19 +87,24 @@ final class SettingsViewModel {
     private let importCoordinator: ImportRunCoordinator
     private let historyAccessProbe: HistoryAccessProbing
     private let startNewlyEnabledTypes: @MainActor (_ types: [HealthDataType]) async -> Void
+    private let requestMedicationAccess: @MainActor () async throws -> Void
 
-    /// The work `save()` kicks off for newly enabled types (authorization, then
-    /// capture). Exposed so tests can await it.
+    /// The work `save()` or `chooseMedicationsToShare()` kicks off for newly
+    /// enabled types (authorization, then capture). Exposed so tests can await it.
     private(set) var enableTask: Task<Void, Never>?
 
-    /// - Parameter startNewlyEnabledTypes: what `save()` does with types the
-    ///   user just turned on. Defaults to `startCapture(for:appState:)`;
-    ///   injectable so tests never touch a live `HKHealthStore`.
+    /// - Parameters:
+    ///   - startNewlyEnabledTypes: what `save()` does with types the user just
+    ///     turned on. Defaults to `startCapture(for:appState:)`; injectable so
+    ///     tests never touch a live `HKHealthStore`.
+    ///   - requestMedicationAccess: presents the per-medication sheet. Defaults
+    ///     to `presentMedicationPicker(appState:)`; injectable for the same reason.
     init(
         appState: AppState,
         importCoordinator: ImportRunCoordinator = .shared,
         historyAccessProbe: HistoryAccessProbing = HealthKitHistoryAccessProbe(),
-        startNewlyEnabledTypes: (@MainActor (_ types: [HealthDataType]) async -> Void)? = nil
+        startNewlyEnabledTypes: (@MainActor (_ types: [HealthDataType]) async -> Void)? = nil,
+        requestMedicationAccess: (@MainActor () async throws -> Void)? = nil
     ) {
         self.appState = appState
         self.importCoordinator = importCoordinator
@@ -107,10 +112,13 @@ final class SettingsViewModel {
         self.startNewlyEnabledTypes = startNewlyEnabledTypes ?? { [appState] types in
             await SettingsViewModel.startCapture(for: types, appState: appState)
         }
+        self.requestMedicationAccess = requestMedicationAccess ?? { [appState] in
+            try await SettingsViewModel.presentMedicationPicker(appState: appState)
+        }
     }
 
     /// Lazy authorization: request HealthKit read access for types the user just
-    /// turned on (cycle tracking is default off and outside the launch-time
+    /// turned on (sensitive types are default off and outside the launch-time
     /// re-prompt, so this is where it is first asked for), then start capturing
     /// them without waiting for a relaunch. Types already decided resolve
     /// without a sheet. Capture starts even if the request fails: a type
@@ -125,6 +133,16 @@ final class SettingsViewModel {
             logger.error("Authorization for newly enabled types failed: \(error.localizedDescription, privacy: .public)")
         }
         appState.startDataCapture()
+    }
+
+    /// The per-medication sheet (`HealthKitAuthorizer.requestMedicationAccess`).
+    /// It is never part of `startCapture`'s request: it prompts on every call,
+    /// so only "Choose Medications to Share…" shows it.
+    @MainActor
+    static func presentMedicationPicker(appState: AppState) async throws {
+        appState.reviewPrompt.beginSensitiveActivity()
+        defer { appState.reviewPrompt.endSensitiveActivity() }
+        try await HealthKitAuthorizer(store: appState.healthStore).requestMedicationAccess()
     }
 
     func load() {
@@ -315,6 +333,40 @@ final class SettingsViewModel {
         }
     }
 
+    /// "Choose Medications to Share…": shows the per-medication sheet, then
+    /// turns Medications on and saves that one toggle by itself, leaving any
+    /// other unsaved Settings edits unsaved. iOS does not say which medications
+    /// were picked, so the toggle goes on whenever the sheet completes; doses
+    /// arrive only for the medications picked there. Tapping it again (to add or
+    /// remove a medication) shows the sheet and changes nothing else.
+    @MainActor
+    func chooseMedicationsToShare() async {
+        guard let medication = HealthTypeRegistry.shared.medicationDose else { return }
+        appState.reviewPrompt.suppressSession()
+        do {
+            try await requestMedicationAccess()
+        } catch {
+            logger.error("Medication authorization failed: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        enabledTypeIDs.insert(medication.identifier)
+        do {
+            let typeDAO = DataTypeConfigDAO(appState.database)
+            guard try typeDAO.find(hkTypeId: medication.identifier)?.enabled != true else { return }
+            try typeDAO.setEnabled(true, hkTypeId: medication.identifier)
+            recordTypeEnabledDate(medication.identifier)
+            let configs = try typeDAO.all()
+            dataTypeConfigsByID = Dictionary(uniqueKeysWithValues: configs.map { ($0.hkTypeId, $0) })
+        } catch {
+            logger.error("Enabling medications failed: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        let start = startNewlyEnabledTypes
+        enableTask = Task { @MainActor in
+            await start([medication])
+        }
+    }
+
     /// Whether the edited (unsaved or saved) webhook URL is the public demo
     /// receiver while a sensitive type is enabled — the case Settings explains
     /// with `DemoReceiver.refusalMessage`.
@@ -323,9 +375,17 @@ final class SettingsViewModel {
     }
 
     /// Whether any sensitive type is enabled, so the import confirmation can
-    /// name it before an explicit bulk upload of reproductive-health history.
+    /// name it before an explicit bulk upload of sensitive history.
     var hasSensitiveTypesEnabled: Bool {
-        HealthTypeRegistry.shared.all.contains { $0.isSensitive && enabledTypeIDs.contains($0.identifier) }
+        !enabledSensitiveCategories.isEmpty
+    }
+
+    /// The sensitive groups with a type enabled, in picker order, for the
+    /// import confirmation to name.
+    var enabledSensitiveCategories: [HealthCategory] {
+        HealthCategory.allCases.filter { category in
+            HealthTypeRegistry.shared.types(in: category).contains { $0.isSensitive && enabledTypeIDs.contains($0.identifier) }
+        }
     }
 
     @MainActor

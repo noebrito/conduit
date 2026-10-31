@@ -21,6 +21,15 @@ struct HKPermissionsDetailView: View {
         }
     }
 
+    /// Medications are read only for the medications picked in their own
+    /// sheet, and an unshared state reads as "no doses" rather than an error,
+    /// so their hint points there instead of at Health permissions.
+    static func noDataHint(for type: HealthDataType) -> String {
+        type.stream == .medicationDose
+            ? "Enabled over 24h ago — no doses received yet. Choose medications to share in Data Types → Medications."
+            : "Enabled over 24h ago — no samples received yet. Check Health permissions."
+    }
+
     var body: some View {
         List {
             Section {
@@ -58,13 +67,13 @@ struct HKPermissionsDetailView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(type.displayName)
                                     .font(.subheadline.bold())
-                                Text("Enabled over 24h ago — no samples received yet. Check Health permissions.")
+                                Text(Self.noDataHint(for: type))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                         }
                         .accessibilityElement(children: .combine)
-                        .accessibilityLabel("\(type.displayName): no samples received in 24 hours. Check Health permissions.")
+                        .accessibilityLabel("\(type.displayName): \(Self.noDataHint(for: type))")
                     }
                 } header: {
                     Text("No Data Received")

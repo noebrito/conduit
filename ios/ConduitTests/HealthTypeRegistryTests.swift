@@ -129,7 +129,7 @@ final class HealthTypeRegistryTests: XCTestCase {
             switch type.stream {
             case .quantity:
                 XCTAssertNotNil(type.defaultUnit, "Quantity type missing unit: \(type.identifier)")
-            case .category, .workout, .correlation, .route, .electrocardiogram:
+            case .category, .workout, .correlation, .route, .electrocardiogram, .medicationDose:
                 XCTAssertNil(type.defaultUnit, "Non-quantity type should not carry a unit: \(type.identifier)")
             }
         }
@@ -144,6 +144,9 @@ final class HealthTypeRegistryTests: XCTestCase {
                 continue
             }
             if RecoveryMetricReadings.minimumIOS[type.identifier].map({ ProcessInfo.processInfo.operatingSystemVersion.majorVersion < $0 }) == true {
+                continue
+            }
+            if type.identifier == MedicationReadings.identifier, !MedicationReadings.isAvailableOnThisOS {
                 continue
             }
             XCTAssertNotNil(type.sampleType, "Unresolvable HK identifier: \(type.identifier)")
@@ -205,8 +208,10 @@ final class HealthTypeRegistryTests: XCTestCase {
         XCTAssertTrue(bloodPressure?.sampleType is HKCorrelationType)
     }
 
+    /// Medication doses are the other exception: they authorize through the
+    /// per-medication sheet, never the normal request (`MedicationRegistryTests`).
     func testNonCorrelationTypesAuthorizeTheirSampleType() {
-        for type in registry.all where type.stream != .correlation {
+        for type in registry.all where type.stream != .correlation && type.stream != .medicationDose {
             XCTAssertEqual(
                 type.authorizationTypes.map { $0.identifier },
                 [type.sampleType].compactMap { $0?.identifier },

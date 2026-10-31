@@ -54,4 +54,16 @@ final class HealthKitAuthorizerTests: XCTestCase {
         XCTAssertTrue(ids.contains(HKQuantityTypeIdentifier.bloodPressureSystolic.rawValue))
         XCTAssertTrue(ids.contains(HKQuantityTypeIdentifier.bloodPressureDiastolic.rawValue))
     }
+
+    /// Neither medication type may enter the read set: the dose-event type
+    /// raises the same uncaught "disallowed" NSException as a correlation type
+    /// (its `requiresPerObjectAuthorization()` is false, so nothing generic
+    /// filters it), and the medication list needs per-object authorization.
+    /// `testRequestAllDoesNotRaiseDisallowedTypesException` is the runtime half.
+    func testAuthorizationReadSetContainsNoMedicationType() {
+        let ids = Set(HealthTypeRegistry.shared.all.flatMap { $0.authorizationTypes }.map(\.identifier))
+        XCTAssertFalse(ids.contains(MedicationReadings.identifier))
+        XCTAssertFalse(ids.contains("HKDataTypeUserAnnotatedMedicationConcept"))
+        XCTAssertFalse(HealthTypeRegistry.shared.readTypes.map(\.identifier).contains(MedicationReadings.identifier))
+    }
 }

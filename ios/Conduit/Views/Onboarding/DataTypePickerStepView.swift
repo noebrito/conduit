@@ -33,6 +33,7 @@ struct DataTypePickerStepView: View {
                                 Text(type.displayName)
                                     .font(.body)
                             }
+                            .disabled(type.stream == .medicationDose && !type.isAvailableOnThisOS)
                             .accessibilityLabel(type.displayName)
                             .accessibilityHint(isEnabled ? "Enabled. Tap to disable." : "Disabled. Tap to enable.")
                         }
@@ -42,8 +43,8 @@ struct DataTypePickerStepView: View {
                     } header: {
                         Text(category.rawValue)
                     } footer: {
-                        if category.isSensitive {
-                            Text(DemoReceiver.sensitiveConsentFooter)
+                        if let footer = DemoReceiver.consentFooter(for: category) {
+                            Text(footer)
                         }
                     }
                 }

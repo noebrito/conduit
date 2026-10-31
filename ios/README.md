@@ -109,7 +109,8 @@ is `isSensitive` in `HealthTypeRegistry`, which means:
   endpoint also drops these types server-side.
   Held rows still count as pending (in the pending count, and they keep "last
   synced" from advancing) until the webhook URL changes.
-- The Import History confirmation names Cycle Tracking when it is enabled.
+- The Import History confirmation names each enabled sensitive group (Cycle
+  Tracking, [Medications](#medications)).
 
 | Type | `hkTypeId` | Shape | `valueName` or unit |
 | --- | --- | --- | --- |
@@ -151,6 +152,45 @@ with a recording (separate HealthKit types). Conduit adds no interpretation.
 unit-tested through `AnchoredReader.makeElectrocardiogramValue`; whether a real
 recording wakes the app in the background is not yet verified on a device (if
 not, it is picked up on the next sync of any other type).
+
+## Medications
+
+Doses logged in the iOS 26 Medications feature of the Health app
+(`HKMedicationDoseEventTypeIdentifierMedicationDoseEvent`, iOS 26 or later) are
+in their own **Medications** group. It is sensitive like cycle tracking (off by
+default, also on upgrade, and held back from the public test endpoint), with one
+difference: HealthKit grants medications **per medication**, in a system sheet
+listing the medications in the Health app, never through the normal permission
+request (putting the dose-event type there raises an exception that kills the
+whole permission flow). Doses arrive only for the medications picked in that
+sheet, which opens from **Choose Medications to Share…** in onboarding's
+permission step and in Settings → Data Types → Medications (which also turns the
+toggle on). Allow Health Access and Save Changes never open it, so turning the
+Medications toggle on alone shares nothing until a medication is picked. The
+sheet appears on every request, so only that button opens it; tap again to add
+or remove a medication. Below iOS 26 the button is not offered and Medications
+cannot be turned on.
+
+Each dose event is one sample in its own `medicationDose` shape (see
+[`docs/webhook/PAYLOADS.md`](../docs/webhook/PAYLOADS.md#medicationdose--one-medication-dose-event)).
+The medication is joined on-device from the shared medication list and sent by
+name and general form only, never its nickname or clinical codes. Every log
+status is sent, including the `notInteracted` and `notificationNotSent`
+placeholders HealthKit writes for unanswered reminders, and a status change
+arrives as a tombstone plus a new sample.
+
+| Field | Source |
+| --- | --- |
+| `medicationName`, `generalForm` | The medication as picked in the Health app (`displayText`, form such as `tablet`); empty if the dose's medication is no longer shared |
+| `scheduleType` | `schedule`, `asNeeded`, or `scheduleType<N>` |
+| `logStatus` | `taken`, `skipped`, `snoozed`, `notInteracted`, `notificationNotSent`, `notLogged`, or `logStatus<N>` |
+| `scheduledUnixMs`, `scheduledDoseQuantity` | When the dose was due and how much; absent for an as-needed dose |
+| `doseQuantity`, `unit` | The logged amount (`0` for a skipped dose, absent when HealthKit has none) and its HealthKit unit |
+
+`HKMedicationDoseEvent` cannot be constructed in a test, so the mapping is
+unit-tested through `AnchoredReader.makeMedicationDoseValue`. The sheet itself,
+the delete-and-recreate on a status change, background delivery, and what
+un-sharing a medication reports can be checked only on a device.
 
 ## Dependencies (Swift Package Manager)
 

@@ -33,7 +33,7 @@ import HealthKit
 enum ImportError: LocalizedError {
     /// No webhook destination is configured, so there is nowhere to stage to.
     case noWebhookConfigured
-    /// A sensitive type (cycle tracking) was asked to import while the
+    /// A sensitive type (cycle tracking, medications) was asked to import while the
     /// destination is the public demo receiver (`DemoReceiver`). A failure, not
     /// an empty success, so the run never claims that type's history arrived.
     case sensitiveTypeBlockedForDemoReceiver
