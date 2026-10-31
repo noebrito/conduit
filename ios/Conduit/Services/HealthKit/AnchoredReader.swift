@@ -242,7 +242,7 @@ struct AnchoredReader {
     // MARK: - HKSample → Conduit_V1_Sample
 
     /// Convert any supported `HKSample` into wire format, dispatching on the
-    /// type's stream (the four value shapes from ARCHITECTURE.md §3.2).
+    /// type's stream (the value shapes in `docs/webhook/PAYLOADS.md`).
     ///
     /// - Parameter includeHeartRateStatistics: whether a `.workout` sample may
     ///   carry `avg/max/min_heart_rate_bpm`. The caller resolves this from the
@@ -325,6 +325,22 @@ struct AnchoredReader {
             // any accidental generic read of the route series type a harmless
             // no-op rather than a malformed sample.
             return nil
+
+        case .electrocardiogram:
+            guard let electrocardiogram = hkSample as? HKElectrocardiogram else { return nil }
+            // HKElectrocardiogram has no public initializer, so a unit test can
+            // never hand one to this case. Only the property reads live here; the
+            // mapping is the pure makeElectrocardiogramValue core below. The
+            // voltages are never read: that needs a separate
+            // HKElectrocardiogramQuery, which Conduit does not run.
+            sample.electrocardiogram = Self.makeElectrocardiogramValue(
+                classification: electrocardiogram.classification,
+                averageHeartRate: electrocardiogram.averageHeartRate,
+                symptomsStatus: electrocardiogram.symptomsStatus,
+                samplingFrequency: electrocardiogram.samplingFrequency,
+                numberOfVoltageMeasurements: electrocardiogram.numberOfVoltageMeasurements,
+                metadata: electrocardiogram.metadata
+            )
         }
 
         return sample
@@ -387,6 +403,72 @@ struct AnchoredReader {
             break
         }
         return value
+    }
+
+    // MARK: - Electrocardiogram (pure)
+
+    /// The `HKElectrocardiogram`-free core of `.electrocardiogram` mapping
+    /// (that class has no public initializer, so this is the testable part).
+    /// Apple's values pass through without interpretation.
+    ///
+    /// - Parameters:
+    ///   - averageHeartRate: `HKElectrocardiogram.averageHeartRate`. Set only
+    ///     when HealthKit has one — absent, never a fabricated 0, which is
+    ///     common for inconclusive readings.
+    ///   - samplingFrequency: set only when HealthKit has one.
+    ///   - metadata: the sample's metadata; only
+    ///     `HKMetadataKeyAppleECGAlgorithmVersion` is read, set when present.
+    static func makeElectrocardiogramValue(
+        classification: HKElectrocardiogram.Classification,
+        averageHeartRate: HKQuantity?,
+        symptomsStatus: HKElectrocardiogram.SymptomsStatus,
+        samplingFrequency: HKQuantity?,
+        numberOfVoltageMeasurements: Int,
+        metadata: [String: Any]?
+    ) -> Conduit_V1_ElectrocardiogramValue {
+        var value = Conduit_V1_ElectrocardiogramValue()
+        value.classification = electrocardiogramClassificationName(classification)
+        // Same unit string as the heartRate registry entry's `defaultUnit`.
+        let bpmUnit = HKUnit(from: "count/min")
+        if let averageHeartRate, averageHeartRate.is(compatibleWith: bpmUnit) {
+            value.averageHeartRateBpm = averageHeartRate.doubleValue(for: bpmUnit)
+        }
+        value.symptomsStatus = electrocardiogramSymptomsStatusName(symptomsStatus)
+        if let samplingFrequency, samplingFrequency.is(compatibleWith: .hertz()) {
+            value.samplingFrequencyHz = samplingFrequency.doubleValue(for: .hertz())
+        }
+        value.numberOfVoltageMeasurements = Int32(clamping: numberOfVoltageMeasurements)
+        if let algorithmVersion = metadata?[HKMetadataKeyAppleECGAlgorithmVersion] as? NSNumber {
+            value.appleEcgAlgorithmVersion = algorithmVersion.int32Value
+        }
+        return value
+    }
+
+    /// Stable name for an ECG classification, with the same numeric fallback
+    /// `workoutEventTypeName` uses for a case a future OS adds.
+    static func electrocardiogramClassificationName(_ classification: HKElectrocardiogram.Classification) -> String {
+        switch classification {
+        case .notSet: return "notSet"
+        case .sinusRhythm: return "sinusRhythm"
+        case .atrialFibrillation: return "atrialFibrillation"
+        case .inconclusiveLowHeartRate: return "inconclusiveLowHeartRate"
+        case .inconclusiveHighHeartRate: return "inconclusiveHighHeartRate"
+        case .inconclusivePoorReading: return "inconclusivePoorReading"
+        case .inconclusiveOther: return "inconclusiveOther"
+        case .unrecognized: return "unrecognized"
+        @unknown default: return "classification\(classification.rawValue)"
+        }
+    }
+
+    /// Stable name for an ECG symptoms status, numeric fallback as above. The
+    /// symptoms themselves are separate category samples Conduit does not read.
+    static func electrocardiogramSymptomsStatusName(_ status: HKElectrocardiogram.SymptomsStatus) -> String {
+        switch status {
+        case .notSet: return "notSet"
+        case .none: return "none"
+        case .present: return "present"
+        @unknown default: return "symptomsStatus\(status.rawValue)"
+        }
     }
 
     // MARK: - Workout enrichment (pure)

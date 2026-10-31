@@ -110,6 +110,7 @@
 		CD000000000000000000C012 /* ShortcutSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000C011 /* ShortcutSync.swift */; };
 		CD000000000000000000C022 /* ShortcutSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000C021 /* ShortcutSyncTests.swift */; };
 		CD000000000000000000C042 /* CycleTrackingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000C041 /* CycleTrackingTests.swift */; };
+		CD000000000000000000C052 /* ElectrocardiogramTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000C051 /* ElectrocardiogramTests.swift */; };
 		CD000000000000000000C032 /* ShortcutEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD000000000000000000C031 /* ShortcutEvidenceTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -248,6 +249,7 @@
 		CD000000000000000000C011 /* ShortcutSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutSync.swift; sourceTree = "<group>"; };
 		CD000000000000000000C021 /* ShortcutSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutSyncTests.swift; sourceTree = "<group>"; };
 		CD000000000000000000C041 /* CycleTrackingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CycleTrackingTests.swift; sourceTree = "<group>"; };
+		CD000000000000000000C051 /* ElectrocardiogramTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElectrocardiogramTests.swift; sourceTree = "<group>"; };
 		CD000000000000000000C031 /* ShortcutEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutEvidenceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -531,6 +533,7 @@
 				CD000000000000000000C021 /* ShortcutSyncTests.swift */,
 				CD000000000000000000C031 /* ShortcutEvidenceTests.swift */,
 				CD000000000000000000C041 /* CycleTrackingTests.swift */,
+				CD000000000000000000C051 /* ElectrocardiogramTests.swift */,
 				CD00000000000000000002A0 /* RegistryReconcileTests.swift */,
 				CD0000000000000000000156 /* StorageDAOTests.swift */,
 				CD00000000000000000AC03 /* HistoryAccessProbeTests.swift */,
@@ -785,6 +788,7 @@
 				CD000000000000000000C022 /* ShortcutSyncTests.swift in Sources */,
 				CD000000000000000000C032 /* ShortcutEvidenceTests.swift in Sources */,
 				CD000000000000000000C042 /* CycleTrackingTests.swift in Sources */,
+				CD000000000000000000C052 /* ElectrocardiogramTests.swift in Sources */,
 				CD00000000000000000002A1 /* RegistryReconcileTests.swift in Sources */,
 				CD0000000000000000000157 /* StorageDAOTests.swift in Sources */,
 				CD000000000000000000F0F4 /* SyncStateTests.swift in Sources */,

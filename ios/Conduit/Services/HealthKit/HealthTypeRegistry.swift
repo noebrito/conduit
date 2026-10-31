@@ -14,6 +14,11 @@ enum HealthStream: String, Codable, CaseIterable, Sendable {
     /// 1:1 map — a route is a two-step async read, so it has its own reader
     /// (`WorkoutRouteReader`) driven off the workout wake.
     case route
+    /// An Apple Watch ECG recording's summary (`HKElectrocardiogram`):
+    /// classification, average heart rate, symptoms status, sampling details.
+    /// Never the waveform — voltages need a separate `HKElectrocardiogramQuery`
+    /// that Conduit does not run.
+    case electrocardiogram
 }
 
 /// UI grouping for the Data Types picker.
@@ -83,6 +88,8 @@ struct HealthDataType: Identifiable, Hashable, Sendable {
             return HKObjectType.workoutType()
         case .route:
             return HKSeriesType.workoutRoute()
+        case .electrocardiogram:
+            return HKObjectType.electrocardiogramType()
         }
     }
 
@@ -100,7 +107,7 @@ struct HealthDataType: Identifiable, Hashable, Sendable {
         switch stream {
         case .correlation:
             return Self.correlationComponentTypes(forIdentifier: identifier)
-        case .quantity, .category, .workout, .route:
+        case .quantity, .category, .workout, .route, .electrocardiogram:
             // A route authorizes as its series type (`HKSeriesType.workoutRoute()`)
             // and NOTHING else. Reading a *stored* route needs no CoreLocation
             // permission, no `NSLocation*UsageDescription`, and no new
@@ -307,12 +314,18 @@ extension HealthDataType {
 
     static let sleepMindfulness: [HealthDataType] = [.sleepAnalysis, .mindfulSession, .appleSleepingWristTemperature, .appleSleepingBreathingDisturbances]
 
-    // Heart Events → conduit-category
+    // Heart Events → conduit-category (+ ECG → conduit-electrocardiogram)
     static let highHeartRateEvent = HealthDataType(identifier: HKCategoryTypeIdentifier.highHeartRateEvent.rawValue, displayName: "High Heart Rate Event", category: .heartEvents, defaultUnit: nil, stream: .category)
     static let lowHeartRateEvent = HealthDataType(identifier: HKCategoryTypeIdentifier.lowHeartRateEvent.rawValue, displayName: "Low Heart Rate Event", category: .heartEvents, defaultUnit: nil, stream: .category)
     static let irregularHeartRhythmEvent = HealthDataType(identifier: HKCategoryTypeIdentifier.irregularHeartRhythmEvent.rawValue, displayName: "Irregular Heart Rhythm Event", category: .heartEvents, defaultUnit: nil, stream: .category)
 
-    static let heartEvents: [HealthDataType] = [.highHeartRateEvent, .lowHeartRateEvent, .irregularHeartRhythmEvent]
+    // Heart Events → conduit-electrocardiogram. HealthKit exports no identifier
+    // constant for the ECG type; this literal is `electrocardiogramType().identifier`
+    // (pinned by `HealthTypeRegistryTests`). Read-only, recorded by Apple Watch;
+    // the summary only, never the waveform (see `HealthStream.electrocardiogram`).
+    static let electrocardiogram = HealthDataType(identifier: "HKDataTypeIdentifierElectrocardiogram", displayName: "Electrocardiograms (ECG)", category: .heartEvents, defaultUnit: nil, stream: .electrocardiogram)
+
+    static let heartEvents: [HealthDataType] = [.highHeartRateEvent, .lowHeartRateEvent, .irregularHeartRhythmEvent, .electrocardiogram]
 
     // Workouts → conduit-workout
     static let workout = HealthDataType(identifier: "HKWorkoutTypeIdentifier", displayName: "Workouts", category: .workouts, defaultUnit: nil, stream: .workout)

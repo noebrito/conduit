@@ -423,6 +423,49 @@ final class RegistryReconcileTests: XCTestCase {
                           named: "persisted-recovery-upgrade.json")
     }
 
+    // MARK: - ECG upgrade path
+
+    /// A user who onboarded before ECG shipped: rows + stored signature for
+    /// every type except ECG. ECG lands enabled by default, and the grown read
+    /// set re-prompts exactly once with the ECG type in the sheet.
+    @MainActor
+    func testElectrocardiogramIsAutoEnabledAndRePromptedOnceOnUpgrade() async throws {
+        let appState = AppState(database: appDB)
+        let dao = DataTypeConfigDAO(appDB)
+        let defaults = try makeCleanDefaults()
+        let ecgID = "HKDataTypeIdentifierElectrocardiogram"
+
+        for type in HealthTypeRegistry.shared.all where type.identifier != ecgID {
+            try dao.setEnabled(type.defaultEnabled, hkTypeId: type.identifier)
+        }
+        let priorSignature = HealthTypeRegistry.shared.defaultReadTypes
+            .map(\.identifier)
+            .filter { $0 != ecgID }
+            .sorted()
+            .joined(separator: ",")
+        defaults.set(priorSignature, forKey: AppState.authorizedSignatureKey)
+        XCTAssertNotEqual(priorSignature, AppState.authorizedTypesSignature(),
+                          "registering ECG must GROW the signature — that growth is what triggers the re-prompt")
+
+        var authorizeCalls = 0
+        var lastRequested: [HealthDataType] = []
+        let authorize: (_ types: [HealthDataType]) async throws -> Void = { types in
+            authorizeCalls += 1
+            lastRequested = types
+        }
+
+        await appState.reconcileRegistry(registry: .shared, defaults: defaults, authorize: authorize)
+
+        XCTAssertTrue(try XCTUnwrap(dao.find(hkTypeId: ecgID), "no config row written for ECG").enabled,
+                      "ECG must be enabled by default after upgrade")
+        XCTAssertEqual(authorizeCalls, 1, "the grown read set must re-prompt exactly once")
+        XCTAssertTrue(lastRequested.contains { $0.identifier == ecgID }, "authorization request must include ECG")
+
+        // A second launch does not re-prompt.
+        await appState.reconcileRegistry(registry: .shared, defaults: defaults, authorize: authorize)
+        XCTAssertEqual(authorizeCalls, 1, "the persisted signature must suppress a second prompt")
+    }
+
     // MARK: - Helpers
 
     /// A private, empty `UserDefaults` suite so tests never read or mutate the
