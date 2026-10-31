@@ -41,7 +41,7 @@ final class OnboardingViewModel {
     var isTesting = false
 
     // Data type selection — every type enabled by default except sensitive ones
-    // (cycle tracking), which the user must turn on deliberately.
+    // (cycle tracking, medications), which the user must turn on deliberately.
     var enabledTypeIDs: Set<String> = Set(HealthTypeRegistry.shared.all.filter(\.defaultEnabled).map(\.identifier))
 
     // Optional: import existing history after setup. OFF by default — the
@@ -123,10 +123,38 @@ final class OnboardingViewModel {
         }
         do {
             try await authorizer.request(for: enabledTypes)
+            // Medications picked in step 2 need their own sheet: the normal
+            // request cannot include them (`HealthDataType.authorizationTypes`).
+            if enabledTypes.contains(where: { $0.stream == .medicationDose }) {
+                try await authorizer.requestMedicationAccess()
+            }
             hkAuthCompleted = true
         } catch {
             hkAuthError = error.localizedDescription
             hkAuthCompleted = true
+        }
+    }
+
+    /// Whether this step offers "Choose Medications to Share…" (the
+    /// Medications API is iOS 26+).
+    var canChooseMedications: Bool {
+        HealthTypeRegistry.shared.medicationDose?.isAvailableOnThisOS == true
+    }
+
+    var medicationsEnabled: Bool {
+        HealthTypeRegistry.shared.medicationDose.map { enabledTypeIDs.contains($0.identifier) } ?? false
+    }
+
+    /// Shows the per-medication sheet, then turns Medications on (saved with the
+    /// rest of the picks by `finishOnboarding`). iOS does not say which
+    /// medications were picked; doses arrive only for those.
+    func chooseMedicationsToShare() async {
+        guard let medication = HealthTypeRegistry.shared.medicationDose else { return }
+        do {
+            try await authorizer.requestMedicationAccess()
+            enabledTypeIDs.insert(medication.identifier)
+        } catch {
+            hkAuthError = error.localizedDescription
         }
     }
 

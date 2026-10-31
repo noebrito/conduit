@@ -19,6 +19,13 @@ enum HealthStream: String, Codable, CaseIterable, Sendable {
     /// Never the waveform — voltages need a separate `HKElectrocardiogramQuery`
     /// that Conduit does not run.
     case electrocardiogram
+    /// One `HKMedicationDoseEvent` (iOS 26+): a logged dose or a reminder slot,
+    /// with the medication's name and general form joined on-device from
+    /// `HKUserAnnotatedMedication`. Read access is per medication, granted in a
+    /// system sheet the user opens deliberately
+    /// (`HealthKitAuthorizer.requestMedicationAccess`), never through the
+    /// normal permission request.
+    case medicationDose
 }
 
 /// UI grouping for the Data Types picker.
@@ -31,6 +38,7 @@ enum HealthCategory: String, Codable, CaseIterable, Sendable {
     case workouts = "Workouts"
     case nutrition = "Nutrition"
     case cycleTracking = "Cycle Tracking"
+    case medications = "Medications"
 
     /// Whether this group holds sensitive types (see `HealthDataType.isSensitive`).
     /// Drives the consent footer and the demo-receiver notice in the pickers.
@@ -55,7 +63,7 @@ struct HealthDataType: Identifiable, Hashable, Sendable {
     let defaultUnit: String?
     /// Value shape / destination stream.
     let stream: HealthStream
-    /// Reproductive-health (and future medical) types that need explicit consent:
+    /// Reproductive-health and medication types that need explicit consent:
     /// - **default off** — onboarding and the upgrade reconcile never turn one on
     ///   (`defaultEnabled`);
     /// - **lazy authorization** — never part of the launch-time re-prompt
@@ -90,8 +98,21 @@ struct HealthDataType: Identifiable, Hashable, Sendable {
             return HKSeriesType.workoutRoute()
         case .electrocardiogram:
             return HKObjectType.electrocardiogramType()
+        case .medicationDose:
+            // The one `#available` guard in the registry. The identifier-keyed
+            // nil-skip idiom (see the effort-score note below) works only for
+            // types resolved from a string; the dose-event type has no
+            // identifier initializer, only an iOS 26 factory method, which
+            // cannot be referenced unguarded at the iOS 17 deployment target.
+            if #available(iOS 26.0, *) {
+                return HKObjectType.medicationDoseEventType()
+            }
+            return nil
         }
     }
+
+    /// Whether this type can be read on the running OS at all.
+    var isAvailableOnThisOS: Bool { sampleType != nil }
 
     /// The `HKObjectType`s to request **read authorization** for.
     ///
@@ -114,6 +135,28 @@ struct HealthDataType: Identifiable, Hashable, Sendable {
             // entitlement — the existing HealthKit entitlement covers it. Never
             // add the route type to a `toShare` set: Conduit never writes HealthKit.
             return sampleType.map { [$0 as HKObjectType] } ?? []
+        case .medicationDose:
+            // NOTHING, ever. Putting the dose-event type in
+            // `requestAuthorization(toShare:read:)` raises an uncaught
+            // NSException ("Authorization to read the following types is
+            // disallowed") that kills the whole permission flow, like a
+            // correlation type does. Its `requiresPerObjectAuthorization()` is
+            // false, so only this explicit exclusion keeps it out. Access is
+            // granted per medication through `requestMedicationAccess`.
+            return []
+        }
+    }
+
+    /// The `HKObjectType`s to ask iOS 27's limited-history probe about
+    /// (`HistoryAccessProbe`). The authorization types, except for medication
+    /// doses: they authorize through a separate sheet, but the probe accepts
+    /// the dose-event sample type, so leaving it out would hide a limited grant.
+    var probeTypes: [HKObjectType] {
+        switch stream {
+        case .medicationDose:
+            return sampleType.map { [$0 as HKObjectType] } ?? []
+        case .quantity, .category, .workout, .correlation, .route, .electrocardiogram:
+            return authorizationTypes
         }
     }
 
@@ -153,7 +196,8 @@ struct HealthTypeRegistry: Sendable {
             HealthDataType.heartEvents +
             HealthDataType.workouts +
             HealthDataType.nutrition +
-            HealthDataType.cycleTracking
+            HealthDataType.cycleTracking +
+            HealthDataType.medications
     }
 
     /// Look up a type by its HK identifier string.
@@ -172,6 +216,11 @@ struct HealthTypeRegistry: Sendable {
     /// identifier isn't available on the current OS are skipped.
     var readTypes: Set<HKObjectType> {
         Set(all.flatMap { $0.authorizationTypes })
+    }
+
+    /// The medication dose-event entry, which authorizes through its own sheet.
+    var medicationDose: HealthDataType? {
+        all.first { $0.stream == .medicationDose }
     }
 
     /// `readTypes` minus sensitive types, which are authorized lazily when the
@@ -389,4 +438,15 @@ extension HealthDataType {
         .persistentIntermenstrualBleeding, .prolongedMenstrualPeriods,
         .cervicalMucusQuality, .ovulationTestResult, .basalBodyTemperature,
     ]
+
+    // Medications → conduit-medication-dose. iOS 26+, read-only. HealthKit
+    // exports no identifier constant usable at the iOS 17 target; this literal is
+    // `medicationDoseEventType().identifier` (pinned by `MedicationRegistryTests`).
+    // Sensitive: default off, never in the normal permission request or the
+    // launch-time signature (`authorizationTypes` is empty), never sent to the
+    // public demo receiver. Turning it on means picking medications in the
+    // per-medication system sheet; doses arrive only for the ones picked there.
+    static let medicationDose = HealthDataType(identifier: "HKMedicationDoseEventTypeIdentifierMedicationDoseEvent", displayName: "Medications", category: .medications, defaultUnit: nil, stream: .medicationDose, isSensitive: true)
+
+    static let medications: [HealthDataType] = [.medicationDose]
 }

@@ -62,9 +62,10 @@ struct HealthKitHistoryAccessProbe: HistoryAccessProbing {
         // from the result whichever types have no limited-access date. Omission
         // is the "not limited" answer, not a rejection — so singling any type out
         // would just hide a real floor and hand it a green checkmark over a
-        // truncated history.
-        let probeable = types.filter { !$0.authorizationTypes.isEmpty }
-        let objectTypes = Set(probeable.flatMap(\.authorizationTypes))
+        // truncated history. Medication doses are probed by their sample type
+        // (`probeTypes`), though they authorize through a separate sheet.
+        let probeable = types.filter { !$0.probeTypes.isEmpty }
+        let objectTypes = Set(probeable.flatMap(\.probeTypes))
         guard !objectTypes.isEmpty else { return HistoryAccessFloors() }
 
         do {
@@ -92,7 +93,7 @@ struct HealthKitHistoryAccessProbe: HistoryAccessProbing {
     static func floors(for types: [HealthDataType], from raw: [HKObjectType: Date]) -> [String: Date] {
         var result: [String: Date] = [:]
         for type in types {
-            let constituentFloors = type.authorizationTypes.compactMap { raw[$0] }
+            let constituentFloors = type.probeTypes.compactMap { raw[$0] }
             guard let latest = constituentFloors.max() else { continue }
             result[type.identifier] = latest
         }

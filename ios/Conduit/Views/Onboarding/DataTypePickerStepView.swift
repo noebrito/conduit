@@ -42,8 +42,8 @@ struct DataTypePickerStepView: View {
                     } header: {
                         Text(category.rawValue)
                     } footer: {
-                        if category.isSensitive {
-                            Text(DemoReceiver.sensitiveConsentFooter)
+                        if let footer = DemoReceiver.consentFooter(for: category) {
+                            Text(footer)
                         }
                     }
                 }

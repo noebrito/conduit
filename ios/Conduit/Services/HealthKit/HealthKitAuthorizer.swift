@@ -11,6 +11,8 @@ struct HealthKitAuthorizer {
     enum AuthorizationError: Error {
         /// HealthKit isn't available on this device (e.g. iPad without Health).
         case healthDataUnavailable
+        /// The Medications API needs iOS 26 or later.
+        case medicationsUnavailable
     }
 
     private let store: HKHealthStore
@@ -45,5 +47,24 @@ struct HealthKitAuthorizer {
     /// Convenience: request authorization for every registered v1 type.
     func requestAll(registry: HealthTypeRegistry = .shared) async throws {
         try await request(for: registry.all)
+    }
+
+    /// Present the system sheet listing the medications in the Health app, so
+    /// the user picks which ones Conduit may read. A grant covers the
+    /// medication and its dose events; there is no separate dose-event request.
+    ///
+    /// Per-object authorization prompts on **every** call, even when the user
+    /// already chose, so this runs only from an explicit tap or toggle — never
+    /// from `request(for:)` or the launch-time `reconcileRegistry`. As with
+    /// `request(for:)`, returning normally means only that the sheet was
+    /// dismissed: iOS does not say which medications were shared.
+    func requestMedicationAccess() async throws {
+        guard isHealthDataAvailable else {
+            throw AuthorizationError.healthDataUnavailable
+        }
+        guard #available(iOS 26.0, *) else {
+            throw AuthorizationError.medicationsUnavailable
+        }
+        try await store.requestPerObjectReadAuthorization(for: HKObjectType.userAnnotatedMedicationType(), predicate: nil)
     }
 }

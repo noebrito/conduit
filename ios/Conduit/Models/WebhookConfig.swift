@@ -65,7 +65,7 @@ extension WebhookConfig {
 /// The public demo receiver (`https://health.noebrito.dev/webhook-test`) renders
 /// everything it receives on a world-readable page for 30 minutes
 /// (`docs/webhook/README.md`). Sensitive types (`HealthDataType.isSensitive`,
-/// i.e. cycle tracking) are never sent there: the app neither stages them while
+/// i.e. cycle tracking and medications) are never sent there: the app neither stages them while
 /// it is the configured destination (`SyncEngine`'s read paths) nor drains
 /// already-staged rows to it (`Batcher.buildBatch`'s exclusion), so rows staged
 /// for the user's own receiver stay queued until the destination changes. The
@@ -95,10 +95,20 @@ enum DemoReceiver {
         return Set(registry.all.filter(\.isSensitive).map(\.identifier))
     }
 
-    /// Consent copy for sensitive picker groups (Settings and onboarding).
-    static let sensitiveConsentFooter = "Cycle tracking entries describe your reproductive health. They stay off until you turn them on, iOS asks for permission when you do, and Conduit sends them only to the webhook you configured, never to the public demo receiver."
+    /// Consent copy for a sensitive picker group (Settings and onboarding), or
+    /// `nil` for a group that is not sensitive.
+    static func consentFooter(for category: HealthCategory) -> String? {
+        switch category {
+        case .cycleTracking:
+            return "Cycle tracking entries describe your reproductive health. They stay off until you turn them on, iOS asks for permission when you do, and Conduit sends them only to the webhook you configured, never to the public demo receiver."
+        case .medications:
+            return "Medication doses describe your health. They stay off until you choose medications to share, and Conduit reads doses only for the medications you pick in that iOS sheet. Conduit sends each dose's medication name and form, when it was scheduled, and whether you took or skipped it, only to the webhook you configured, never to the public demo receiver."
+        case .activityFitness, .bodyMeasurements, .vitals, .sleepMindfulness, .heartEvents, .workouts, .nutrition:
+            return nil
+        }
+    }
 
     /// In-app copy shown wherever sensitive types are toggled or saved while the
     /// demo receiver is the destination.
-    static let refusalMessage = "Cycle Tracking isn't sent to the public demo receiver, because it shows everything it receives on a public page. Point Conduit at a webhook you control to send it."
+    static let refusalMessage = "Cycle Tracking and Medications aren't sent to the public demo receiver, because it shows everything it receives on a public page. Point Conduit at a webhook you control to send them."
 }

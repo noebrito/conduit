@@ -308,9 +308,13 @@ struct DataTypesCategoryView: View {
                     .accessibilityHint(isEnabled ? "Enabled. Tap to disable." : "Disabled. Tap to enable.")
                 }
             } footer: {
-                if category.isSensitive {
-                    Text(DemoReceiver.sensitiveConsentFooter)
+                if let footer = DemoReceiver.consentFooter(for: category) {
+                    Text(footer)
                 }
+            }
+
+            if category == .medications, let medication = HealthTypeRegistry.shared.medicationDose {
+                MedicationsPickerSection(medication: medication, viewModel: viewModel)
             }
 
             if category.isSensitive && viewModel.sensitiveTypesBlockedByDemoReceiver {
@@ -320,6 +324,35 @@ struct DataTypesCategoryView: View {
             }
         }
         .navigationTitle(category.rawValue)
+    }
+}
+
+/// The "Choose Medications to Share…" button. Medications have their own
+/// per-medication sheet instead of the normal permission request (see
+/// `HealthKitAuthorizer.requestMedicationAccess`), and it is the only way to add
+/// or remove a shared medication from inside Conduit.
+private struct MedicationsPickerSection: View {
+    let medication: HealthDataType
+    @Bindable var viewModel: SettingsViewModel
+
+    var body: some View {
+        Section {
+            if medication.isAvailableOnThisOS {
+                Button {
+                    Task { await viewModel.chooseMedicationsToShare() }
+                } label: {
+                    Label("Choose Medications to Share…", systemImage: "pills")
+                }
+                .accessibilityHint("Opens the iOS sheet where you pick which medications Conduit may read, and turns Medications on")
+            } else {
+                Label("Medications need iOS 26 or later.", systemImage: "info.circle")
+                    .foregroundStyle(.secondary)
+            }
+        } footer: {
+            if medication.isAvailableOnThisOS {
+                Text("iOS lists the medications in your Health app. Tap again any time to add or remove one; a medication you add to Health later asks there whether to share it with Conduit.")
+            }
+        }
     }
 }
 
@@ -603,9 +636,10 @@ private struct ImportHistoryView: View {
         // Honest about what leaving the app does: a clean pause that resumes
         // itself — NOT "it keeps importing in the background".
         let keepOpen = "You can leave the app: the import pauses at a clean point and picks itself back up when you return, or in background time iOS grants it."
-        // An explicit bulk upload of reproductive-health history is named, not
-        // implied by "the data types you've enabled".
-        let sensitive = viewModel.hasSensitiveTypesEnabled ? " This includes your Cycle Tracking history." : ""
+        // An explicit bulk upload of sensitive history is named, not implied by
+        // "the data types you've enabled".
+        let sensitiveNames = viewModel.enabledSensitiveCategories.map(\.rawValue)
+        let sensitive = sensitiveNames.isEmpty ? "" : " This includes your \(sensitiveNames.joined(separator: " and ")) history."
         if viewModel.canResumeImport {
             return "This discards the paused import's progress and re-reads \(viewModel.importRange.label) from the most recent data.\(sensitive) \(keepOpen)"
         }

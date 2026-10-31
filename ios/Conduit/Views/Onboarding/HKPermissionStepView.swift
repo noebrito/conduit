@@ -73,6 +73,25 @@ struct HKPermissionStepView: View {
                     .accessibilityLabel("Finish setup and start syncing")
                 }
 
+                if viewModel.canChooseMedications {
+                    Button(action: {
+                        Task { await viewModel.chooseMedicationsToShare() }
+                    }) {
+                        Label("Choose Medications to Share…", systemImage: "pills")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .accessibilityHint("Optional. Opens the iOS sheet where you pick which medications Conduit may read")
+
+                    Text(viewModel.medicationsEnabled
+                         ? "Medications are on. Conduit sends doses only for the medications you picked."
+                         : "Optional. Medications stay off unless you choose some to share.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
                 Text("iOS controls which types are actually readable. You can review and change permissions in the Health app at any time.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

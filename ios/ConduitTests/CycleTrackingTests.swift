@@ -61,10 +61,10 @@ final class CycleTrackingRegistryTests: XCTestCase {
         XCTAssertTrue(HealthCategory.cycleTracking.isSensitive)
     }
 
-    func testOnlyCycleTrackingIsSensitive() {
+    func testOnlyCycleTrackingAndMedicationsAreSensitive() {
         let sensitive = Set(registry.all.filter(\.isSensitive).map(\.identifier))
-        XCTAssertEqual(sensitive, CycleTrackingReadings.identifiers)
-        for category in HealthCategory.allCases where category != .cycleTracking {
+        XCTAssertEqual(sensitive, CycleTrackingReadings.identifiers.union([MedicationReadings.identifier]))
+        for category in HealthCategory.allCases where category != .cycleTracking && category != .medications {
             XCTAssertFalse(category.isSensitive, category.rawValue)
         }
     }
@@ -340,7 +340,7 @@ final class DemoReceiverTests: XCTestCase {
 
     func testBlockedTypesAreTheSensitiveSetForTheDemoReceiverOnly() {
         XCTAssertEqual(DemoReceiver.blockedTypeIDs(forURL: "https://health.noebrito.dev/webhook-test"),
-                       CycleTrackingReadings.identifiers)
+                       CycleTrackingReadings.identifiers.union([MedicationReadings.identifier]))
         XCTAssertTrue(DemoReceiver.blockedTypeIDs(forURL: "https://example.com/hook").isEmpty)
     }
 

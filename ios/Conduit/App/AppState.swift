@@ -566,7 +566,7 @@ final class AppState {
     /// 1. **Auto-enable newly-registered types.** Every registry type with no
     ///    `data_type_config` row yet is inserted with its `defaultEnabled` state:
     ///    **enabled** for ordinary types, matching fresh-install onboarding, and
-    ///    **disabled** for sensitive ones (cycle tracking), which an update must
+    ///    **disabled** for sensitive ones (cycle tracking, medications), which an update must
     ///    never silently turn on. Existing rows (enabled *or* disabled) are left
     ///    untouched, so a user's deliberate choices are preserved.
     /// 2. **Re-request HealthKit authorization when the authorized set grew.**

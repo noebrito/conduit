@@ -149,7 +149,7 @@ struct AnchoredReader {
         }
         let predicate = Self.importWindowPredicate(since: since, before: before)
         let sort = [NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)]
-        return try await withCheckedThrowingContinuation { continuation in
+        let samples: [HKSample] = try await withCheckedThrowingContinuation { continuation in
             let query = HKSampleQuery(
                 sampleType: sampleType,
                 predicate: predicate,
@@ -160,15 +160,16 @@ struct AnchoredReader {
                     continuation.resume(throwing: error)
                     return
                 }
-                let mapped = (samples ?? []).compactMap {
-                    Self.makeSample(from: $0, type: type, includeHeartRateStatistics: includeHeartRateStatistics)
-                }
-                // Import is a point-in-time snapshot of current Health — nothing
-                // to delete.
-                continuation.resume(returning: Result(samples: mapped, deletedUuids: [], newAnchor: nil))
+                continuation.resume(returning: samples ?? [])
             }
             store.execute(query)
         }
+        let medications = try await medicationDirectory(for: type, samples: samples)
+        let mapped = samples.compactMap {
+            Self.makeSample(from: $0, type: type, includeHeartRateStatistics: includeHeartRateStatistics, medications: medications)
+        }
+        // Import is a point-in-time snapshot of current Health — nothing to delete.
+        return Result(samples: mapped, deletedUuids: [], newAnchor: nil)
     }
 
     /// Build the date-floor predicate for a **forward** read. `nil` start means
@@ -199,7 +200,7 @@ struct AnchoredReader {
         limit: Int,
         includeHeartRateStatistics: Bool
     ) async throws -> Result {
-        try await withCheckedThrowingContinuation { continuation in
+        let (samples, deletedUuids, newAnchor): ([HKSample], [String], HKQueryAnchor?) = try await withCheckedThrowingContinuation { continuation in
             // One-shot anchored read: a results handler with no update handler
             // fires exactly once with the batch newer than `anchor`. The third
             // handler param is `deletedObjects` — samples HealthKit removed since
@@ -216,14 +217,32 @@ struct AnchoredReader {
                     continuation.resume(throwing: error)
                     return
                 }
-                let mapped = (samples ?? []).compactMap {
-                    Self.makeSample(from: $0, type: type, includeHeartRateStatistics: includeHeartRateStatistics)
-                }
                 let deletedUuids = (deletedObjects ?? []).map { $0.uuid.uuidString }
-                continuation.resume(returning: Result(samples: mapped, deletedUuids: deletedUuids, newAnchor: newAnchor))
+                continuation.resume(returning: (samples ?? [], deletedUuids, newAnchor))
             }
             store.execute(query)
         }
+        let medications = try await medicationDirectory(for: type, samples: samples)
+        let mapped = samples.compactMap {
+            Self.makeSample(from: $0, type: type, includeHeartRateStatistics: includeHeartRateStatistics, medications: medications)
+        }
+        return Result(samples: mapped, deletedUuids: deletedUuids, newAnchor: newAnchor)
+    }
+
+    /// The name join for a medication dose read: the medications the user
+    /// shared, fetched once per read and only when the page has dose events.
+    /// Fetched AFTER the dose query, so a medication shared mid-read is already
+    /// in the list for its doses. A failed fetch fails the whole read, so the
+    /// anchor stays put and the page is retried rather than sent without names.
+    private func medicationDirectory(for type: HealthDataType, samples: [HKSample]) async throws -> MedicationDirectory {
+        guard type.stream == .medicationDose, !samples.isEmpty else { return MedicationDirectory() }
+        guard #available(iOS 26.0, *) else { return MedicationDirectory() }
+        // No predicate: archived medications still resolve, which matters for
+        // imports of past doses.
+        let medications = try await HKUserAnnotatedMedicationQueryDescriptor().result(for: store)
+        return MedicationDirectory(medications.map {
+            (concept: $0.medication.identifier, identity: Self.medicationIdentity($0.medication))
+        })
     }
 
     // MARK: - Anchor (de)serialization
@@ -244,15 +263,19 @@ struct AnchoredReader {
     /// Convert any supported `HKSample` into wire format, dispatching on the
     /// type's stream (the value shapes in `docs/webhook/PAYLOADS.md`).
     ///
-    /// - Parameter includeHeartRateStatistics: whether a `.workout` sample may
-    ///   carry `avg/max/min_heart_rate_bpm`. The caller resolves this from the
-    ///   user's own Heart Rate data-type toggle (see `SyncEngine`), so turning
-    ///   Heart Rate off suppresses these fields even when Workouts stays on.
-    ///   Ignored for every other stream.
+    /// - Parameters:
+    ///   - includeHeartRateStatistics: whether a `.workout` sample may carry
+    ///     `avg/max/min_heart_rate_bpm`. The caller resolves this from the
+    ///     user's own Heart Rate data-type toggle (see `SyncEngine`), so turning
+    ///     Heart Rate off suppresses these fields even when Workouts stays on.
+    ///     Ignored for every other stream.
+    ///   - medications: the shared medications a `.medicationDose` sample's
+    ///     name and form are looked up in. Ignored for every other stream.
     static func makeSample(
         from hkSample: HKSample,
         type: HealthDataType,
-        includeHeartRateStatistics: Bool = true
+        includeHeartRateStatistics: Bool = true,
+        medications: MedicationDirectory = MedicationDirectory()
     ) -> Conduit_V1_Sample? {
         var sample = Conduit_V1_Sample()
         sample.uuid = hkSample.uuid.uuidString
@@ -340,6 +363,20 @@ struct AnchoredReader {
                 samplingFrequency: electrocardiogram.samplingFrequency,
                 numberOfVoltageMeasurements: electrocardiogram.numberOfVoltageMeasurements,
                 metadata: electrocardiogram.metadata
+            )
+        case .medicationDose:
+            guard #available(iOS 26.0, *), let doseEvent = hkSample as? HKMedicationDoseEvent else { return nil }
+            // HKMedicationDoseEvent has no public initializer, so a unit test can
+            // never hand one to this case. Only the property reads live here; the
+            // mapping is the pure makeMedicationDoseValue core below.
+            sample.medicationDose = Self.makeMedicationDoseValue(
+                medication: medications.identity(for: doseEvent.medicationConceptIdentifier),
+                scheduleType: doseEvent.scheduleType,
+                logStatus: doseEvent.logStatus,
+                scheduledDate: doseEvent.scheduledDate,
+                scheduledDoseQuantity: doseEvent.scheduledDoseQuantity,
+                doseQuantity: doseEvent.doseQuantity,
+                unit: doseEvent.unit
             )
         }
 
@@ -468,6 +505,111 @@ struct AnchoredReader {
         case .none: return "none"
         case .present: return "present"
         @unknown default: return "symptomsStatus\(status.rawValue)"
+        }
+    }
+
+    // MARK: - Medication doses (pure)
+
+    /// The `HKMedicationDoseEvent`-free core of `.medicationDose` mapping (that
+    /// class has no public initializer, so this is the testable part). Every log
+    /// status is sent, including the `notInteracted`/`notificationNotSent`
+    /// placeholders HealthKit writes for unanswered reminder slots.
+    ///
+    /// - Parameters:
+    ///   - medication: the joined name and form, or `nil` when the dose's
+    ///     medication is not in the shared list (both fields stay empty rather
+    ///     than guessed). Never the nickname or clinical codes.
+    ///   - scheduledDate, scheduledDoseQuantity: set only when HealthKit has
+    ///     them (absent for an as-needed dose).
+    ///   - doseQuantity: set only when HealthKit has one. `0` is a real answer
+    ///     (a skipped dose), so absent is never collapsed into it.
+    @available(iOS 26.0, *)
+    static func makeMedicationDoseValue(
+        medication: MedicationIdentity?,
+        scheduleType: HKMedicationDoseEvent.ScheduleType,
+        logStatus: HKMedicationDoseEvent.LogStatus,
+        scheduledDate: Date?,
+        scheduledDoseQuantity: Double?,
+        doseQuantity: Double?,
+        unit: HKUnit
+    ) -> Conduit_V1_MedicationDoseValue {
+        var value = Conduit_V1_MedicationDoseValue()
+        value.medicationName = medication?.name ?? ""
+        value.generalForm = medication?.generalForm ?? ""
+        value.scheduleType = medicationScheduleTypeName(scheduleType)
+        value.logStatus = medicationLogStatusName(logStatus)
+        if let scheduledDate {
+            value.scheduledUnixMs = unixMillis(scheduledDate)
+        }
+        if let scheduledDoseQuantity {
+            value.scheduledDoseQuantity = scheduledDoseQuantity
+        }
+        if let doseQuantity {
+            value.doseQuantity = doseQuantity
+        }
+        value.unit = unit.unitString
+        return value
+    }
+
+    /// The name and form a dose event is sent with, from the medication the
+    /// user picked in the Health app. Deliberately not the nickname, and not
+    /// `relatedCodings` (RxNorm and similar).
+    @available(iOS 26.0, *)
+    static func medicationIdentity(_ concept: HKMedicationConcept) -> MedicationIdentity {
+        MedicationIdentity(name: concept.displayText, generalForm: medicationGeneralFormName(concept.generalForm))
+    }
+
+    /// Stable name for a dose log status, with the same numeric fallback
+    /// `workoutEventTypeName` uses for a case a future OS adds.
+    @available(iOS 26.0, *)
+    static func medicationLogStatusName(_ status: HKMedicationDoseEvent.LogStatus) -> String {
+        switch status {
+        case .notInteracted: return "notInteracted"
+        case .notificationNotSent: return "notificationNotSent"
+        case .snoozed: return "snoozed"
+        case .taken: return "taken"
+        case .skipped: return "skipped"
+        case .notLogged: return "notLogged"
+        @unknown default: return "logStatus\(status.rawValue)"
+        }
+    }
+
+    /// Stable name for a dose schedule type, numeric fallback as above.
+    @available(iOS 26.0, *)
+    static func medicationScheduleTypeName(_ scheduleType: HKMedicationDoseEvent.ScheduleType) -> String {
+        switch scheduleType {
+        case .asNeeded: return "asNeeded"
+        case .schedule: return "schedule"
+        @unknown default: return "scheduleType\(scheduleType.rawValue)"
+        }
+    }
+
+    /// Stable name for a medication's general form. Spelled out rather than
+    /// passing `rawValue` through, so the wire value does not depend on the
+    /// SDK's private constant strings; a form a future OS adds falls back to
+    /// its raw value.
+    @available(iOS 26.0, *)
+    static func medicationGeneralFormName(_ form: HKMedicationGeneralForm) -> String {
+        switch form {
+        case .capsule: return "capsule"
+        case .cream: return "cream"
+        case .device: return "device"
+        case .drops: return "drops"
+        case .foam: return "foam"
+        case .gel: return "gel"
+        case .inhaler: return "inhaler"
+        case .injection: return "injection"
+        case .liquid: return "liquid"
+        case .lotion: return "lotion"
+        case .ointment: return "ointment"
+        case .patch: return "patch"
+        case .powder: return "powder"
+        case .spray: return "spray"
+        case .suppository: return "suppository"
+        case .tablet: return "tablet"
+        case .topical: return "topical"
+        case .unknown: return "unknown"
+        default: return form.rawValue
         }
     }
 
@@ -664,5 +806,28 @@ struct AnchoredReader {
         case .dance: return "dance"
         default: return "activityType\(activity.rawValue)"
         }
+    }
+}
+
+/// The medication fields a dose event is sent with (`MedicationDoseValue`).
+struct MedicationIdentity: Equatable, Sendable {
+    let name: String
+    let generalForm: String
+}
+
+/// The medications the user shared, for joining a dose event's
+/// `medicationConceptIdentifier` to a name and form. Concepts are matched with
+/// `isEqual` (HealthKit's documented comparison for concept identifiers), not
+/// by hashing; a user shares a handful of medications, so the scan is cheap.
+/// Keys are `NSObject` so the lookup compiles and is testable below iOS 26.
+struct MedicationDirectory {
+    private let entries: [(concept: NSObject, identity: MedicationIdentity)]
+
+    init(_ entries: [(concept: NSObject, identity: MedicationIdentity)] = []) {
+        self.entries = entries
+    }
+
+    func identity(for concept: NSObject) -> MedicationIdentity? {
+        entries.first { $0.concept.isEqual(concept) }?.identity
     }
 }
