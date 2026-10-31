@@ -358,6 +358,28 @@ final class MedicationSettingsTests: XCTestCase {
         XCTAssertEqual(viewModel.canChooseMedications, MedicationReadings.isAvailableOnThisOS)
     }
 
+    /// Medications turned on with the step-2 toggle get the sheet from Allow
+    /// Health Access; once the button already showed it, Allow does not show
+    /// it a second time.
+    @MainActor
+    func testOnboardingAllowShowsTheMedicationSheetOnlyIfNotAlreadyChosen() async {
+        var sheets = 0
+        let toggled = OnboardingViewModel(appState: AppState(database: appDB), requestMedicationAccess: { sheets += 1 })
+        toggled.enabledTypeIDs = [medicationID]
+        await toggled.requestHealthKitPermission()
+        XCTAssertEqual(sheets, 1, "toggle plus Allow shows the sheet")
+
+        sheets = 0
+        let chosen = OnboardingViewModel(appState: AppState(database: appDB), requestMedicationAccess: { sheets += 1 })
+        chosen.enabledTypeIDs = []
+        await chosen.chooseMedicationsToShare()
+        XCTAssertTrue(chosen.medicationsEnabled)
+        await chosen.requestHealthKitPermission()
+        XCTAssertEqual(sheets, 1, "Allow after Choose does not show the sheet again")
+        XCTAssertNil(chosen.hkAuthError)
+        XCTAssertTrue(chosen.hkAuthCompleted)
+    }
+
     /// No doses after 24h usually means no medication was picked (an unshared
     /// read is empty, not an error), so the hint points at the sheet.
     @MainActor

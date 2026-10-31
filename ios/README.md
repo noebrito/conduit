@@ -164,8 +164,10 @@ request (putting the dose-event type there raises an exception that kills the
 whole permission flow). So Medications turn on only through that sheet:
 **Choose Medications to Share…** in onboarding's permission step and in Settings
 → Data Types → Medications (which also turns the toggle on), or the toggle plus
-Save Changes, which shows the sheet first. The sheet appears on every tap, so it
-is never shown automatically; tap again to add or remove a medication.
+Save Changes (in onboarding, the toggle plus Allow Health Access, unless the
+button already showed it), which shows the sheet first. The sheet appears on
+every tap, so it is never shown automatically; tap again to add or remove a
+medication.
 
 Each dose event is one sample in its own `medicationDose` shape (see
 [`docs/webhook/PAYLOADS.md`](../docs/webhook/PAYLOADS.md#medicationdose--one-medication-dose-event)).

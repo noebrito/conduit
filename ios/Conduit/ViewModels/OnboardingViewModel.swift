@@ -55,10 +55,19 @@ final class OnboardingViewModel {
     var hkAuthError: String? = nil
     var hkAuthCompleted = false
 
+    private let requestMedicationAccess: @MainActor () async throws -> Void
+    private var medicationsChosen = false
+
     private let appState: AppState
 
-    init(appState: AppState) {
+    /// - Parameter requestMedicationAccess: presents the per-medication sheet.
+    ///   Defaults to `HealthKitAuthorizer.requestMedicationAccess`; injectable so
+    ///   tests never touch a live `HKHealthStore`.
+    init(appState: AppState, requestMedicationAccess: (@MainActor () async throws -> Void)? = nil) {
         self.appState = appState
+        self.requestMedicationAccess = requestMedicationAccess ?? { [authorizer] in
+            try await authorizer.requestMedicationAccess()
+        }
         restorePartialState()
     }
 
@@ -125,8 +134,10 @@ final class OnboardingViewModel {
             try await authorizer.request(for: enabledTypes)
             // Medications picked in step 2 need their own sheet: the normal
             // request cannot include them (`HealthDataType.authorizationTypes`).
-            if enabledTypes.contains(where: { $0.stream == .medicationDose }) {
-                try await authorizer.requestMedicationAccess()
+            // It prompts on every call, so not again once "Choose Medications
+            // to Share…" already showed it.
+            if !medicationsChosen, enabledTypes.contains(where: { $0.stream == .medicationDose }) {
+                try await requestMedicationAccess()
             }
             hkAuthCompleted = true
         } catch {
@@ -151,7 +162,8 @@ final class OnboardingViewModel {
     func chooseMedicationsToShare() async {
         guard let medication = HealthTypeRegistry.shared.medicationDose else { return }
         do {
-            try await authorizer.requestMedicationAccess()
+            try await requestMedicationAccess()
+            medicationsChosen = true
             enabledTypeIDs.insert(medication.identifier)
         } catch {
             hkAuthError = error.localizedDescription
