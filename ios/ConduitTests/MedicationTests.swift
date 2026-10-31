@@ -132,7 +132,7 @@ final class MedicationRegistryTests: XCTestCase {
             XCTAssertTrue(footer.contains(detail), detail)
         }
         XCTAssertFalse(footer.contains("nickname"))
-        XCTAssertTrue(footer.hasSuffix("never to the public demo receiver."))
+        XCTAssertTrue(footer.hasSuffix("only to the webhook you configured."))
     }
 }
 
