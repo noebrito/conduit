@@ -71,11 +71,18 @@ final class BackgroundTaskConfigTests: XCTestCase {
 /// `Conduit.app`, so `Bundle.main` is that shipped bundle (same mechanism
 /// `BackgroundTaskConfigTests` above relies on).
 ///
+/// The same pair of rejections recurred for build 141 (the tip jar build):
+/// 1.9 was already live, so `ITMS-90186` closed the '1.9' train and
+/// `ITMS-90062` refused `CFBundleShortVersionString [1.9]`. The bound tracks the
+/// latest approved version, so it must move each time a release goes live.
+/// The comparison is numeric on purpose — App Store Connect orders 1.10 after
+/// 1.9, while a plain string comparison would put it before.
+///
 /// The bound is a lower bound, not a pin, so a later bump keeps passing.
 final class AppStoreVersionTests: XCTestCase {
 
     /// The version App Store Connect has already approved; its train is closed.
-    private static let closedTrain = "1.4"
+    private static let closedTrain = "1.9"
 
     private var shortVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
