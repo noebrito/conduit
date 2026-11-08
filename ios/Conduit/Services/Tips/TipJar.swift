@@ -25,7 +25,8 @@ enum TipPurchaseResult: Equatable {
     /// Ask to Buy or an interrupted payment; `TipTransactionObserver` finishes it if it later completes.
     case pending
     case cancelled
-    /// StoreKit could not verify the signed transaction. It is still finished.
+    /// StoreKit could not verify the signed transaction. Apple has still charged the
+    /// user and it is still finished, so it is thanked like a verified tip.
     case unverified
 }
 
@@ -102,10 +103,9 @@ final class TipJarModel {
         defer { purchasingID = nil }
         do {
             switch try await client.purchase(id: option.id) {
-            case .thanked: notice = .thanks
+            case .thanked, .unverified: notice = .thanks
             case .pending: notice = .pending
             case .cancelled: break
-            case .unverified: notice = .failed
             }
         } catch {
             notice = .failed

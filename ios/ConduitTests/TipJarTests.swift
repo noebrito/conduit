@@ -88,7 +88,7 @@ final class TipJarTests: XCTestCase {
             (.success(.thanked), .thanks),
             (.success(.pending), .pending),
             (.success(.cancelled), nil),
-            (.success(.unverified), .failed),
+            (.success(.unverified), .thanks),
             (.failure(Failure()), .failed),
         ]
         for (result, expected) in cases {
