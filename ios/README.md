@@ -38,17 +38,21 @@ ios/
 │   │   ├── Networking/  Uploader, BackgroundSession, BackoffPolicy,
 │   │   │                WebhookTester (foreground Test Connection probe)
 │   │   ├── Storage/     Database (GRDB) + DAOs, incl. DeliveryLogDAO
-│   │   └── Security/    KeychainStore (bearer token + device_id)
+│   │   ├── Security/    KeychainStore (bearer token + device_id)
+│   │   └── Tips/        TipJar (tip ordering + Support screen state),
+│   │                    StoreKitTipClient (StoreKit 2 wrapper)
 │   ├── ViewModels/      One per screen (Home, Onboarding, Settings, ActivityLog)
 │   ├── Views/
 │   │   ├── Onboarding/  Welcome → Webhook setup → Data Type picker → HK
 │   │   │                permission trigger
 │   │   ├── Home/        Status line, sample counts, Sync Now
-│   │   ├── Settings/    Webhook/Sync/Data Types/About + HK permissions detail
+│   │   ├── Settings/    Webhook/Sync/Data Types/About + HK permissions detail,
+│   │   │                Support Conduit (tip jar)
 │   │   ├── Activity/    Reverse-chrono delivery log + batch detail
 │   │   └── Shared/      MaskedTokenField, WebhookTestView
 │   ├── Assets.xcassets
-│   └── Info.plist
+│   ├── Info.plist
+│   └── Tips.storekit    Local StoreKit config (scheme Run action + tests only)
 ├── ConduitShared/       ConduitStatusSnapshot (App Group transport type,
 │                        compiled into both Conduit and ConduitWidgets)
 ├── ConduitWidgets/      Lock Screen sync-status widget extension
@@ -258,6 +262,9 @@ command line. The bundle identifier is `dev.noebrito.Conduit`.
 - `BGTaskSchedulerPermittedIdentifiers` — `dev.noebrito.Conduit.flush` (upload drain,
   `BGAppRefreshTask`) and `dev.noebrito.Conduit.import` (history-import resumption,
   `BGProcessingTask`)
+- In-App Purchase (StoreKit 2) for the optional tip jar — no entitlement key;
+  the three consumable tips are created in App Store Connect, and
+  `Conduit/Tips.storekit` stands in for them locally (see [Tips](#tips))
 
 ## Continuous integration
 
@@ -302,6 +309,37 @@ empty fixture in a real simulator window when `TEST_RUNNER_CONDUIT_EVIDENCE_DIR`
 is passed to `xcodebuild test`; point it outside the repository. This is a rendering
 check; physical-device StoreKit presentation and end-to-end link opening remain
 unverified.
+
+## Tips
+
+Settings → About → **Support Conduit** is the one place Conduit asks for money:
+three optional one-time consumable tips (`dev.noebrito.Conduit.tip.small`,
+`.tip.nice`, `.tip.generous`; Small, Nice and Generous Tip), each showing Apple's
+localized price. A tip unlocks nothing, nothing about it is stored, and the only
+response is a thank-you alert. There is no banner, badge, prompt or link to the
+screen anywhere else (not Home, onboarding, notifications, Shortcuts or the
+widget), and no external payment or donation link anywhere in the app. Opening
+the screen suppresses the review prompt for that session.
+
+Privacy rules, which keep the App Store "Data Not Collected" label true:
+
+- StoreKit 2 verifies each transaction on device (`VerificationResult`); there is
+  no receipt or entitlement server, and no `appAccountToken`.
+- No purchase SDK, analytics or crash reporting. Product metadata is fetched from
+  the App Store only while the Support screen is open; the only launch-time work
+  is a local `Transaction.updates` listener that finishes tips completed outside
+  the purchase call (Ask to Buy, interrupted payments).
+- `SKIncludeConsumableInAppPurchaseHistory` stays unset, so finished tips leave
+  no history to rebuild.
+- The Support screen reads no HealthKit data.
+
+`Services/Tips/TipJar.swift` holds the testable core (ordering, screen state;
+`TipJarTests`) behind a thin StoreKit wrapper, `StoreKitTipClient.swift`.
+The shared scheme's Run action uses `Conduit/Tips.storekit`, so tips work in
+the simulator without an App Store connection; archives and
+TestFlight builds use the real App Store products. `TipSupportEvidenceTests`
+captures the About section and Support screen when
+`TEST_RUNNER_CONDUIT_EVIDENCE_DIR` is set.
 
 ## Shortcuts — Sync Health Data
 

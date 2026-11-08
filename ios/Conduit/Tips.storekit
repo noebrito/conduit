@@ -1,0 +1,80 @@
+{
+  "appPolicies" : {
+    "eula" : "",
+    "policies" : [
+      {
+        "locale" : "en_US",
+        "policyText" : "",
+        "policyURL" : ""
+      }
+    ]
+  },
+  "identifier" : "C0D01700",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "0.99",
+      "familyShareable" : false,
+      "internalID" : "C0D01701",
+      "localizations" : [
+        {
+          "description" : "A small one-time tip to the developer. Unlocks nothing.",
+          "displayName" : "Small Tip",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "dev.noebrito.Conduit.tip.small",
+      "referenceName" : "Small Tip",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "2.99",
+      "familyShareable" : false,
+      "internalID" : "C0D01702",
+      "localizations" : [
+        {
+          "description" : "A one-time tip to the developer. Unlocks nothing.",
+          "displayName" : "Nice Tip",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "dev.noebrito.Conduit.tip.nice",
+      "referenceName" : "Nice Tip",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "6.99",
+      "familyShareable" : false,
+      "internalID" : "C0D01703",
+      "localizations" : [
+        {
+          "description" : "A generous one-time tip to the developer. Unlocks nothing.",
+          "displayName" : "Generous Tip",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "dev.noebrito.Conduit.tip.generous",
+      "referenceName" : "Generous Tip",
+      "type" : "Consumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "6786544769",
+    "_developerTeamID" : "",
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+
+    ]
+  },
+  "subscriptionGroups" : [
+
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}
