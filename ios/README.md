@@ -252,7 +252,10 @@ command line. The bundle identifier is `dev.noebrito.Conduit`.
 
 ## Capabilities
 
-- HealthKit + HealthKit background delivery (`Conduit/App/Conduit.entitlements`)
+- HealthKit + HealthKit background delivery (`Conduit/App/Conduit.entitlements`).
+  Debug simulator builds sign with `Conduit/App/ConduitSimulator.entitlements`
+  instead — the same keys plus `get-task-allow`, which `SKTestSession` needs —
+  so keep its other keys in step with `Conduit.entitlements`
 - App Groups: `group.dev.noebrito.Conduit`, on both the app and the widget
   extension (`ConduitWidgets/ConduitWidgets.entitlements`) — carries the
   sync-status snapshot the Lock Screen widget reads
