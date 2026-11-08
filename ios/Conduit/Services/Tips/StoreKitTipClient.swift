@@ -64,17 +64,12 @@ final class TipTransactionObserver {
     static let shared = TipTransactionObserver()
 
     private var task: Task<Void, Never>?
-    /// Product IDs of the transactions this listener has finished, in order. Lets a
-    /// test observe the listener without a hook into StoreKit; it lives only in memory.
-    private(set) var finishedProductIDs: [String] = []
 
     func start() {
         guard task == nil else { return }
         task = Task.detached(priority: .background) {
             for await verification in Transaction.updates {
                 await TipTransactions.finish(verification)
-                let productID = verification.unsafePayloadValue.productID
-                await MainActor.run { TipTransactionObserver.shared.finishedProductIDs.append(productID) }
             }
         }
     }

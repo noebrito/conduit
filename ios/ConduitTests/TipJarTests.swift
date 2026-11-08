@@ -2,7 +2,7 @@ import XCTest
 @testable import Conduit
 
 /// Pure-logic coverage for the tip jar: ordering and screen state, with a fake
-/// StoreKit client. `TipStoreKitTests` covers the real wrapper against `Tips.storekit`.
+/// StoreKit client.
 @MainActor
 final class TipJarTests: XCTestCase {
     private final class FakeClient: TipStoreClient {

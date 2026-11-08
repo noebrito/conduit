@@ -252,10 +252,7 @@ command line. The bundle identifier is `dev.noebrito.Conduit`.
 
 ## Capabilities
 
-- HealthKit + HealthKit background delivery (`Conduit/App/Conduit.entitlements`).
-  Debug simulator builds sign with `Conduit/App/ConduitSimulator.entitlements`
-  instead — the same keys plus `get-task-allow`, which `SKTestSession` needs —
-  so keep its other keys in step with `Conduit.entitlements`
+- HealthKit + HealthKit background delivery (`Conduit/App/Conduit.entitlements`)
 - App Groups: `group.dev.noebrito.Conduit`, on both the app and the widget
   extension (`ConduitWidgets/ConduitWidgets.entitlements`) — carries the
   sync-status snapshot the Lock Screen widget reads
@@ -338,9 +335,8 @@ Privacy rules, which keep the App Store "Data Not Collected" label true:
 
 `Services/Tips/TipJar.swift` holds the testable core (ordering, screen state;
 `TipJarTests`) behind a thin StoreKit wrapper, `StoreKitTipClient.swift`.
-`TipStoreKitTests` runs that wrapper against `Conduit/Tips.storekit` with
-`SKTestSession`, so no App Store connection is needed. The shared scheme's Run
-action also uses `Tips.storekit`, so tips work in the simulator; archives and
+The shared scheme's Run action uses `Conduit/Tips.storekit`, so tips work in
+the simulator without an App Store connection; archives and
 TestFlight builds use the real App Store products. `TipSupportEvidenceTests`
 captures the About section and Support screen when
 `TEST_RUNNER_CONDUIT_EVIDENCE_DIR` is set.
