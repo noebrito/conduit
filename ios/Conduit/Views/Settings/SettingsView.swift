@@ -214,6 +214,15 @@ private struct SettingsContent: View {
 
                 ReviewHelpLinks(onHelp: { appState.reviewPrompt.suppressSession() })
 
+                // The only entry point to the tip jar anywhere in the app.
+                NavigationLink {
+                    SupportView()
+                        .onAppear { appState.reviewPrompt.suppressSession() }
+                } label: {
+                    Label("Support Conduit", systemImage: "cup.and.saucer")
+                }
+                .accessibilityHint("Optional tips to the developer. Nothing is unlocked.")
+
                 NavigationLink("Open Source Licenses") {
                     LicensesView()
                 }

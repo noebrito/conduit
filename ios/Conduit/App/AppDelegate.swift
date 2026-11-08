@@ -15,6 +15,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         Uploader.shared.database = db
         // Reset any inflight rows whose background task was killed (§4.6).
         Uploader.shared.reconcileInflight()
+        // Finish any tip that completed outside the purchase call (Ask to Buy,
+        // interrupted payment). Purely local StoreKit; it grants nothing.
+        TipTransactionObserver.shared.start()
         // Register the BGAppRefreshTask handler. This MUST run synchronously before
         // launch returns — iOS requires every task handler to be registered by the
         // end of launch. It's the fallback that drains the outbox when HealthKit

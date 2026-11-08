@@ -7,6 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CF0000000000000000000011 /* TipJar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF0000000000000000000001 /* TipJar.swift */; };
+		CF0000000000000000000012 /* StoreKitTipClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF0000000000000000000002 /* StoreKitTipClient.swift */; };
+		CF0000000000000000000013 /* SupportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF0000000000000000000003 /* SupportView.swift */; };
+		CF0000000000000000000014 /* Tips.storekit in Resources */ = {isa = PBXBuildFile; fileRef = CF0000000000000000000004 /* Tips.storekit */; };
+		CF0000000000000000000015 /* TipJarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF0000000000000000000005 /* TipJarTests.swift */; };
+		CF0000000000000000000016 /* TipStoreKitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF0000000000000000000006 /* TipStoreKitTests.swift */; };
+		CF0000000000000000000017 /* TipSupportEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF0000000000000000000007 /* TipSupportEvidenceTests.swift */; };
 		CD0000000000000000000101 /* ConduitApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000100 /* ConduitApp.swift */; };
 		CD0000000000000000000103 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000102 /* AppDelegate.swift */; };
 		CD0000000000000000000107 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000106 /* HomeView.swift */; };
@@ -147,6 +154,13 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		CF0000000000000000000001 /* TipJar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipJar.swift; sourceTree = "<group>"; };
+		CF0000000000000000000002 /* StoreKitTipClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitTipClient.swift; sourceTree = "<group>"; };
+		CF0000000000000000000003 /* SupportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupportView.swift; sourceTree = "<group>"; };
+		CF0000000000000000000004 /* Tips.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = Tips.storekit; sourceTree = "<group>"; };
+		CF0000000000000000000005 /* TipJarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipJarTests.swift; sourceTree = "<group>"; };
+		CF0000000000000000000006 /* TipStoreKitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipStoreKitTests.swift; sourceTree = "<group>"; };
+		CF0000000000000000000007 /* TipSupportEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipSupportEvidenceTests.swift; sourceTree = "<group>"; };
 		CD0000000000000000000050 /* Conduit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Conduit.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD0000000000000000000051 /* ConduitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ConduitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD0000000000000000000100 /* ConduitApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConduitApp.swift; sourceTree = "<group>"; };
@@ -335,6 +349,7 @@
 				CD000000000000000000000A /* Views */,
 				CD000000000000000000010C /* Assets.xcassets */,
 				CD0000000000000000000105 /* Info.plist */,
+				CF0000000000000000000004 /* Tips.storekit */,
 			);
 			path = Conduit;
 			sourceTree = "<group>";
@@ -392,6 +407,7 @@
 				CD0000000000000000000180 /* Sync */,
 				CD0000000000000000000181 /* Networking */,
 				CE0000000000000000000B100 /* Review */,
+				CF0000000000000000000030 /* Tips */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -493,6 +509,7 @@
 			children = (
 				CD00000000000000000001BC /* SettingsView.swift */,
 				CD00000000000000000001BE /* HKPermissionsDetailView.swift */,
+				CF0000000000000000000003 /* SupportView.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -536,6 +553,9 @@
 				CD000000000000000000C031 /* ShortcutEvidenceTests.swift */,
 				CD000000000000000000C041 /* CycleTrackingTests.swift */,
 				CD000000000000000000C051 /* ElectrocardiogramTests.swift */,
+				CF0000000000000000000005 /* TipJarTests.swift */,
+				CF0000000000000000000006 /* TipStoreKitTests.swift */,
+				CF0000000000000000000007 /* TipSupportEvidenceTests.swift */,
 				CD000000000000000000C061 /* MedicationTests.swift */,
 				CD00000000000000000002A0 /* RegistryReconcileTests.swift */,
 				CD0000000000000000000156 /* StorageDAOTests.swift */,
@@ -573,6 +593,15 @@
 			path = Review;
 			sourceTree = "<group>";
 		};
+		CF0000000000000000000030 /* Tips */ = {
+			isa = PBXGroup;
+			children = (
+				CF0000000000000000000001 /* TipJar.swift */,
+				CF0000000000000000000002 /* StoreKitTipClient.swift */,
+			);
+			path = Tips;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -605,6 +634,7 @@
 			buildPhases = (
 				CD0000000000000000000043 /* Sources */,
 				CD0000000000000000000044 /* Frameworks */,
+				CF0000000000000000000031 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -688,6 +718,14 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		CF0000000000000000000031 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CF0000000000000000000014 /* Tips.storekit in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		CD0000000000000000000042 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -714,6 +752,9 @@
 				CE0000000000000000000B021 /* ReviewPromptCoordinator.swift in Sources */,
 				CE0000000000000000000B011 /* ReviewReadiness.swift in Sources */,
 				CE0000000000000000000B001 /* ReviewEligibility.swift in Sources */,
+				CF0000000000000000000011 /* TipJar.swift in Sources */,
+				CF0000000000000000000012 /* StoreKitTipClient.swift in Sources */,
+				CF0000000000000000000013 /* SupportView.swift in Sources */,
 				CD0000000000000000000103 /* AppDelegate.swift in Sources */,
 				CD000000000000000000C002 /* SyncHealthIntent.swift in Sources */,
 				CD0000000000000000000107 /* HomeView.swift in Sources */,
@@ -792,6 +833,9 @@
 				CD000000000000000000C032 /* ShortcutEvidenceTests.swift in Sources */,
 				CD000000000000000000C042 /* CycleTrackingTests.swift in Sources */,
 				CD000000000000000000C052 /* ElectrocardiogramTests.swift in Sources */,
+				CF0000000000000000000015 /* TipJarTests.swift in Sources */,
+				CF0000000000000000000016 /* TipStoreKitTests.swift in Sources */,
+				CF0000000000000000000017 /* TipSupportEvidenceTests.swift in Sources */,
 				CD000000000000000000C062 /* MedicationTests.swift in Sources */,
 				CD00000000000000000002A1 /* RegistryReconcileTests.swift in Sources */,
 				CD0000000000000000000157 /* StorageDAOTests.swift in Sources */,
