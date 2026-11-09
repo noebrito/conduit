@@ -10,7 +10,8 @@
 2. **Merge to `main`.** Xcode Cloud picks up the merge, archives the app, and
    uploads the build to TestFlight automatically — no manual archive step.
 3. **Once the build ships** (TestFlight, then App Store release), tag the
-   commit `vX.Y` matching the released `MARKETING_VERSION` and
+   commit `v` + the released `MARKETING_VERSION` (`vX.Y`, or `vX.Y.Z` for a
+   patch release such as `v1.10.1`) and
    [create a GitHub release](https://github.com/noebrito/conduit/releases/new)
    from that tag.
 

@@ -18,7 +18,7 @@ struct SupportView: View {
             Section {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Conduit is free and open source, and every feature stays free for everyone. Nothing here unlocks anything.")
-                    Text("If Conduit saves you time and you'd like to say thanks, you can leave a tip. Tips help cover the Apple developer membership, the website and the public demo receiver, and the hours that go into new data types.")
+                    Text("If Conduit saves you time and you'd like to say thanks, you can leave a tip. Tips help cover the Apple developer membership, the website, and the hours that go into new data types.")
                 }
                 .padding(.vertical, 4)
             }
