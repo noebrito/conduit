@@ -77,12 +77,14 @@ final class BackgroundTaskConfigTests: XCTestCase {
 /// latest approved version, so it must move each time a release goes live.
 /// The comparison is numeric on purpose — App Store Connect orders 1.10 after
 /// 1.9, while a plain string comparison would put it before.
+/// 1.10 went live without its tip in-app purchases, so 1.10.1 carries them
+/// to review and the bound moves to 1.10.
 ///
 /// The bound is a lower bound, not a pin, so a later bump keeps passing.
 final class AppStoreVersionTests: XCTestCase {
 
     /// The version App Store Connect has already approved; its train is closed.
-    private static let closedTrain = "1.9"
+    private static let closedTrain = "1.10"
 
     private var shortVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
