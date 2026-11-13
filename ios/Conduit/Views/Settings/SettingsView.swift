@@ -611,6 +611,7 @@ private struct ImportHistoryView: View {
             switch run.stopCause {
             case .historyLimited: return "exclamationmark.triangle.fill"
             case .historyAccessUnknown: return "questionmark.circle.fill"
+            case .deviceLocked: return "lock.circle.fill"
             default: return "pause.circle.fill"
             }
         case .running: return "arrow.triangle.2.circlepath"

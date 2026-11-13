@@ -435,7 +435,7 @@ final class AppState {
     private static func isRoutinePause(_ run: ImportRunState) -> Bool {
         guard run.status == .interrupted else { return false }
         switch run.stopCause {
-        case .userCancelled, .backgrounded:
+        case .userCancelled, .backgrounded, .deviceLocked:
             return true
         case .queueNotDraining, .historyLimited, .historyAccessUnknown, .endedShort, .none:
             return false

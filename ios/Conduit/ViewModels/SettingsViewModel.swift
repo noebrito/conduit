@@ -62,6 +62,10 @@ final class SettingsViewModel {
     /// Which run that terminal copy describes. A later observation tick for the
     /// SAME run must not clobber it; a tick for a different run must.
     private var outcomeCopyRunId: String?
+    /// When that terminal copy was rendered. A run row set `running` AFTER this
+    /// is the same run being driven again (an automatic resume), which the
+    /// copy no longer describes; an older `running` row is just a late tick.
+    private var outcomeCopyRenderedAt: Date?
 
     // About
     var appVersion: String {
@@ -212,6 +216,13 @@ final class SettingsViewModel {
         importError = run.status == .failed ? run.failureReason : nil
         guard !isCancellingImport else { return }
         if let describedRun = outcomeCopyRunId, describedRun != run.runId {
+            hasLocalOutcomeCopy = false
+        }
+        // The same run being driven again (an automatic resume after a pause)
+        // supersedes the terminal copy rendered for it — otherwise "paused"
+        // lingers under an "Importing…" heading. Only a row stamped after the
+        // copy counts: a late tick from before the run stopped must not clobber it.
+        if run.status == .running, let renderedAt = outcomeCopyRenderedAt, run.updatedAt > renderedAt {
             hasLocalOutcomeCopy = false
         }
         guard !hasLocalOutcomeCopy else { return }
@@ -682,6 +693,7 @@ final class SettingsViewModel {
     private func markLocalOutcomeCopy() {
         hasLocalOutcomeCopy = true
         outcomeCopyRunId = importRun?.runId
+        outcomeCopyRenderedAt = Date()
     }
 
     /// The runner that owns durable import progress. Recreated per access — it is
@@ -716,6 +728,9 @@ final class SettingsViewModel {
             if outcome.cancelled {
                 return Self.cancelledText(count: count)
             }
+            if outcome.pausedForLockedDevice {
+                return Self.lockedPauseText(count: count)
+            }
             if outcome.pausedForBackground {
                 return Self.pausedText(count: count)
             }
@@ -740,6 +755,17 @@ final class SettingsViewModel {
     /// the app continues it. Never claim it keeps importing while you're away.
     static func pausedText(count: String) -> String {
         "Import paused after \(count) samples — it kept its place. It continues when iOS grants Conduit background time, and as soon as you reopen the app."
+    }
+
+    /// Heading for a run the iPhone's lock paused. Calm on purpose: nothing
+    /// failed, and nothing is asked of the user beyond unlocking.
+    static let lockedPauseTitle = "Paused until you unlock your iPhone"
+
+    /// Copy for a run the iPhone's lock paused mid-read (HealthKit refuses every
+    /// read while protected data is locked away). It is a pause, not a failure:
+    /// the run kept its place and Conduit continues it on its own after unlock.
+    static func lockedPauseText(count: String) -> String {
+        "Health data can't be read while your iPhone is locked, so the import paused after \(count) samples and kept its place. It continues on its own once you unlock."
     }
 
     /// Copy for a run the user stopped themselves. It stays cancelled until they
@@ -791,6 +817,10 @@ final class SettingsViewModel {
         case .running:
             return "Importing…"
         case .interrupted:
+            // The lock's pause names its one condition: unlocking.
+            if run.stopCause == .deviceLocked {
+                return lockedPauseText(count: count)
+            }
             // An auto-resumable pause is a different (and honest) statement than
             // "interrupted, go tap Resume" — the app really will pick this one up.
             if run.autoResume {
@@ -836,6 +866,9 @@ final class SettingsViewModel {
         case .failed: return "Import failed"
         case .running: return "Importing…"
         case .interrupted:
+            if run.stopCause == .deviceLocked {
+                return lockedPauseTitle
+            }
             if run.autoResume || run.stopCause == .queueNotDraining {
                 return "Import paused"
             }

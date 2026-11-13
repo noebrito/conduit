@@ -56,23 +56,47 @@ final class ImportBackgroundCoordinator {
     private let database: AppDatabase
     private let engine: SyncEngine
     private let coordinator: ImportRunCoordinator
+    private let probe: HistoryAccessProbing
+    /// Whether HealthKit's protected data is readable right now — false while
+    /// the iPhone is locked. A seam so the lock policy is testable without a
+    /// device; production reads `UIApplication.isProtectedDataAvailable`.
+    private let isProtectedDataAvailable: @MainActor () -> Bool
+    /// Whether the app is on screen (not in the background). A seam for the
+    /// same reason as `isProtectedDataAvailable`.
+    private let isInForeground: @MainActor () -> Bool
 
     /// The `UIApplication` background-task assertion held while a paused run
     /// finishes its page. Only ever touched on the main actor.
     private var assertionID: UIBackgroundTaskIdentifier = .invalid
 
+    private var protectedDataObserver: NSObjectProtocol?
+    /// The resume an unlock started, if any — exposed so a test can await it.
+    private(set) var unlockResume: Task<ResumeResult, Never>?
+
     init(
         database: AppDatabase,
         engine: SyncEngine,
-        coordinator: ImportRunCoordinator = .shared
+        coordinator: ImportRunCoordinator = .shared,
+        probe: HistoryAccessProbing = HealthKitHistoryAccessProbe(),
+        isProtectedDataAvailable: @escaping @MainActor () -> Bool = { UIApplication.shared.isProtectedDataAvailable },
+        isInForeground: @escaping @MainActor () -> Bool = { UIApplication.shared.applicationState != .background }
     ) {
         self.database = database
         self.engine = engine
         self.coordinator = coordinator
+        self.probe = probe
+        self.isProtectedDataAvailable = isProtectedDataAvailable
+        self.isInForeground = isInForeground
+    }
+
+    deinit {
+        if let protectedDataObserver {
+            NotificationCenter.default.removeObserver(protectedDataObserver)
+        }
     }
 
     private var runner: ImportRunner {
-        ImportRunner(database: database, engine: engine, coordinator: coordinator)
+        ImportRunner(database: database, engine: engine, coordinator: coordinator, probe: probe)
     }
 
     // MARK: - Should this run continue on its own?
@@ -86,8 +110,10 @@ final class ImportBackgroundCoordinator {
     ///   force-quit or otherwise stopped by something other than the user.
     /// - a user cancellation clears the flag, so Cancel means cancelled.
     /// - `.failed` is excluded even though it is resumable: a read that failed
-    ///   (protected data while locked, revoked permission) would just fail again
-    ///   every window, so a failure waits for a deliberate tap.
+    ///   (revoked permission, storage) would just fail again every window, so a
+    ///   failure waits for a deliberate tap. The iPhone locking mid-read is NOT
+    ///   a failure — it is an auto-resumable `.deviceLocked` pause, held by
+    ///   `resumePausedRun` until protected data is readable again.
     static func shouldAutoResume(_ run: ImportRunState?) -> Bool {
         guard let run else { return false }
         return run.status == .interrupted && run.autoResume
@@ -308,6 +334,43 @@ final class ImportBackgroundCoordinator {
         }
     }
 
+    // MARK: - Unlock: continue a run the lock paused
+
+    /// Start listening for the iPhone being unlocked. Called once at launch.
+    ///
+    /// Foreground return already resumes a paused run, but an unlock can land
+    /// AFTER `applicationWillEnterForeground` (protected data becomes readable a
+    /// beat later), in which case that resume was held back as still locked.
+    /// This catches exactly that, so a run paused by the lock continues on its
+    /// own, from the same place, without anyone tapping Resume.
+    @MainActor
+    func observeProtectedDataAvailability(center: NotificationCenter = .default) {
+        guard protectedDataObserver == nil else { return }
+        let onUnlock: @MainActor () -> Void = { [weak self] in self?.protectedDataDidBecomeAvailable() }
+        protectedDataObserver = center.addObserver(
+            forName: UIApplication.protectedDataDidBecomeAvailableNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { onUnlock() }
+        }
+    }
+
+    /// Resume on unlock when the app is on screen. In the background there is no
+    /// assertion keeping the process alive through a page, so leave it to the
+    /// booked background window (and the next foreground) instead.
+    @MainActor
+    func protectedDataDidBecomeAvailable() {
+        guard isInForeground() else {
+            scheduleResumeIfNeeded()
+            return
+        }
+        unlockResume = Task { @MainActor [weak self] in
+            guard let self else { return .notCompleted }
+            return await self.resumePausedRun(trigger: "unlock")
+        }
+    }
+
     /// Resume the persisted run if — and only if — it is one we may continue on
     /// our own and nothing else is already driving it.
     ///
@@ -335,6 +398,14 @@ final class ImportBackgroundCoordinator {
             return .notCompleted
         }
         guard ImportBackgroundCoordinator.shouldAutoResume(currentRun()) else { return .notCompleted }
+        // While the iPhone is locked every HealthKit read fails with "Protected
+        // health data is inaccessible", so starting now would only re-pause.
+        // Hold the run; the unlock (or next foreground / background window)
+        // picks it up from the same place.
+        guard isProtectedDataAvailable() else {
+            logger.info("Import resume (\(trigger, privacy: .public)) held — protected data unavailable (device locked)")
+            return .notCompleted
+        }
         // Staging needs somewhere to send to. Without this the resume would end
         // as `.failed` (noWebhookConfigured) and, worse, clear the auto-resume
         // flag on a run the user could otherwise still finish.
