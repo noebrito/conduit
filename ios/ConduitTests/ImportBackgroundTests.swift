@@ -1,4 +1,5 @@
 import HealthKit
+import SwiftUI
 import UIKit
 import XCTest
 @testable import Conduit
@@ -705,5 +706,88 @@ final class ImportLockedPauseTests: XCTestCase {
             typesTotal: 2, typesCompleted: 1, oldestReachedAt: nil, historyFloor: nil,
             autoResume: true, stopCause: .deviceLocked, startedAt: Date(), updatedAt: Date())
         XCTAssertNil(AppState.importHeadline(for: run))
+    }
+}
+
+// MARK: - Reviewer evidence (opt-in: set CONDUIT_EVIDENCE_DIR)
+
+/// Renders the real Settings → Import History screen over the exact persisted
+/// state the TestFlight run reached: a "Last year" import of HRV + Steps that the
+/// iPhone's lock interrupted mid-HRV, then the same screen after the unlock
+/// resumed it on its own. Skips unless `CONDUIT_EVIDENCE_DIR` is set.
+extension ImportLockedPauseTests {
+
+    func testEvidenceImportHistoryScreenPausedByLockThenResumedByUnlock() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["CONDUIT_EVIDENCE_DIR"] != nil)
+        let f = try makeFixture()
+        f.health.lockAfter(2, readsOf: hrv.identifier)
+        let outcome = await runner(f).start(range: .lastYear, since: nil, types: f.types)
+        XCTAssertTrue(outcome.pausedForLockedDevice)
+
+        let app = AppState(database: f.database)
+        let (window, collection) = try presentSettings(app)
+        defer { window.isHidden = true }
+        try openImportHistory(collection)
+        let pausedTitle = SettingsViewModel.statusTitle(for: try XCTUnwrap(ImportProgressDAO(f.database).currentRun()))
+        XCTAssertEqual(pausedTitle, "Paused until you unlock your iPhone")
+        XCTAssertNotEqual(pausedTitle, "Import failed")
+        try writeArtifact(capture(window), named: "import-history-1-paused-while-locked.png")
+
+        // Unlock: no Resume tap — the protected-data notification drives it.
+        var protectedDataAvailable = false
+        let background = ImportBackgroundCoordinator(
+            database: f.database, engine: f.engine, coordinator: f.coordinator, probe: NoFloorsProbe(),
+            isProtectedDataAvailable: { protectedDataAvailable },
+            isInForeground: { true }
+        )
+        let center = NotificationCenter()
+        background.observeProtectedDataAvailability(center: center)
+        f.health.unlock()
+        protectedDataAvailable = true
+        center.post(name: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil)
+        let result = try await XCTUnwrap(background.unlockResume).value
+        XCTAssertEqual(result, .completed)
+        settle(1.5)
+        XCTAssertEqual(try ImportProgressDAO(f.database).currentRun()?.status, .completed)
+        try writeArtifact(capture(window), named: "import-history-2-resumed-after-unlock.png")
+    }
+
+    private func presentSettings(_ app: AppState) throws -> (UIWindow, UICollectionView) {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let host = UIHostingController(rootView: SettingsView().environment(app))
+        let window = UIWindow(windowScene: scene)
+        window.overrideUserInterfaceStyle = .light
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        settle(1.5)
+        let collection = try XCTUnwrap(scrollViews(host.view)
+            .max(by: { $0.contentSize.height < $1.contentSize.height }) as? UICollectionView)
+        return (window, collection)
+    }
+
+    /// Settings' "History" section sits directly above "About" (the last section).
+    private func openImportHistory(_ collection: UICollectionView) throws {
+        let row = IndexPath(item: 0, section: collection.numberOfSections - 2)
+        collection.scrollToItem(at: row, at: .centeredVertically, animated: false)
+        settle(0.5)
+        let delegate = try XCTUnwrap(collection.delegate)
+        delegate.collectionView?(collection, didSelectItemAt: row)
+        settle(2.0)
+    }
+
+    private func capture(_ window: UIWindow) throws -> Data {
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        return try XCTUnwrap(image.pngData())
+    }
+
+    private func settle(_ seconds: TimeInterval) {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
+    }
+
+    private func scrollViews(_ view: UIView) -> [UIScrollView] {
+        (view as? UIScrollView).map { [$0] } ?? view.subviews.flatMap(scrollViews)
     }
 }

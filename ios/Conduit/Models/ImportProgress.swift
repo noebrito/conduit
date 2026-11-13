@@ -117,9 +117,8 @@ struct ImportRunState: Codable, Equatable, FetchableRecord, PersistableRecord {
     /// iOS suspended land on the same status, and only the second should continue
     /// on its own. Set when the app pauses a live run (backgrounding, the iPhone
     /// locking mid-read, or a `running` row reconciled after a force-quit);
-    /// deliberately **false** for a
-    /// user cancellation, a failure (a failing read would just loop) and a
-    /// completed run.
+    /// deliberately **false** for a user cancellation, a failure (a failing read
+    /// would just loop) and a completed run.
     var autoResume: Bool
     /// Why this run stopped, when it stopped short. `nil` while running, on a
     /// completed run, and on any row written before this was recorded.
