@@ -1,4 +1,5 @@
 import Foundation
+import HealthKit
 import os
 
 private let logger = Logger(subsystem: "dev.noebrito.Conduit", category: "ImportRunner")
@@ -119,7 +120,10 @@ final class ImportRunCoordinator: @unchecked Sendable {
 ///   run as `.failed` with the reason attached. It is NEVER converted into a
 ///   zero-sample "success", which is how a locked-device read failure used to
 ///   truncate a user's history under a green checkmark. A run is `.completed`
-///   only when every type read its range to the end.
+///   only when every type read its range to the end. The one error that is not
+///   a failure is the iPhone locking mid-read (protected data unavailable): it
+///   ends the run as an auto-resumable `.interrupted` pause
+///   (`stopCause == .deviceLocked`), never as a success.
 ///
 /// It deliberately owns no UI state: `SettingsViewModel` renders the persisted
 /// state, and onboarding's optional import uses the same runner so its progress
@@ -150,6 +154,10 @@ final class ImportRunner {
         /// page boundary to checkpoint. The run is picked back up automatically —
         /// on the next foreground, or in a background window iOS grants.
         var pausedForBackground: Bool = false
+        /// True when the iPhone locked mid-import and HealthKit refused the read
+        /// (protected data unavailable). The run kept its place and is picked
+        /// back up automatically once the iPhone is unlocked.
+        var pausedForLockedDevice: Bool = false
         /// True when the call was refused because another task in this process is
         /// already driving an import. Nothing was started and nothing was reset.
         var alreadyRunning: Bool = false
@@ -359,6 +367,18 @@ final class ImportRunner {
                     }
                 )
             } catch {
+                // A locked iPhone is not a failure: HealthKit simply can't read
+                // protected data until the user unlocks, and the same read will
+                // work then. Pause in place instead of ending the run as failed.
+                if ImportRunner.isProtectedDataUnavailable(error) {
+                    return pauseForLockedDevice(
+                        runId: runId,
+                        type: type,
+                        startCursor: startCursor,
+                        priorStaged: priorStaged,
+                        stagedTotal: stagedTotal
+                    )
+                }
                 // The defect this whole change exists to kill: a read/stage
                 // failure must surface as a failure, never as a quiet success.
                 try? progressDAO.checkpoint(
@@ -536,6 +556,58 @@ final class ImportRunner {
             stored.filter { $0.runId == runId && $0.status == .completed }.map(\.hkTypeId)
         )
         return types.allSatisfy { completed.contains($0.identifier) }
+    }
+
+    /// Whether `error` is HealthKit refusing a read because the iPhone is locked
+    /// (`HKError.errorDatabaseInaccessible`, "Protected health data is
+    /// inaccessible"). Any data type can raise it, so it is classified by the
+    /// error alone, never by which type was being read.
+    static func isProtectedDataUnavailable(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == HKErrorDomain
+            && nsError.code == HKError.Code.errorDatabaseInaccessible.rawValue
+    }
+
+    /// Stop the run as a **pause** because the iPhone locked mid-read.
+    ///
+    /// Unlike `fail`, the type keeps the cursor its last page checkpointed (not
+    /// the cursor this pass started from), so everything staged before the lock
+    /// stays counted and the resume continues from the same place. The run is
+    /// flagged auto-resumable — the identical read succeeds once the user
+    /// unlocks — unless the user had already asked to cancel, which always wins.
+    private func pauseForLockedDevice(
+        runId: String,
+        type: HealthDataType,
+        startCursor: Date?,
+        priorStaged: Int,
+        stagedTotal: Int
+    ) -> Outcome {
+        let persisted = (try? progressDAO.typeProgress(hkTypeId: type.identifier))
+            .flatMap { $0 }
+            .flatMap { $0.runId == runId ? $0 : nil }
+        try? progressDAO.checkpoint(
+            hkTypeId: type.identifier,
+            runId: runId,
+            cursor: persisted?.cursor ?? startCursor,
+            stagedCount: persisted?.stagedCount ?? priorStaged,
+            status: .interrupted
+        )
+        let userCancelled = coordinator.requestedStopReason == .userCancelled || Task.isCancelled
+        try? progressDAO.finishRun(
+            status: .interrupted,
+            autoResume: !userCancelled,
+            stopCause: userCancelled ? .userCancelled : .deviceLocked
+        )
+        let finalStaged = (try? progressDAO.currentRun())?.stagedCount ?? stagedTotal
+        logger.info("import run \(runId, privacy: .public) paused — protected data unavailable while reading \(type.identifier, privacy: .public)")
+        return Outcome(
+            status: .interrupted,
+            staged: finalStaged,
+            failureReason: nil,
+            hitCap: false,
+            cancelled: userCancelled,
+            pausedForLockedDevice: !userCancelled
+        )
     }
 
     private func fail(_ error: Error, staged: Int, typeName: String? = nil) async -> Outcome {

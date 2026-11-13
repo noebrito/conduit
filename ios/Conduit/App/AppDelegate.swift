@@ -31,6 +31,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // the end of launch) and on its own identifier, so the upload-drain task
         // above is completely unaffected.
         AppState.shared.importBackground.registerBackgroundTask()
+        // An import the iPhone's lock paused continues once it is unlocked.
+        AppState.shared.importBackground.observeProtectedDataAvailability()
         // Returning users: first reconcile the persisted config + HealthKit
         // authorization against the current registry, so data types added in an
         // app update (e.g. appleStandHour) are auto-enabled and get a one-time

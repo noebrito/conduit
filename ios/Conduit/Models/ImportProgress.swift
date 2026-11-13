@@ -47,8 +47,14 @@ enum ImportStopCause: String, Codable {
     /// The user tapped Cancel.
     case userCancelled
     /// iOS took the foreground away (backgrounding, or an expiring background
-    /// window). The only cause that is auto-resumable.
+    /// window). Auto-resumable.
     case backgrounded
+    /// The iPhone locked mid-import, so HealthKit refused the read with
+    /// `HKError.errorDatabaseInaccessible` ("Protected health data is
+    /// inaccessible"). Nothing went wrong — the data is simply unreadable until
+    /// the user unlocks — so this is a pause, not a failure: the run keeps its
+    /// place and is auto-resumed once protected data is available again.
+    case deviceLocked
     /// Staging stopped because the outbox never drained inside
     /// `importDrainTimeout` — uploads are genuinely not getting through.
     case queueNotDraining
@@ -109,8 +115,9 @@ struct ImportRunState: Codable, Equatable, FetchableRecord, PersistableRecord {
     ///
     /// `interrupted` alone can't carry that: a run the user cancelled and a run
     /// iOS suspended land on the same status, and only the second should continue
-    /// on its own. Set when the app pauses a live run (backgrounding, or a
-    /// `running` row reconciled after a force-quit); deliberately **false** for a
+    /// on its own. Set when the app pauses a live run (backgrounding, the iPhone
+    /// locking mid-read, or a `running` row reconciled after a force-quit);
+    /// deliberately **false** for a
     /// user cancellation, a failure (a failing read would just loop) and a
     /// completed run.
     var autoResume: Bool

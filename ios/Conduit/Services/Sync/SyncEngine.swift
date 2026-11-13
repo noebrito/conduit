@@ -11,8 +11,9 @@ import os
 /// `handleObserverWake`; the `AppDelegate` starts it once on launch.
 actor SyncEngine {
     private let database: AppDatabase
-    private let reader: AnchoredReader
     private let readAnchored: (HealthDataType, HKQueryAnchor?, Date?, Int, Bool) async throws -> AnchoredReader.Result
+    /// One newest-first history-import page: (type, since, before, limit, includeHR).
+    private let readImportPage: (HealthDataType, Date?, Date?, Int, Bool) async throws -> AnchoredReader.Result
     private let scanWorkouts: (Date?, Date?, Int) async throws -> [HKWorkout]
     private let readRoutes: (HKWorkout) async throws -> [Conduit_V1_Sample]
     private let outboxDAO: OutboxDAO
@@ -62,6 +63,7 @@ actor SyncEngine {
         uploader: Uploader = .shared,
         keychain: KeychainStore = .shared,
         readAnchored: ((HealthDataType, HKQueryAnchor?, Date?, Int, Bool) async throws -> AnchoredReader.Result)? = nil,
+        readImportPage: ((HealthDataType, Date?, Date?, Int, Bool) async throws -> AnchoredReader.Result)? = nil,
         scanWorkouts: ((Date?, Date?, Int) async throws -> [HKWorkout])? = nil,
         readRoutes: ((HKWorkout) async throws -> [Conduit_V1_Sample])? = nil,
         bearerToken: (@MainActor () -> String?)? = nil,
@@ -70,9 +72,13 @@ actor SyncEngine {
         self.database = database
         let reader = AnchoredReader(store: store)
         let routeReader = WorkoutRouteReader(store: store)
-        self.reader = reader
         self.readAnchored = readAnchored ?? { type, anchor, since, limit, includeHR in
             try await reader.read(type: type, anchor: anchor, since: since, limit: limit, includeHeartRateStatistics: includeHR)
+        }
+        self.readImportPage = readImportPage ?? { type, since, before, limit, includeHR in
+            try await reader.readImportPage(
+                type: type, since: since, before: before, limit: limit, includeHeartRateStatistics: includeHR
+            )
         }
         self.scanWorkouts = scanWorkouts ?? { since, before, limit in
             try await routeReader.workouts(since: since, before: before, limit: limit)
@@ -419,12 +425,12 @@ actor SyncEngine {
             startCursor: startCursor,
             isCancelled: isCancelled,
             readPage: { before in
-                try await self.reader.readImportPage(
-                    type: dataType,
-                    since: since,
-                    before: before,
-                    limit: pageSize,
-                    includeHeartRateStatistics: try self.includeHeartRateStatisticsForWorkouts()
+                try await self.readImportPage(
+                    dataType,
+                    since,
+                    before,
+                    pageSize,
+                    try self.includeHeartRateStatisticsForWorkouts()
                 )
             },
             stagePage: { samples in
@@ -504,6 +510,11 @@ actor SyncEngine {
                 let samples: [Conduit_V1_Sample]
                 do {
                     samples = try await readRoutes(workout)
+                } catch where ImportRunner.isProtectedDataUnavailable(error) {
+                    // The iPhone locked: every later route read would fail the
+                    // same way, so skipping would silently drop routes. Let the
+                    // runner pause and re-read this page after unlock instead.
+                    throw error
                 } catch {
                     logger.error("Route read failed for workout \(workout.uuid.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)")
                     continue
