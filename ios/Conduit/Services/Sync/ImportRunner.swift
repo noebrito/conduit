@@ -37,6 +37,20 @@ final class ImportRunCoordinator: @unchecked Sendable {
     private var activeRunId: String?
     private var stopReason: ImportStopReason?
     private var reviewRevision: UInt64 = 0
+    /// Set by the claim holder when its run ended as a locked-iPhone pause, so
+    /// `release` can report it once nothing holds the claim any more.
+    private var endedPausedForLockedDevice = false
+    private var lockPauseHandler: (@Sendable () -> Void)?
+
+    /// Called — on the releasing thread, after the claim is free — whenever a
+    /// run that ended as a locked-iPhone pause releases its claim. Firing after
+    /// the release, not at the pause itself, is what lets the handler start a
+    /// resume: until then the claim would refuse it. One handler; the last set
+    /// wins.
+    var onLockPausedRunReleased: (@Sendable () -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return lockPauseHandler }
+        set { lock.lock(); lockPauseHandler = newValue; lock.unlock() }
+    }
 
     /// Detect even an import that started and ended between Home readiness reads.
     var reviewActivity: (running: Bool, revision: UInt64) {
@@ -76,17 +90,34 @@ final class ImportRunCoordinator: @unchecked Sendable {
         activeRunId = runId
         reviewRevision &+= 1
         stopReason = nil
+        endedPausedForLockedDevice = false
         return true
     }
 
     /// Release a claim this caller holds. A no-op for anyone else's claim.
     func release(_ runId: String) {
         lock.lock()
-        defer { lock.unlock() }
-        if activeRunId == runId {
-            activeRunId = nil
-            stopReason = nil
+        guard activeRunId == runId else {
+            lock.unlock()
+            return
         }
+        activeRunId = nil
+        stopReason = nil
+        let pausedForLock = endedPausedForLockedDevice
+        endedPausedForLockedDevice = false
+        let handler = lockPauseHandler
+        lock.unlock()
+        if pausedForLock { handler?() }
+    }
+
+    /// Record that the run `runId` (which must hold the claim) ended as a
+    /// locked-iPhone pause. Reported through `onLockPausedRunReleased` when the
+    /// claim is released.
+    func notePausedForLockedDevice(_ runId: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard activeRunId == runId else { return }
+        endedPausedForLockedDevice = true
     }
 
     /// Ask the live run — whoever owns it — to stop at its next boundary.
@@ -558,14 +589,22 @@ final class ImportRunner {
         return types.allSatisfy { completed.contains($0.identifier) }
     }
 
-    /// Whether `error` is HealthKit refusing a read because the iPhone is locked
-    /// (`HKError.errorDatabaseInaccessible`, "Protected health data is
-    /// inaccessible"). Any data type can raise it, so it is classified by the
+    /// HealthKit's "Database inaccessible before first unlock": a read made after
+    /// a restart, before the user has unlocked once. Not in the public
+    /// `HKError.Code` enum, but HealthKit itself files it with code 6 as a
+    /// database-accessibility error, and it clears the same way — on unlock.
+    static let databaseInaccessibleBeforeFirstUnlockCode = 101
+
+    /// Whether `error` is HealthKit refusing a read because the iPhone is locked:
+    /// `HKError.errorDatabaseInaccessible` (6, "Protected health data is
+    /// inaccessible"), or the same refusal before the first unlock after a
+    /// restart (101). Any data type can raise either, so it is classified by the
     /// error alone, never by which type was being read.
     static func isProtectedDataUnavailable(_ error: Error) -> Bool {
         let nsError = error as NSError
-        return nsError.domain == HKErrorDomain
-            && nsError.code == HKError.Code.errorDatabaseInaccessible.rawValue
+        guard nsError.domain == HKErrorDomain else { return false }
+        return nsError.code == HKError.Code.errorDatabaseInaccessible.rawValue
+            || nsError.code == databaseInaccessibleBeforeFirstUnlockCode
     }
 
     /// Stop the run as a **pause** because the iPhone locked mid-read.
@@ -598,6 +637,7 @@ final class ImportRunner {
             autoResume: !userCancelled,
             stopCause: userCancelled ? .userCancelled : .deviceLocked
         )
+        if !userCancelled { coordinator.notePausedForLockedDevice(runId) }
         let finalStaged = (try? progressDAO.currentRun())?.stagedCount ?? stagedTotal
         logger.info("import run \(runId, privacy: .public) paused — protected data unavailable while reading \(type.identifier, privacy: .public)")
         return Outcome(
