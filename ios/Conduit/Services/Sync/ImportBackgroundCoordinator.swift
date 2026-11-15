@@ -25,6 +25,16 @@ private let logger = Logger(subsystem: "dev.noebrito.Conduit", category: "Import
 ///    resumable run continues it automatically rather than making the user tap
 ///    Resume.
 ///
+/// ## Where the lifecycle comes from
+///
+/// This is the one owner of the import's leave-screen / return-to-screen
+/// handling, driven by UIKit's application lifecycle notifications
+/// (`observeAppLifecycle`). It deliberately does NOT hang off
+/// `UIApplicationDelegate.applicationDidEnterBackground` /
+/// `applicationWillEnterForeground`: in this SwiftUI (scene-based) app UIKit
+/// sends those events to the scene, never to the app delegate — measured in the
+/// real app on the simulator — so hooks placed there are dead code.
+///
 /// It is emphatically NOT "the import keeps churning while you use other apps".
 /// Nothing here should ever be described that way to the user.
 ///
@@ -64,14 +74,32 @@ final class ImportBackgroundCoordinator {
     /// Whether the app is on screen (not in the background). A seam for the
     /// same reason as `isProtectedDataAvailable`.
     private let isInForeground: @MainActor () -> Bool
+    /// Whether the app is fully active (on screen and frontmost). Only then is a
+    /// lock-pause retried on the spot; a seam for the same reason as the others.
+    private let isActive: @MainActor () -> Bool
 
     /// The `UIApplication` background-task assertion held while a paused run
     /// finishes its page. Only ever touched on the main actor.
     private var assertionID: UIBackgroundTaskIdentifier = .invalid
 
     private var protectedDataObserver: NSObjectProtocol?
+    private var lifecycleObservers: [NSObjectProtocol] = []
     /// The resume an unlock started, if any — exposed so a test can await it.
     private(set) var unlockResume: Task<ResumeResult, Never>?
+    /// The resume the app becoming active started, if any — exposed so a test
+    /// can await it.
+    private(set) var activeResume: Task<ResumeResult, Never>?
+    /// The launch's own resume, if any — exposed so a test can await it.
+    private(set) var launchResume: Task<ResumeResult, Never>?
+    /// What launch must finish (the registry reconcile) before any resume reads
+    /// the enabled types; every resume awaits it.
+    private var launchPreparation: Task<Void, Never>?
+    /// The single retry of a run that ended as a lock pause while the app was
+    /// active and unlocked, if any — exposed so a test can await it.
+    private(set) var lockPauseRetry: Task<ResumeResult, Never>?
+    /// True from the moment a lock-pause retry is scheduled until its resume
+    /// returns. Read on whatever thread releases the claim, hence the lock.
+    private let lockPauseRetryInFlight = OSAllocatedUnfairLock(initialState: false)
 
     init(
         database: AppDatabase,
@@ -79,7 +107,8 @@ final class ImportBackgroundCoordinator {
         coordinator: ImportRunCoordinator = .shared,
         probe: HistoryAccessProbing = HealthKitHistoryAccessProbe(),
         isProtectedDataAvailable: @escaping @MainActor () -> Bool = { UIApplication.shared.isProtectedDataAvailable },
-        isInForeground: @escaping @MainActor () -> Bool = { UIApplication.shared.applicationState != .background }
+        isInForeground: @escaping @MainActor () -> Bool = { UIApplication.shared.applicationState != .background },
+        isActive: @escaping @MainActor () -> Bool = { UIApplication.shared.applicationState == .active }
     ) {
         self.database = database
         self.engine = engine
@@ -87,11 +116,15 @@ final class ImportBackgroundCoordinator {
         self.probe = probe
         self.isProtectedDataAvailable = isProtectedDataAvailable
         self.isInForeground = isInForeground
+        self.isActive = isActive
     }
 
     deinit {
         if let protectedDataObserver {
             NotificationCenter.default.removeObserver(protectedDataObserver)
+        }
+        for observer in lifecycleObservers {
+            NotificationCenter.default.removeObserver(observer)
         }
     }
 
@@ -266,7 +299,8 @@ final class ImportBackgroundCoordinator {
 
     // MARK: - Backgrounding: stop cleanly, keep the checkpoint
 
-    /// Called from `applicationDidEnterBackground`.
+    /// The app left the screen (`UIApplication.didEnterBackgroundNotification`,
+    /// via `observeAppLifecycle`).
     ///
     /// If an import is live we ask it to stop at its next page boundary and hold a
     /// `beginBackgroundTask` assertion until it does, so the in-flight page lands
@@ -275,7 +309,7 @@ final class ImportBackgroundCoordinator {
     /// nothing is ever lost — but we would re-read a page for no reason and the
     /// status would be a page staler than the truth).
     @MainActor
-    func applicationDidEnterBackground(_ application: UIApplication = .shared) {
+    func applicationDidEnterBackground(_ application: UIApplication) {
         guard coordinator.isRunning else {
             scheduleResumeIfNeeded()
             return
@@ -322,15 +356,110 @@ final class ImportBackgroundCoordinator {
         }
     }
 
-    // MARK: - Foreground: continue without making the user ask
+    // MARK: - Lifecycle: the one owner of leave-screen / return-to-screen
 
-    /// Called from `applicationWillEnterForeground` (and once on launch).
-    /// Continues a run iOS paused, so coming back to the app just picks up where
-    /// it stopped. An import the user cancelled is deliberately left alone.
+    /// Start handling the app leaving and returning to the screen, the iPhone
+    /// unlocking, and a run that ends as a lock pause. Called once at launch.
+    ///
+    /// Driven by UIKit's application lifecycle notifications, which a
+    /// scene-based app receives (unlike the app-delegate callbacks; see the type
+    /// comment). `isEnabled` gates the leave/return handling exactly as the
+    /// launch path is gated — production passes "onboarding is complete" — and
+    /// is read per event, so finishing onboarding mid-session turns it on.
+    ///
+    /// - Leaving the screen: refresh the pending background flush, stop a live
+    ///   import cleanly at its next page boundary and book a background window
+    ///   (`applicationDidEnterBackground`).
+    /// - Becoming active: continue a paused run. The phone is certainly
+    ///   unlocked by then, which is why this — not "will enter foreground" — is
+    ///   the trigger: an unlock usually lands before the app is back on screen,
+    ///   when the unlock signal alone can only book a background window.
     @MainActor
-    func applicationWillEnterForeground() {
-        Task { @MainActor [weak self] in
-            _ = await self?.resumePausedRun(trigger: "foreground")
+    func observeAppLifecycle(
+        center: NotificationCenter = .default,
+        isEnabled: @escaping @MainActor () -> Bool
+    ) {
+        guard lifecycleObservers.isEmpty else { return }
+        observeProtectedDataAvailability(center: center)
+        let onBackground: @MainActor () -> Void = { [weak self] in
+            guard let self, isEnabled() else { return }
+            self.engine.scheduleBackgroundFlush()
+            self.applicationDidEnterBackground(UIApplication.shared)
+        }
+        let onActive: @MainActor () -> Void = { [weak self] in
+            self?.applicationDidBecomeActive(isEnabled: isEnabled)
+        }
+        lifecycleObservers = [
+            center.addObserver(
+                forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+            ) { _ in MainActor.assumeIsolated { onBackground() } },
+            center.addObserver(
+                forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+            ) { _ in MainActor.assumeIsolated { onActive() } },
+        ]
+        coordinator.onLockPausedRunReleased = { [weak self] in self?.lockPausedRunReleased() }
+    }
+
+    /// The app became active: continue a run iOS paused, so coming back to the
+    /// app just picks up where it stopped. An import the user cancelled is
+    /// deliberately left alone.
+    @MainActor
+    func applicationDidBecomeActive(isEnabled: @escaping @MainActor () -> Bool = { true }) {
+        activeResume = Task { @MainActor [weak self] in
+            guard let self, isEnabled() else { return .notCompleted }
+            return await self.resumePausedRun(trigger: "active")
+        }
+    }
+
+    /// Run launch's preparation, then continue a paused run. Every resume —
+    /// whichever trigger fires first, including the app becoming active during
+    /// launch — waits for `prepare` to finish, so none reads the enabled types
+    /// before it has reconciled them.
+    @MainActor
+    func resumeAfterLaunch(preparing prepare: @escaping @MainActor () async -> Void) {
+        launchPreparation = Task { @MainActor in await prepare() }
+        launchResume = Task { @MainActor [weak self] in
+            guard let self else { return .notCompleted }
+            return await self.resumePausedRun(trigger: "launch")
+        }
+    }
+
+    // MARK: - A lock pause that landed after the triggers fired
+
+    /// A run that ended as a lock pause just released its claim. Runs on the
+    /// releasing thread.
+    ///
+    /// The unlock and becoming-active triggers skip a run that is still in
+    /// flight, so if the locked read's error lands AFTER they fired (the app was
+    /// suspended with the read outstanding), the pause is recorded with nothing
+    /// left to resume it. So when the app is active and protected data is
+    /// readable at the moment the pause lands, try the resume once.
+    ///
+    /// Once per pause, never a loop: if the retry's own run pauses again (UIKit
+    /// says unlocked but HealthKit still refuses), that pause is reported while
+    /// the retry is still in flight — the claim is released before the resume
+    /// returns — and is left for the next real trigger.
+    private func lockPausedRunReleased() {
+        guard !lockPauseRetryInFlight.withLock({ $0 }) else {
+            logger.info("Import paused for the lock again during its retry — waiting for the next trigger")
+            return
+        }
+        Task { @MainActor [weak self] in self?.retryLockPauseOnce() }
+    }
+
+    @MainActor
+    private func retryLockPauseOnce() {
+        guard isActive(), isProtectedDataAvailable() else { return }
+        let claimed = lockPauseRetryInFlight.withLock { inFlight -> Bool in
+            guard !inFlight else { return false }
+            inFlight = true
+            return true
+        }
+        guard claimed else { return }
+        lockPauseRetry = Task { @MainActor [weak self] in
+            guard let self else { return .notCompleted }
+            defer { self.lockPauseRetryInFlight.withLock { $0 = false } }
+            return await self.resumePausedRun(trigger: "lock pause retry")
         }
     }
 
@@ -338,10 +467,9 @@ final class ImportBackgroundCoordinator {
 
     /// Start listening for the iPhone being unlocked. Called once at launch.
     ///
-    /// Foreground return already resumes a paused run, but an unlock can land
-    /// AFTER `applicationWillEnterForeground` (protected data becomes readable a
-    /// beat later), in which case that resume was held back as still locked.
-    /// This catches exactly that, so a run paused by the lock continues on its
+    /// Becoming active already resumes a paused run, but an unlock can land
+    /// while the app is on screen without it becoming active again, in which
+    /// case only this catches it, so a run paused by the lock continues on its
     /// own, from the same place, without anyone tapping Resume.
     @MainActor
     func observeProtectedDataAvailability(center: NotificationCenter = .default) {
@@ -358,7 +486,7 @@ final class ImportBackgroundCoordinator {
 
     /// Resume on unlock when the app is on screen. In the background there is no
     /// assertion keeping the process alive through a page, so leave it to the
-    /// booked background window (and the next foreground) instead.
+    /// booked background window (and the app becoming active) instead.
     @MainActor
     func protectedDataDidBecomeAvailable() {
         guard isInForeground() else {
@@ -390,6 +518,7 @@ final class ImportBackgroundCoordinator {
     @MainActor
     @discardableResult
     func resumePausedRun(trigger: String) async -> ResumeResult {
+        await launchPreparation?.value
         // The claim is the real guard (checked again inside the runner); this is
         // just an early out so a background wake during a foreground import does
         // no work at all.
@@ -400,8 +529,8 @@ final class ImportBackgroundCoordinator {
         guard ImportBackgroundCoordinator.shouldAutoResume(currentRun()) else { return .notCompleted }
         // While the iPhone is locked every HealthKit read fails with "Protected
         // health data is inaccessible", so starting now would only re-pause.
-        // Hold the run; the unlock (or next foreground / background window)
-        // picks it up from the same place.
+        // Hold the run; the unlock (or the app becoming active, or a background
+        // window) picks it up from the same place.
         guard isProtectedDataAvailable() else {
             logger.info("Import resume (\(trigger, privacy: .public)) held — protected data unavailable (device locked)")
             return .notCompleted

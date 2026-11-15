@@ -450,10 +450,18 @@ final class ImportLockedPauseTests: XCTestCase {
         private var lockAfterPages: (typeID: String, pages: Int)?
         private var pagesRead: [String: Int] = [:]
         private(set) var cursorsRead: [String: [Date?]] = [:]
+        private(set) var lockedThrows = 0
         /// Non-lock error to raise instead, for the "genuine failure" guard.
         var otherError: Error?
-        /// Runs just before the locked read throws (a Cancel racing the lock).
-        var beforeLockedThrow: (() -> Void)?
+        /// The HealthKit code a locked read fails with: 6 once the iPhone has
+        /// locked, 101 before its first unlock after a restart.
+        var lockedCode = HKError.Code.errorDatabaseInaccessible.rawValue
+        /// Runs (outside the store's lock) just before the locked read throws:
+        /// a Cancel racing the lock, or a test holding the error back.
+        var beforeLockedThrow: (() async -> Void)?
+        /// Runs (outside the store's lock) before every read, with the number of
+        /// pages of that type already served — lets a test hold a read in flight.
+        var beforeRead: ((_ typeID: String, _ pagesServed: Int) async -> Void)?
 
         init(histories: [String: [Int64]]) { self.histories = histories }
 
@@ -468,7 +476,31 @@ final class ImportLockedPauseTests: XCTestCase {
             lockAfterPages = nil
         }
 
-        func read(_ type: HealthDataType, before: Date?, limit: Int) throws -> AnchoredReader.Result {
+        func read(_ type: HealthDataType, before: Date?, limit: Int) async throws -> AnchoredReader.Result {
+            let (served, hook) = peek(type)
+            await hook?(type.identifier, served)
+            switch serve(type, before: before, limit: limit) {
+            case .page(let page):
+                return page
+            case .locked(let hold, let failure, let code):
+                await hold?()
+                if let failure { throw failure }
+                throw NSError(domain: HKErrorDomain, code: code,
+                              userInfo: [NSLocalizedDescriptionKey: "Protected health data is inaccessible"])
+            }
+        }
+
+        private enum Served {
+            case page(AnchoredReader.Result)
+            case locked(hold: (() async -> Void)?, failure: Error?, code: Int)
+        }
+
+        private func peek(_ type: HealthDataType) -> (Int, ((String, Int) async -> Void)?) {
+            lock.lock(); defer { lock.unlock() }
+            return (pagesRead[type.identifier, default: 0], beforeRead)
+        }
+
+        private func serve(_ type: HealthDataType, before: Date?, limit: Int) -> Served {
             lock.lock(); defer { lock.unlock() }
             cursorsRead[type.identifier, default: []].append(before)
             if let trigger = lockAfterPages, trigger.typeID == type.identifier,
@@ -476,19 +508,47 @@ final class ImportLockedPauseTests: XCTestCase {
                 isLocked = true
             }
             if isLocked {
-                beforeLockedThrow?()
-                if let otherError { throw otherError }
-                throw NSError(domain: HKErrorDomain, code: HKError.Code.errorDatabaseInaccessible.rawValue,
-                              userInfo: [NSLocalizedDescriptionKey: "Protected health data is inaccessible"])
+                lockedThrows += 1
+                return .locked(hold: beforeLockedThrow, failure: otherError, code: lockedCode)
             }
             pagesRead[type.identifier, default: 0] += 1
             let upper = before.map { AnchoredReader.unixMillis($0) } ?? Int64.max
             let page = (histories[type.identifier] ?? []).filter { $0 < upper }.prefix(limit)
-            return AnchoredReader.Result(
+            return .page(AnchoredReader.Result(
                 samples: page.map { ImportLockedPauseTests.sample(type: type, endMs: $0) },
                 deletedUuids: [],
                 newAnchor: nil
-            )
+            ))
+        }
+    }
+
+    /// Holds an in-flight read without blocking a thread (the run may be
+    /// executing on the main thread, which the test needs to keep running).
+    private final class Gate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var isOpen = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func wait() async {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                lock.lock()
+                if isOpen {
+                    lock.unlock()
+                    continuation.resume()
+                } else {
+                    waiters.append(continuation)
+                    lock.unlock()
+                }
+            }
+        }
+
+        func open() {
+            lock.lock()
+            isOpen = true
+            let pending = waiters
+            waiters = []
+            lock.unlock()
+            pending.forEach { $0.resume() }
         }
     }
 
@@ -544,7 +604,7 @@ final class ImportLockedPauseTests: XCTestCase {
             hrv.identifier: history(count: pageSize * 2 + 2_000, offsetMs: 0),
         ])
         let engine = SyncEngine(database: database, readImportPage: { type, _, before, limit, _ in
-            try health.read(type, before: before, limit: limit)
+            try await health.read(type, before: before, limit: limit)
         })
         let enabled: Set<String> = [steps.identifier, hrv.identifier]
         let types = HealthTypeRegistry.shared.all.filter { enabled.contains($0.identifier) }
@@ -706,6 +766,291 @@ final class ImportLockedPauseTests: XCTestCase {
             typesTotal: 2, typesCompleted: 1, oldestReachedAt: nil, historyFloor: nil,
             autoResume: true, stopCause: .deviceLocked, startedAt: Date(), updatedAt: Date())
         XCTAssertNil(AppState.importHeadline(for: run))
+    }
+}
+
+// MARK: - Lifecycle delivery and the lock-pause retry
+
+/// Regression for build 1.10.2 (149): a lock-paused import said "It continues
+/// on its own once you unlock" but did not. Its leave-screen and
+/// return-to-screen handling hung off `AppDelegate.applicationDidEnterBackground`
+/// / `applicationWillEnterForeground`, which UIKit never calls in this
+/// scene-based app, and the earlier tests called the coordinator directly, so
+/// the dead hooks never failed one. These go through the notifications UIKit
+/// actually delivers.
+extension ImportLockedPauseTests {
+
+    private func makeBackground(
+        _ f: Fixture,
+        protectedDataAvailable: @escaping @MainActor () -> Bool = { true },
+        isActive: @escaping @MainActor () -> Bool = { true }
+    ) -> ImportBackgroundCoordinator {
+        ImportBackgroundCoordinator(
+            database: f.database, engine: f.engine, coordinator: f.coordinator, probe: NoFloorsProbe(),
+            isProtectedDataAvailable: protectedDataAvailable,
+            isInForeground: { true },
+            isActive: isActive
+        )
+    }
+
+    /// Wait (on the main actor, letting it run) until `condition` holds.
+    private func waitUntil(_ timeout: TimeInterval = 5, _ condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+    }
+
+    /// The dead hooks must not come back: UIKit would never call them, and if it
+    /// ever did they would double-fire alongside the live owner.
+    func testAppDelegateDoesNotCarryTheDeadLifecycleHooks() {
+        let delegate = AppDelegate()
+        XCTAssertFalse(delegate.responds(to: #selector(UIApplicationDelegate.applicationDidEnterBackground(_:))))
+        XCTAssertFalse(delegate.responds(to: #selector(UIApplicationDelegate.applicationWillEnterForeground(_:))))
+    }
+
+    /// Returning to the screen — UIKit's didBecomeActive — continues a lock
+    /// pause by itself, from the same place. Before onboarding is complete the
+    /// same delivery does nothing, exactly as the launch path is gated.
+    func testBecomingActiveResumesALockPausedImport() async throws {
+        let f = try makeFixture()
+        f.health.lockAfter(2, readsOf: hrv.identifier)
+        _ = await runner(f).start(range: .lastYear, since: nil, types: f.types)
+        let dao = ImportProgressDAO(f.database)
+        XCTAssertEqual(try dao.currentRun()?.stopCause, .deviceLocked)
+        let pausedCursor = try XCTUnwrap(dao.typeProgress(hkTypeId: hrv.identifier)?.cursor)
+        let readsBeforeReturn = try XCTUnwrap(f.health.cursorsRead[hrv.identifier]?.count)
+
+        var onboardingComplete = false
+        let background = makeBackground(f)
+        let center = NotificationCenter()
+        background.observeAppLifecycle(center: center, isEnabled: { onboardingComplete })
+        f.health.unlock()
+
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        let gated = try await XCTUnwrap(background.activeResume).value
+        XCTAssertEqual(gated, .notCompleted, "Gated off until onboarding is complete")
+        XCTAssertEqual(f.health.cursorsRead[hrv.identifier]?.count, readsBeforeReturn,
+                       "Nothing may be read before onboarding is complete")
+        XCTAssertEqual(try dao.currentRun()?.stopCause, .deviceLocked)
+
+        onboardingComplete = true
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        let resumed = try XCTUnwrap(background.activeResume, "Becoming active must start the resume")
+        let result = await resumed.value
+
+        XCTAssertEqual(result, .completed)
+        XCTAssertEqual(f.health.cursorsRead[hrv.identifier]?[readsBeforeReturn], pausedCursor,
+                       "The resume continues at the paused cursor, not the newest end")
+        XCTAssertEqual(try dao.currentRun()?.status, .completed)
+        XCTAssertEqual(try OutboxDAO(f.database).totalCount(), pageSize * 2 + 2_000 + 10,
+                       "Every sample staged exactly once across the pause")
+    }
+
+    /// The production wiring itself: the coordinator the running app installed
+    /// at launch reacts to UIKit's didBecomeActive on the default center, posted
+    /// the way UIKit posts it. Dropping the launch-time `observeAppLifecycle`
+    /// call, or observing another center or object, fails this.
+    func testTheRunningAppsImportCoordinatorReceivesBecomingActive() throws {
+        let live = AppState.shared.importBackground
+        let before = live.activeResume
+
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification,
+                                        object: UIApplication.shared)
+
+        let after = try XCTUnwrap(live.activeResume, "The live coordinator must hear didBecomeActive")
+        XCTAssertNotEqual(after, before, "The post must start a new resume on the live coordinator")
+    }
+
+    /// Cold launch: UIKit's didBecomeActive lands while launch is still
+    /// reconciling the registry. The resume it starts must wait for that
+    /// reconcile, so it reads the reconciled enabled types, never the stale set.
+    func testBecomingActiveDuringLaunchWaitsForTheRegistryReconcile() async throws {
+        let f = try makeFixture()
+        f.health.lockAfter(2, readsOf: hrv.identifier)
+        _ = await runner(f).start(range: .lastYear, since: nil, types: f.types)
+        f.health.unlock()
+        let dao = ImportProgressDAO(f.database)
+        let pausedCursor = try XCTUnwrap(dao.typeProgress(hkTypeId: hrv.identifier)?.cursor)
+        let readsBeforeLaunch = try XCTUnwrap(f.health.cursorsRead[hrv.identifier]?.count)
+        let stepsReadsBeforeLaunch = f.health.cursorsRead[steps.identifier]?.count
+        try DataTypeConfigDAO(f.database).setEnabled(false, hkTypeId: hrv.identifier)
+
+        let background = makeBackground(f)
+        let center = NotificationCenter()
+        background.observeAppLifecycle(center: center, isEnabled: { true })
+        let reconcileStarted = expectation(description: "launch reconcile running")
+        let finishReconcile = Gate()
+        background.resumeAfterLaunch { [database = f.database, hrv] in
+            reconcileStarted.fulfill()
+            await finishReconcile.wait()
+            try? DataTypeConfigDAO(database).setEnabled(true, hkTypeId: hrv.identifier)
+        }
+        await fulfillment(of: [reconcileStarted], timeout: 5)
+
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        let active = try XCTUnwrap(background.activeResume)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertFalse(f.coordinator.isRunning, "No resume may start before the reconcile finishes")
+        XCTAssertEqual(f.health.cursorsRead[hrv.identifier]?.count, readsBeforeLaunch)
+        XCTAssertEqual(f.health.cursorsRead[steps.identifier]?.count, stepsReadsBeforeLaunch)
+        XCTAssertEqual(try dao.currentRun()?.stopCause, .deviceLocked)
+
+        finishReconcile.open()
+        let activeResult = await active.value
+        let launchResult = try await XCTUnwrap(background.launchResume).value
+        let results = [activeResult, launchResult]
+
+        XCTAssertTrue(results.contains(.completed), "\(results)")
+        XCTAssertEqual(f.health.cursorsRead[hrv.identifier]?.dropFirst(readsBeforeLaunch).first, pausedCursor,
+                       "The type the reconcile enabled resumes at its paused cursor")
+        XCTAssertEqual(try dao.currentRun()?.status, .completed)
+        XCTAssertEqual(try OutboxDAO(f.database).totalCount(), pageSize * 2 + 2_000 + 10,
+                       "Every sample staged exactly once across the pause")
+    }
+
+    /// Leaving the screen — UIKit's didEnterBackground — stops a live import
+    /// cleanly at its next page boundary as an auto-resumable pause, and
+    /// becoming active again finishes it.
+    func testLeavingTheScreenStopsCleanlyAndReturningFinishes() async throws {
+        let f = try makeFixture()
+        let readArrived = expectation(description: "HRV page 2 read in flight")
+        let release = Gate()
+        f.health.beforeRead = { [hrv] typeID, served in
+            guard typeID == hrv.identifier, served == 1 else { return }
+            readArrived.fulfill()
+            await release.wait()
+        }
+        let background = makeBackground(f)
+        let center = NotificationCenter()
+        background.observeAppLifecycle(center: center, isEnabled: { true })
+
+        let run = Task.detached { [runner = runner(f), types = f.types] in
+            await runner.start(range: .lastYear, since: nil, types: types)
+        }
+        await fulfillment(of: [readArrived], timeout: 5)
+
+        center.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        XCTAssertEqual(f.coordinator.requestedStopReason, .backgrounded,
+                       "Leaving the screen must ask the live run to stop at its next boundary")
+        f.health.beforeRead = nil
+        release.open()
+        let outcome = await run.value
+
+        XCTAssertTrue(outcome.pausedForBackground)
+        let dao = ImportProgressDAO(f.database)
+        let paused = try XCTUnwrap(dao.currentRun())
+        XCTAssertEqual(paused.stopCause, .backgrounded)
+        XCTAssertTrue(paused.autoResume)
+        XCTAssertEqual(try dao.typeProgress(hkTypeId: hrv.identifier)?.stagedCount, pageSize * 2,
+                       "The in-flight page landed and checkpointed")
+
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        let result = try await XCTUnwrap(background.activeResume).value
+        XCTAssertEqual(result, .completed)
+        XCTAssertEqual(try OutboxDAO(f.database).totalCount(), pageSize * 2 + 2_000 + 10)
+    }
+
+    /// The ordering hazard: the unlock and becoming-active triggers fire while
+    /// the locked read is still outstanding, find a run in flight and skip. When
+    /// the pause then lands on an active, unlocked app it is retried once, so
+    /// it does not sit paused with nothing left to resume it.
+    func testALockPauseThatLandsAfterTheTriggersIsRetriedOnce() async throws {
+        let f = try makeFixture()
+        f.health.lockAfter(2, readsOf: hrv.identifier)
+        let errorPending = expectation(description: "locked read in flight")
+        let deliverError = Gate()
+        f.health.beforeLockedThrow = { [health = f.health] in
+            health.beforeLockedThrow = nil
+            errorPending.fulfill()
+            await deliverError.wait()
+            // The user unlocked while the error was still on its way.
+            health.unlock()
+        }
+        let background = makeBackground(f)
+        let center = NotificationCenter()
+        background.observeAppLifecycle(center: center, isEnabled: { true })
+
+        let run = Task.detached { [runner = runner(f), types = f.types] in
+            await runner.start(range: .lastYear, since: nil, types: types)
+        }
+        await fulfillment(of: [errorPending], timeout: 5)
+
+        center.post(name: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil)
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        let unlockResult = try await XCTUnwrap(background.unlockResume).value
+        let activeResult = try await XCTUnwrap(background.activeResume).value
+        XCTAssertEqual(unlockResult, .notCompleted, "Skipped: the run is still in flight")
+        XCTAssertEqual(activeResult, .notCompleted, "Skipped: the run is still in flight")
+
+        deliverError.open()
+        let outcome = await run.value
+        XCTAssertTrue(outcome.pausedForLockedDevice)
+
+        await waitUntil { background.lockPauseRetry != nil }
+        let retry = try XCTUnwrap(background.lockPauseRetry, "The pause must be retried while active and unlocked")
+        let result = await retry.value
+        XCTAssertEqual(result, .completed)
+        XCTAssertEqual(try ImportProgressDAO(f.database).currentRun()?.status, .completed)
+        XCTAssertEqual(try OutboxDAO(f.database).totalCount(), pageSize * 2 + 2_000 + 10)
+    }
+
+    /// UIKit says unlocked but HealthKit still refuses: the retry re-pauses, and
+    /// that pause is NOT retried again — one attempt per pause, never a loop.
+    func testTheLockPauseRetryIsAttemptedOnlyOnce() async throws {
+        let f = try makeFixture()
+        f.health.lockAfter(2, readsOf: hrv.identifier)
+        let background = makeBackground(f)
+        background.observeAppLifecycle(center: NotificationCenter(), isEnabled: { true })
+
+        _ = await runner(f).start(range: .lastYear, since: nil, types: f.types)
+        await waitUntil { background.lockPauseRetry != nil }
+        let retry = try XCTUnwrap(background.lockPauseRetry)
+        let result = await retry.value
+        XCTAssertEqual(result, .notCompleted)
+
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(f.health.lockedThrows, 2, "The original read plus exactly one retry")
+        let run = try XCTUnwrap(ImportProgressDAO(f.database).currentRun())
+        XCTAssertEqual(run.stopCause, .deviceLocked)
+        XCTAssertTrue(run.autoResume, "Still paused for the next real trigger")
+    }
+
+    /// No retry unless the app is active AND protected data is available.
+    func testALockPauseIsNotRetriedOffScreenOrWhileLocked() async throws {
+        for (active, available) in [(false, true), (true, false)] {
+            let f = try makeFixture()
+            f.health.lockAfter(2, readsOf: hrv.identifier)
+            let background = makeBackground(f, protectedDataAvailable: { available }, isActive: { active })
+            background.observeAppLifecycle(center: NotificationCenter(), isEnabled: { true })
+
+            _ = await runner(f).start(range: .lastYear, since: nil, types: f.types)
+            try await Task.sleep(nanoseconds: 200_000_000)
+
+            XCTAssertNil(background.lockPauseRetry, "active=\(active) protectedData=\(available)")
+            XCTAssertEqual(f.health.lockedThrows, 1)
+        }
+    }
+
+    /// HealthKit code 101 — "Database inaccessible before first unlock" — is the
+    /// same lock, seen after a restart: a pause, never a red failure.
+    func testDatabaseInaccessibleBeforeFirstUnlockPausesLikeALock() async throws {
+        XCTAssertTrue(ImportRunner.isProtectedDataUnavailable(NSError(domain: HKErrorDomain, code: 101)))
+        XCTAssertFalse(ImportRunner.isProtectedDataUnavailable(NSError(domain: NSCocoaErrorDomain, code: 101)))
+
+        let f = try makeFixture()
+        f.health.lockedCode = 101
+        f.health.lockAfter(2, readsOf: hrv.identifier)
+
+        let outcome = await runner(f).start(range: .lastYear, since: nil, types: f.types)
+
+        XCTAssertEqual(outcome.status, .interrupted)
+        XCTAssertTrue(outcome.pausedForLockedDevice)
+        XCTAssertNil(outcome.failureReason)
+        let run = try XCTUnwrap(ImportProgressDAO(f.database).currentRun())
+        XCTAssertEqual(run.stopCause, .deviceLocked)
+        XCTAssertTrue(run.autoResume)
+        XCTAssertEqual(SettingsViewModel.statusTitle(for: run), "Paused until you unlock your iPhone")
     }
 }
 

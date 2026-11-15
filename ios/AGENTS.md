@@ -112,8 +112,8 @@ live with `SyncEngine.workoutsWithCapturedRoute` and `stageCapturedRoutes`; see
 `testEmptyAndPartiallyStagedRoutesRemainRetryable`. History import routes through the same reader
 (`SyncEngine.importRoutes`, driven by the enabled-registry loop in `ImportRunner`, so routes
 checkpoint and resume like every other type). A route read that fails for ONE workout is still
-skipped and logged (except a locked-iPhone `errorDatabaseInaccessible`, which propagates so the run
-pauses), but an error from the workout scan or from staging propagates so the run is recorded as
+skipped and logged (except a locked-iPhone refusal, `ImportRunner.isProtectedDataUnavailable`, which
+propagates so the run pauses), but an error from the workout scan or from staging propagates so the run is recorded as
 failed, not silently short.
 
 **Privacy (do not regress):** reading a *stored* route needs the HealthKit read auth for

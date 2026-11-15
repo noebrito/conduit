@@ -49,9 +49,9 @@ enum ImportStopCause: String, Codable {
     /// iOS took the foreground away (backgrounding, or an expiring background
     /// window). Auto-resumable.
     case backgrounded
-    /// The iPhone locked mid-import, so HealthKit refused the read with
-    /// `HKError.errorDatabaseInaccessible` ("Protected health data is
-    /// inaccessible"). Nothing went wrong — the data is simply unreadable until
+    /// The iPhone locked mid-import, so HealthKit refused the read as protected
+    /// data being inaccessible (`ImportRunner.isProtectedDataUnavailable`, codes
+    /// 6 and 101). Nothing went wrong — the data is simply unreadable until
     /// the user unlocks — so this is a pause, not a failure: the run keeps its
     /// place and is auto-resumed once protected data is available again.
     case deviceLocked

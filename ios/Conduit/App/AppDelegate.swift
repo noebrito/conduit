@@ -31,8 +31,15 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // the end of launch) and on its own identifier, so the upload-drain task
         // above is completely unaffected.
         AppState.shared.importBackground.registerBackgroundTask()
-        // An import the iPhone's lock paused continues once it is unlocked.
-        AppState.shared.importBackground.observeProtectedDataAvailability()
+        // The import's one owner of leaving / returning to the screen, the
+        // iPhone unlocking, and a run that ends as a lock pause. It listens to
+        // UIKit's lifecycle notifications: this scene-based app never receives
+        // `applicationDidEnterBackground` / `applicationWillEnterForeground` on
+        // the app delegate, so do not reintroduce them here (that would also
+        // double-fire if UIKit ever did call them).
+        AppState.shared.importBackground.observeAppLifecycle(
+            isEnabled: { AppState.shared.isOnboardingComplete }
+        )
         // Returning users: first reconcile the persisted config + HealthKit
         // authorization against the current registry, so data types added in an
         // app update (e.g. appleStandHour) are auto-enabled and get a one-time
@@ -43,37 +50,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         if AppState.shared.isOnboardingComplete {
             // Keep a background flush pending from first launch onward.
             AppState.shared.syncEngine.scheduleBackgroundFlush()
-            Task { @MainActor in
+            // A run the app died in the middle of is reconciled to
+            // "interrupted, auto-resumable" when its status is read, so this
+            // launch continues it instead of waiting for the user to find
+            // Settings → Import History and tap Resume.
+            AppState.shared.importBackground.resumeAfterLaunch {
                 await AppState.shared.reconcileRegistry()
                 AppState.shared.startDataCapture()
-                // A run the app died in the middle of is reconciled to
-                // "interrupted, auto-resumable" when its status is read, so this
-                // launch continues it instead of waiting for the user to find
-                // Settings → Import History and tap Resume.
-                await AppState.shared.importBackground.resumePausedRun(trigger: "launch")
             }
         }
         return true
-    }
-
-    /// Refresh the pending background flush whenever we background, so iOS always
-    /// has a request to run while we're suspended (belt-and-suspenders alongside
-    /// the observer-wake and post-flush scheduling).
-    ///
-    /// A live import is also stopped **cleanly** here: we hold a background-task
-    /// assertion just long enough for the page it is reading to finish and
-    /// checkpoint, then ask iOS for a window to continue in.
-    func applicationDidEnterBackground(_ application: UIApplication) {
-        guard AppState.shared.isOnboardingComplete else { return }
-        AppState.shared.syncEngine.scheduleBackgroundFlush()
-        AppState.shared.importBackground.applicationDidEnterBackground(application)
-    }
-
-    /// Continue a paused import as soon as the user comes back, rather than
-    /// making them tap Resume. An import they cancelled stays cancelled.
-    func applicationWillEnterForeground(_ application: UIApplication) {
-        guard AppState.shared.isOnboardingComplete else { return }
-        AppState.shared.importBackground.applicationWillEnterForeground()
     }
 
     /// iOS relaunches the app to deliver background URLSession events when it
