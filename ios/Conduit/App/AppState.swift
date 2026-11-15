@@ -50,7 +50,8 @@ final class AppState {
     let observerCoordinator: ObserverCoordinator
     /// Keeps a paused "Import history" run resumable across backgrounding: takes
     /// the checkpoint assertion, schedules the BGProcessingTask resume, and
-    /// auto-resumes on foreground. See `ImportBackgroundCoordinator`.
+    /// auto-resumes when the app becomes active or the iPhone unlocks. See
+    /// `ImportBackgroundCoordinator`.
     let importBackground: ImportBackgroundCoordinator
 
     private(set) var isOnboardingComplete: Bool
