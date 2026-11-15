@@ -50,14 +50,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         if AppState.shared.isOnboardingComplete {
             // Keep a background flush pending from first launch onward.
             AppState.shared.syncEngine.scheduleBackgroundFlush()
-            Task { @MainActor in
+            // A run the app died in the middle of is reconciled to
+            // "interrupted, auto-resumable" when its status is read, so this
+            // launch continues it instead of waiting for the user to find
+            // Settings → Import History and tap Resume.
+            AppState.shared.importBackground.resumeAfterLaunch {
                 await AppState.shared.reconcileRegistry()
                 AppState.shared.startDataCapture()
-                // A run the app died in the middle of is reconciled to
-                // "interrupted, auto-resumable" when its status is read, so this
-                // launch continues it instead of waiting for the user to find
-                // Settings → Import History and tap Resume.
-                await AppState.shared.importBackground.resumePausedRun(trigger: "launch")
             }
         }
         return true

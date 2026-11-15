@@ -828,7 +828,11 @@ extension ImportLockedPauseTests {
         f.health.unlock()
 
         center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
-        XCTAssertNil(background.activeResume, "Gated off until onboarding is complete")
+        let gated = try await XCTUnwrap(background.activeResume).value
+        XCTAssertEqual(gated, .notCompleted, "Gated off until onboarding is complete")
+        XCTAssertEqual(f.health.cursorsRead[hrv.identifier]?.count, readsBeforeReturn,
+                       "Nothing may be read before onboarding is complete")
+        XCTAssertEqual(try dao.currentRun()?.stopCause, .deviceLocked)
 
         onboardingComplete = true
         center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
@@ -838,6 +842,68 @@ extension ImportLockedPauseTests {
         XCTAssertEqual(result, .completed)
         XCTAssertEqual(f.health.cursorsRead[hrv.identifier]?[readsBeforeReturn], pausedCursor,
                        "The resume continues at the paused cursor, not the newest end")
+        XCTAssertEqual(try dao.currentRun()?.status, .completed)
+        XCTAssertEqual(try OutboxDAO(f.database).totalCount(), pageSize * 2 + 2_000 + 10,
+                       "Every sample staged exactly once across the pause")
+    }
+
+    /// The production wiring itself: the coordinator the running app installed
+    /// at launch reacts to UIKit's didBecomeActive on the default center, posted
+    /// the way UIKit posts it. Dropping the launch-time `observeAppLifecycle`
+    /// call, or observing another center or object, fails this.
+    func testTheRunningAppsImportCoordinatorReceivesBecomingActive() throws {
+        let live = AppState.shared.importBackground
+        let before = live.activeResume
+
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification,
+                                        object: UIApplication.shared)
+
+        let after = try XCTUnwrap(live.activeResume, "The live coordinator must hear didBecomeActive")
+        XCTAssertNotEqual(after, before, "The post must start a new resume on the live coordinator")
+    }
+
+    /// Cold launch: UIKit's didBecomeActive lands while launch is still
+    /// reconciling the registry. The resume it starts must wait for that
+    /// reconcile, so it reads the reconciled enabled types, never the stale set.
+    func testBecomingActiveDuringLaunchWaitsForTheRegistryReconcile() async throws {
+        let f = try makeFixture()
+        f.health.lockAfter(2, readsOf: hrv.identifier)
+        _ = await runner(f).start(range: .lastYear, since: nil, types: f.types)
+        f.health.unlock()
+        let dao = ImportProgressDAO(f.database)
+        let pausedCursor = try XCTUnwrap(dao.typeProgress(hkTypeId: hrv.identifier)?.cursor)
+        let readsBeforeLaunch = try XCTUnwrap(f.health.cursorsRead[hrv.identifier]?.count)
+        let stepsReadsBeforeLaunch = f.health.cursorsRead[steps.identifier]?.count
+        try DataTypeConfigDAO(f.database).setEnabled(false, hkTypeId: hrv.identifier)
+
+        let background = makeBackground(f)
+        let center = NotificationCenter()
+        background.observeAppLifecycle(center: center, isEnabled: { true })
+        let reconcileStarted = expectation(description: "launch reconcile running")
+        let finishReconcile = Gate()
+        background.resumeAfterLaunch { [database = f.database, hrv] in
+            reconcileStarted.fulfill()
+            await finishReconcile.wait()
+            try? DataTypeConfigDAO(database).setEnabled(true, hkTypeId: hrv.identifier)
+        }
+        await fulfillment(of: [reconcileStarted], timeout: 5)
+
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        let active = try XCTUnwrap(background.activeResume)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertFalse(f.coordinator.isRunning, "No resume may start before the reconcile finishes")
+        XCTAssertEqual(f.health.cursorsRead[hrv.identifier]?.count, readsBeforeLaunch)
+        XCTAssertEqual(f.health.cursorsRead[steps.identifier]?.count, stepsReadsBeforeLaunch)
+        XCTAssertEqual(try dao.currentRun()?.stopCause, .deviceLocked)
+
+        finishReconcile.open()
+        let activeResult = await active.value
+        let launchResult = try await XCTUnwrap(background.launchResume).value
+        let results = [activeResult, launchResult]
+
+        XCTAssertTrue(results.contains(.completed), "\(results)")
+        XCTAssertEqual(f.health.cursorsRead[hrv.identifier]?.dropFirst(readsBeforeLaunch).first, pausedCursor,
+                       "The type the reconcile enabled resumes at its paused cursor")
         XCTAssertEqual(try dao.currentRun()?.status, .completed)
         XCTAssertEqual(try OutboxDAO(f.database).totalCount(), pageSize * 2 + 2_000 + 10,
                        "Every sample staged exactly once across the pause")

@@ -89,6 +89,11 @@ final class ImportBackgroundCoordinator {
     /// The resume the app becoming active started, if any — exposed so a test
     /// can await it.
     private(set) var activeResume: Task<ResumeResult, Never>?
+    /// The launch's own resume, if any — exposed so a test can await it.
+    private(set) var launchResume: Task<ResumeResult, Never>?
+    /// What launch must finish (the registry reconcile) before any resume reads
+    /// the enabled types; every resume awaits it.
+    private var launchPreparation: Task<Void, Never>?
     /// The single retry of a run that ended as a lock pause while the app was
     /// active and unlocked, if any — exposed so a test can await it.
     private(set) var lockPauseRetry: Task<ResumeResult, Never>?
@@ -382,8 +387,7 @@ final class ImportBackgroundCoordinator {
             self.applicationDidEnterBackground(UIApplication.shared)
         }
         let onActive: @MainActor () -> Void = { [weak self] in
-            guard let self, isEnabled() else { return }
-            self.applicationDidBecomeActive()
+            self?.applicationDidBecomeActive(isEnabled: isEnabled)
         }
         lifecycleObservers = [
             center.addObserver(
@@ -400,10 +404,23 @@ final class ImportBackgroundCoordinator {
     /// app just picks up where it stopped. An import the user cancelled is
     /// deliberately left alone.
     @MainActor
-    func applicationDidBecomeActive() {
+    func applicationDidBecomeActive(isEnabled: @escaping @MainActor () -> Bool = { true }) {
         activeResume = Task { @MainActor [weak self] in
-            guard let self else { return .notCompleted }
+            guard let self, isEnabled() else { return .notCompleted }
             return await self.resumePausedRun(trigger: "active")
+        }
+    }
+
+    /// Run launch's preparation, then continue a paused run. Every resume —
+    /// whichever trigger fires first, including the app becoming active during
+    /// launch — waits for `prepare` to finish, so none reads the enabled types
+    /// before it has reconciled them.
+    @MainActor
+    func resumeAfterLaunch(preparing prepare: @escaping @MainActor () async -> Void) {
+        launchPreparation = Task { @MainActor in await prepare() }
+        launchResume = Task { @MainActor [weak self] in
+            guard let self else { return .notCompleted }
+            return await self.resumePausedRun(trigger: "launch")
         }
     }
 
@@ -501,6 +518,7 @@ final class ImportBackgroundCoordinator {
     @MainActor
     @discardableResult
     func resumePausedRun(trigger: String) async -> ResumeResult {
+        await launchPreparation?.value
         // The claim is the real guard (checked again inside the runner); this is
         // just an early out so a background wake during a foreground import does
         // no work at all.
